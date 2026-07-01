@@ -1,6 +1,6 @@
 /** 1~5점 → 운영자용 만족도 라벨 */
 export function getRatingSatisfactionLabel(score?: number) {
-  if (typeof score !== "number" || Number.isNaN(score)) return "평가 완료";
+  if (typeof score !== "number" || Number.isNaN(score)) return "평가완료";
   if (score >= 4) return "만족";
   if (score >= 3) return "보통";
   return "불만족";

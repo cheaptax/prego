@@ -30,8 +30,8 @@ const TABS: { key: TabKey; label: string; description: string }[] = [
   { key: "overview", label: "Overview", description: "내 활동과 보유 포인트 요약" },
   {
     key: "inquiries",
-    label: "문의 내역",
-    description: "등록한 문의와 답변 내역을 상세하게 확인할 수 있습니다.",
+    label: "Inquiries",
+    description: "내가 등록한 문의와 답변",
   },
   { key: "points", label: "Points", description: "농협 지갑 포인트 사용 내역" },
   { key: "profile", label: "Profile", description: "내 소속과 계정 정보" },
@@ -370,6 +370,11 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
   }
 
   const activeTab = TABS.find((item) => item.key === tab);
+  const topbarTitle = tab === "inquiries" ? "문의 내역" : activeTab?.label;
+  const topbarDescription =
+    tab === "inquiries"
+      ? "등록한 문의와 답변 내역을 상세하게 확인할 수 있습니다."
+      : activeTab?.description;
 
   return (
     <div className="admin-shell">
@@ -440,8 +445,8 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
         <header className="admin-topbar">
           <div>
             <p className="admin-topbar__crumb">My page / {activeTab?.label}</p>
-            <h1 className="admin-topbar__title">{activeTab?.label}</h1>
-            <p className="admin-topbar__hint">{activeTab?.description}</p>
+            <h1 className="admin-topbar__title">{topbarTitle}</h1>
+            <p className="admin-topbar__hint">{topbarDescription}</p>
           </div>
           <div className="admin-topbar__actions">
             <span className="admin-topbar__updated">
@@ -525,13 +530,13 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
               </article>
               <article className="admin-kpi admin-kpi--green">
                 <header>
-                  <span>답변 가능</span>
+                  <span>미열람 답변</span>
                 </header>
                 <p className="admin-kpi__value">
                   {waitingAnswerCount.toLocaleString()}
                   <span className="admin-kpi__suffix">건</span>
                 </p>
-                <p className="admin-kpi__helper">지금 확인할 수 있는 답변</p>
+                <p className="admin-kpi__helper">아직 확인하지 않은 답변</p>
               </article>
               <article className="admin-kpi admin-kpi--violet">
                 <header>

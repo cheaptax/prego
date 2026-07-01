@@ -307,7 +307,8 @@ export function ConsultForm() {
         <fieldset className="consult-form__field consult-category">
           <legend className="consult-form__label">문의 유형</legend>
           <p className="consult-form__field-hint">
-            기본값은 자동 배정이며, 운영자가 분야를 지정합니다.
+            어떤 분야인지 잘 모르겠다면 자동 배정을 선택해 주세요. 문의 내용을 보고
+            알맞은 담당자가 확인해 드립니다.
           </p>
           <div className="consult-choice__grid" role="radiogroup" aria-label="문의 유형">
             {CATEGORY_OPTIONS.map((option) => {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import { adminDb } from "@/lib/firebase/admin";
+import { ensureDefaultFaqRecords } from "@/lib/default-faqs";
 import {
   authErrorCode,
   authErrorStatus,
@@ -39,6 +40,7 @@ export async function GET(req: Request) {
   }
 
   const db = adminDb();
+  await ensureDefaultFaqRecords(db);
   const snapshot = await db.collection("faqs").get();
   const faqs = snapshot.docs
     .map((doc) => doc.data() as FaqRecord)

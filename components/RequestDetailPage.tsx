@@ -63,7 +63,7 @@ export function RequestDetailPage({ requestId }: Props) {
   const [completeLoading, setCompleteLoading] = useState(false);
   const [completeMessage, setCompleteMessage] = useState("");
   const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
-  const [ratingGuideOpen, setRatingGuideOpen] = useState(false);
+  const [completionRatingOpen, setCompletionRatingOpen] = useState(false);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -252,6 +252,7 @@ export function RequestDetailPage({ requestId }: Props) {
           : current
       );
       setRatingMessage("답변 평가를 저장했습니다. 이제 문의를 완료할 수 있습니다.");
+      setCompletionRatingOpen(true);
     } catch (err) {
       setRatingMessage(
         err instanceof Error && err.message === "answer_not_viewed"
@@ -277,7 +278,8 @@ export function RequestDetailPage({ requestId }: Props) {
       return;
     }
     if (!hasRating) {
-      setRatingGuideOpen(true);
+      setCompletionRatingOpen(true);
+      setCompleteMessage("문의 완료 전 답변 평가를 작성해 주세요.");
       return;
     }
     setCompleteConfirmOpen(true);
@@ -482,8 +484,8 @@ export function RequestDetailPage({ requestId }: Props) {
             <span className="tag tag--gold">후속 액션</span>
             <h3>답변 확인 후 다음 단계를 선택해 주세요.</h3>
             <p>
-              추가 문의, 추가상담·견적진행, 답변 평가, 문의 완료까지 이 화면에서
-              이어서 진행할 수 있습니다.
+              답변으로 해결되지 않은 내용은 후속 문의나 상담 요청으로 이어가고,
+              해결된 문의는 평가를 남긴 뒤 완료할 수 있습니다.
             </p>
 
             <div className="request-action-grid">
@@ -501,123 +503,103 @@ export function RequestDetailPage({ requestId }: Props) {
                 <strong>추가상담·견적진행 요청</strong>
                 <span>전문가 연결이나 견적이 필요한 경우 요청합니다.</span>
               </Link>
-            </div>
-
-            <div className="answer-rating-box" id="answer-rating-section">
-              <div>
-                <h4>답변 평가 {hasRating ? "(작성 완료)" : "(필수)"}</h4>
-                <p>평가를 남기면 운영자가 답변 품질과 후속 상담 필요 여부를 확인할 수 있습니다.</p>
-              </div>
-              <div className="answer-rating-box__score" aria-label="답변 점수">
-                {[1, 2, 3, 4, 5].map((score) => (
-                  <button
-                    key={score}
-                    type="button"
-                    className={effectiveRatingScore >= score ? "is-active" : undefined}
-                    onClick={() => setRatingScore(score)}
-                    aria-label={`${score}점`}
-                  >
-                    ★
-                  </button>
-                ))}
-              </div>
-              <div className="answer-rating-box__helpful">
-                <label>
-                  <input
-                    type="radio"
-                    name="answer-helpful"
-                    checked={effectiveRatingHelpful}
-                    onChange={() => setRatingHelpful(true)}
-                  />
-                  도움이 되었어요
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="answer-helpful"
-                    checked={!effectiveRatingHelpful}
-                    onChange={() => setRatingHelpful(false)}
-                  />
-                  보완이 필요해요
-                </label>
-              </div>
-              <textarea
-                value={effectiveRatingComment}
-                onChange={(event) => setRatingComment(event.target.value)}
-                placeholder="답변에 대한 의견이나 추가로 필요한 도움을 적어주세요."
-                rows={4}
-              />
-              <button
-                type="button"
-                className="cta cta--solid"
-                onClick={() => void handleSaveRating()}
-                disabled={ratingLoading}
-              >
-                {ratingLoading ? "평가 저장 중..." : hasRating ? "평가 수정하기" : "답변 평가 저장"}
-              </button>
-              {ratingMessage && <p className="request-action-message">{ratingMessage}</p>}
-            </div>
-
-            <div className="request-complete-box">
-              <div>
-                <h4>문의 완료</h4>
-                <p>
-                  답변 평가를 작성한 뒤 문의를 종료할 수 있습니다. 추가 지원이 필요하면
-                  완료 전 추가 문의나 상담 요청을 먼저 진행해 주세요.
-                </p>
-              </div>
               {isCompleted ? (
-                <span className="request-complete-badge">상담 종료됨</span>
+                <span className="request-action request-action--done">
+                  <strong>문의 완료됨</strong>
+                  <span>평가 작성 후 상담이 종료되었습니다.</span>
+                </span>
               ) : (
                 <button
                   type="button"
-                  className="cta cta--ghost"
+                  className="request-action"
                   onClick={handleCompleteClick}
                   disabled={completeLoading}
                 >
-                  {completeLoading ? "완료 처리 중..." : "문의 완료 처리"}
+                  <strong>문의 완료하기</strong>
+                  <span>
+                    문제가 해결되었다면 답변 평가를 작성하고 문의를 종료합니다.
+                  </span>
                 </button>
               )}
-              {completeMessage && <p className="request-action-message">{completeMessage}</p>}
             </div>
+
+            {(completionRatingOpen || hasRating) && !isCompleted && (
+              <div className="answer-rating-box" id="answer-rating-section">
+                <div>
+                  <h4>답변 평가 {hasRating ? "(작성 완료)" : "(필수)"}</h4>
+                  <p>
+                    문의 완료 전 답변 평가를 작성해 주세요. 평가는 운영자가 답변 품질과
+                    후속 지원 필요 여부를 확인하는 데 사용됩니다.
+                  </p>
+                </div>
+                <div className="answer-rating-box__score" aria-label="답변 점수">
+                  {[1, 2, 3, 4, 5].map((score) => (
+                    <button
+                      key={score}
+                      type="button"
+                      className={effectiveRatingScore >= score ? "is-active" : undefined}
+                      onClick={() => setRatingScore(score)}
+                      aria-label={`${score}점`}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+                <div className="answer-rating-box__helpful">
+                  <label>
+                    <input
+                      type="radio"
+                      name="answer-helpful"
+                      checked={effectiveRatingHelpful}
+                      onChange={() => setRatingHelpful(true)}
+                    />
+                    도움이 되었어요
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="answer-helpful"
+                      checked={!effectiveRatingHelpful}
+                      onChange={() => setRatingHelpful(false)}
+                    />
+                    보완이 필요해요
+                  </label>
+                </div>
+                <textarea
+                  value={effectiveRatingComment}
+                  onChange={(event) => setRatingComment(event.target.value)}
+                  placeholder="답변에 대한 의견이나 추가로 필요한 도움을 적어주세요."
+                  rows={4}
+                />
+                <div className="answer-rating-box__actions">
+                  <button
+                    type="button"
+                    className="cta cta--solid"
+                    onClick={() => void handleSaveRating()}
+                    disabled={ratingLoading}
+                  >
+                    {ratingLoading
+                      ? "평가 저장 중..."
+                      : hasRating
+                        ? "평가 수정하기"
+                        : "답변 평가 저장"}
+                  </button>
+                  <button
+                    type="button"
+                    className="cta cta--ghost"
+                    onClick={handleCompleteClick}
+                    disabled={completeLoading || !hasRating}
+                  >
+                    {completeLoading ? "완료 처리 중..." : "문의 완료 처리"}
+                  </button>
+                </div>
+                {ratingMessage && <p className="request-action-message">{ratingMessage}</p>}
+                {completeMessage && <p className="request-action-message">{completeMessage}</p>}
+              </div>
+            )}
           </article>
         )}
       </div>
-
-      {ratingGuideOpen && (
-        <div className="answer-confirm-modal" role="dialog" aria-modal="true">
-          <div className="answer-confirm-modal__panel">
-            <span className="tag tag--gold">답변 평가 필요</span>
-            <h3>답변 평가를 먼저 작성해 주세요</h3>
-            <p>
-              답변 평가 작성 후 문의를 종료할 수 있습니다. 평가는 운영자가 답변
-              품질과 후속 지원 필요 여부를 확인하는 데 사용됩니다.
-            </p>
-            <div className="answer-confirm-modal__actions">
-              <button
-                type="button"
-                className="cta cta--ghost"
-                onClick={() => setRatingGuideOpen(false)}
-              >
-                닫기
-              </button>
-              <button
-                type="button"
-                className="cta cta--solid"
-                onClick={() => {
-                  setRatingGuideOpen(false);
-                  document.getElementById("answer-rating-section")?.scrollIntoView({
-                    behavior: "smooth",
-                    block: "start",
-                  });
-                }}
-              >
-                평가 작성하기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {completeConfirmOpen && (
         <div className="answer-confirm-modal" role="dialog" aria-modal="true">
@@ -658,10 +640,10 @@ export function RequestDetailPage({ requestId }: Props) {
           aria-labelledby="answer-view-dialog-title"
         >
           <div className="answer-confirm-modal__panel answer-confirm-modal__panel--view">
-            <span className="tag tag--gold">포인트 차감 안내</span>
             <h3 id="answer-view-dialog-title">답변을 열람하시겠습니까?</h3>
             <p className="answer-confirm-modal__lede">
               답변을 열람하면 {answer.pointCost.toLocaleString()}P가 차감됩니다.
+              <br />
               이미 열람한 답변은 추가 차감되지 않습니다.
             </p>
             <dl className="answer-confirm-modal__meta">

@@ -47,12 +47,17 @@ export async function POST(req: Request, { params }: Params) {
   const pointCost = validateAnswerPointCost(body?.pointCost);
   const internalCategory = body?.internalCategory?.trim() ?? "";
   const adminTags = parseAdminTags(body?.adminTags);
+  if (pointCost === null) {
+    return NextResponse.json(
+      { ok: false, error: "invalid_point_cost" },
+      { status: 400 },
+    );
+  }
   if (
     !body?.answerBody?.trim() ||
     !internalCategory ||
     !isValidSupportFieldLabel(internalCategory) ||
-    adminTags.length === 0 ||
-    pointCost === null
+    adminTags.length === 0
   ) {
     return NextResponse.json({ ok: false, error: "invalid_answer" }, { status: 400 });
   }

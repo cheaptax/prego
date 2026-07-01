@@ -22,16 +22,25 @@ export function About() {
         <aside className="about-intro__panel" aria-label="센터 소개 요약">
           <ul className="about-intro__points">
             <li>
-              <strong>전국 최초</strong>
-              <span>농협 전용 지원 조직</span>
+              <span className="about-intro__icon" aria-hidden="true">1</span>
+              <span className="about-intro__text">
+                <strong>전국 최초</strong>
+                <span>농협 전용 지원 조직</span>
+              </span>
             </li>
             <li>
-              <strong>8대 전문직</strong>
-              <span>통합 문의·연결 지원</span>
+              <span className="about-intro__icon" aria-hidden="true">8</span>
+              <span className="about-intro__text">
+                <strong>8대 전문직</strong>
+                <span>통합 문의·연결 지원</span>
+              </span>
             </li>
             <li>
-              <strong>원스톱</strong>
-              <span>상담·견적·업무 연결</span>
+              <span className="about-intro__icon" aria-hidden="true">✓</span>
+              <span className="about-intro__text">
+                <strong>원스톱</strong>
+                <span>상담·견적·업무 연결</span>
+              </span>
             </li>
           </ul>
         </aside>
@@ -40,9 +49,8 @@ export function About() {
       <div className="about-grid">
         <article className="about-card about-card--lead">
           <h3>
-            농협에 필요한 전문지식을
-            <br />
-            더 쉽고 폭넓게 연결합니다
+            농협에 필요한 전문지식을 더 쉽고
+            <span>폭넓게 연결합니다</span>
           </h3>
           <p>
             농협 업무는 여러 전문 분야가 함께 연결되는 경우가 많습니다.

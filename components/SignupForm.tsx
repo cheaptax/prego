@@ -74,6 +74,7 @@ type FieldErrorKey =
 
 type FieldErrors = Partial<Record<FieldErrorKey, string>>;
 type PhoneVerificationStatus = "idle" | "sending" | "sent" | "confirmed" | "verified";
+type EmailCheckStatus = "idle" | "checking" | "available" | "duplicate" | "error";
 
 const INITIAL_FORM: FormState = {
   name: "",
@@ -97,6 +98,14 @@ const INITIAL_FORM: FormState = {
 };
 
 const MAX_BUSINESS_CARD_SIZE = 10 * 1024 * 1024;
+const COOPERATIVE_REQUIRED_MESSAGE = "소속 농협을 선택해 주세요.";
+const PHONE_VERIFICATION_TTL_MS = 30 * 60 * 1000;
+const PHONE_VERIFICATION_EXPIRED_MESSAGE =
+  "휴대폰 인증이 만료되었습니다. 인증번호를 다시 받아 주세요.";
+const PHONE_VERIFICATION_RETRY_MESSAGE =
+  "회원가입을 완료하지 못해 휴대폰 인증을 다시 진행해 주세요.";
+const EMAIL_CHECK_REQUIRED_MESSAGE = "이메일 중복확인을 먼저 진행해 주세요.";
+const EMAIL_INVALID_FORMAT_MESSAGE = "이메일 형식이 올바르지 않습니다.";
 const ALLOWED_BUSINESS_CARD_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -109,6 +118,10 @@ function cooperativeDisplay(item: Cooperative) {
 
 function safeFileName(name: string) {
   return name.replace(/[^\w.-]+/g, "_");
+}
+
+function isValidSignupEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 function getSignupErrorMessage(error: unknown) {
@@ -197,6 +210,11 @@ export function SignupForm() {
   const [phoneVerificationCode, setPhoneVerificationCode] = useState("");
   const [phoneVerificationStatus, setPhoneVerificationStatus] =
     useState<PhoneVerificationStatus>("idle");
+  const [phoneVerificationExpiresAt, setPhoneVerificationExpiresAt] =
+    useState<number | null>(null);
+  const [emailCheckStatus, setEmailCheckStatus] =
+    useState<EmailCheckStatus>("idle");
+  const [emailCheckedValue, setEmailCheckedValue] = useState("");
   const businessCardInputRef = useRef<HTMLInputElement>(null);
   const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
@@ -206,6 +224,33 @@ export function SignupForm() {
       recaptchaVerifierRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (phoneVerificationStatus !== "confirmed" || !phoneVerificationExpiresAt) {
+      return;
+    }
+
+    const expireVerification = () => {
+      setPhoneVerificationId("");
+      setPhoneVerificationPhone("");
+      setPhoneVerificationCode("");
+      setPhoneVerificationStatus("idle");
+      setPhoneVerificationExpiresAt(null);
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: PHONE_VERIFICATION_EXPIRED_MESSAGE,
+      }));
+    };
+
+    const remainingTime = phoneVerificationExpiresAt - Date.now();
+    if (remainingTime <= 0) {
+      expireVerification();
+      return;
+    }
+
+    const timerId = window.setTimeout(expireVerification, remainingTime);
+    return () => window.clearTimeout(timerId);
+  }, [phoneVerificationExpiresAt, phoneVerificationStatus]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -284,6 +329,137 @@ export function SignupForm() {
     });
   };
 
+  const updatePassword = (value: string) => {
+    setForm((prev) => ({ ...prev, password: value }));
+    setError("");
+    setFieldErrors((prev) => {
+      const nextErrors = { ...prev };
+      delete nextErrors.password;
+      if (form.passwordConfirm && value !== form.passwordConfirm) {
+        nextErrors.passwordConfirm = "비밀번호가 일치하지 않습니다.";
+      } else {
+        delete nextErrors.passwordConfirm;
+      }
+      return nextErrors;
+    });
+  };
+
+  const updatePasswordConfirm = (value: string) => {
+    setForm((prev) => ({ ...prev, passwordConfirm: value }));
+    setError("");
+    setFieldErrors((prev) => {
+      const nextErrors = { ...prev };
+      if (value && form.password && value !== form.password) {
+        nextErrors.passwordConfirm = "비밀번호가 일치하지 않습니다.";
+      } else {
+        delete nextErrors.passwordConfirm;
+      }
+      return nextErrors;
+    });
+  };
+
+  const updateEmail = (value: string) => {
+    setForm((prev) => ({ ...prev, email: value }));
+    setError("");
+    const nextEmail = value.trim().toLowerCase();
+    if (nextEmail !== emailCheckedValue) {
+      setEmailCheckStatus("idle");
+      setEmailCheckedValue("");
+    }
+    setFieldErrors((prev) => {
+      const nextErrors = { ...prev };
+      if (nextEmail && !isValidSignupEmail(nextEmail)) {
+        nextErrors.email = EMAIL_INVALID_FORMAT_MESSAGE;
+      } else {
+        delete nextErrors.email;
+      }
+      return nextErrors;
+    });
+  };
+
+  const checkEmailAvailability = async () => {
+    const email = form.email.trim().toLowerCase();
+    if (!email) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        email: "농협 이메일을 입력해 주세요.",
+      }));
+      setEmailCheckStatus("idle");
+      setEmailCheckedValue("");
+      return false;
+    }
+    if (!isValidSignupEmail(email)) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        email: EMAIL_INVALID_FORMAT_MESSAGE,
+      }));
+      setEmailCheckStatus("idle");
+      setEmailCheckedValue("");
+      return false;
+    }
+    if (emailCheckStatus === "available" && emailCheckedValue === email) {
+      return true;
+    }
+
+    setEmailCheckStatus("checking");
+    setFieldErrors((prev) => {
+      const nextErrors = { ...prev };
+      delete nextErrors.email;
+      return nextErrors;
+    });
+
+    try {
+      const res = await fetch("/api/auth/check-email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; available?: boolean; error?: string }
+        | null;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error ?? "email_check_failed");
+      }
+      if (!data.available) {
+        setEmailCheckStatus("duplicate");
+        setEmailCheckedValue(email);
+        setFieldErrors((prev) => ({
+          ...prev,
+          email: "이미 가입된 이메일입니다. 로그인해 주세요.",
+        }));
+        return false;
+      }
+      setEmailCheckStatus("available");
+      setEmailCheckedValue(email);
+      return true;
+    } catch {
+      setEmailCheckStatus("error");
+      setEmailCheckedValue("");
+      setFieldErrors((prev) => ({
+        ...prev,
+        email: "이메일 중복확인 중 문제가 발생했습니다. 다시 시도해 주세요.",
+      }));
+      return false;
+    }
+  };
+
+  const updatePosition = (value: string) => {
+    setForm((prev) => ({ ...prev, position: value }));
+    setError("");
+    setFieldErrors((prev) => {
+      const nextErrors = { ...prev };
+
+      if (value.trim() && !form.cooperativeId) {
+        nextErrors.position = COOPERATIVE_REQUIRED_MESSAGE;
+        nextErrors.cooperativeId = COOPERATIVE_REQUIRED_MESSAGE;
+      } else {
+        delete nextErrors.position;
+      }
+
+      return nextErrors;
+    });
+  };
+
   const clearRecaptchaVerifier = () => {
     recaptchaVerifierRef.current?.clear();
     recaptchaVerifierRef.current = null;
@@ -317,6 +493,7 @@ export function SignupForm() {
       setPhoneVerificationPhone("");
       setPhoneVerificationCode("");
       setPhoneVerificationStatus("idle");
+      setPhoneVerificationExpiresAt(null);
     }
     setFieldErrors((prev) => {
       const nextErrors = { ...prev };
@@ -326,6 +503,14 @@ export function SignupForm() {
   };
 
   const sendPhoneVerificationCode = async () => {
+    if (!form.name.trim()) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        name: "이름을 입력해 주세요.",
+      }));
+      return;
+    }
+
     const normalizedPhone = normalizeKrMobilePhone(form.phone);
     if (!isValidKrMobilePhone(normalizedPhone)) {
       setFieldErrors((prev) => ({
@@ -365,12 +550,14 @@ export function SignupForm() {
       setPhoneVerificationPhone(normalizedPhone);
       setPhoneVerificationCode("");
       setPhoneVerificationStatus("sent");
+      setPhoneVerificationExpiresAt(null);
       setError("");
     } catch (err) {
       clearRecaptchaVerifier();
       setPhoneVerificationId("");
       setPhoneVerificationPhone("");
       setPhoneVerificationStatus("idle");
+      setPhoneVerificationExpiresAt(null);
       setFieldErrors((prev) => ({
         ...prev,
         phoneVerificationCode: getPhoneVerificationErrorMessage(err),
@@ -400,6 +587,7 @@ export function SignupForm() {
       return nextErrors;
     });
     setPhoneVerificationStatus("confirmed");
+    setPhoneVerificationExpiresAt(Date.now() + PHONE_VERIFICATION_TTL_MS);
   };
 
   const selectCooperative = (item: Cooperative) => {
@@ -415,6 +603,9 @@ export function SignupForm() {
     setFieldErrors((prev) => {
       const nextErrors = { ...prev };
       delete nextErrors.cooperativeId;
+      if (nextErrors.position === COOPERATIVE_REQUIRED_MESSAGE) {
+        delete nextErrors.position;
+      }
       return nextErrors;
     });
   };
@@ -461,6 +652,7 @@ export function SignupForm() {
 
     const nextFieldErrors: FieldErrors = {};
     const normalizedPhone = normalizeKrMobilePhone(form.phone);
+    const normalizedEmail = form.email.trim().toLowerCase();
     if (!form.name.trim()) nextFieldErrors.name = "이름을 입력해 주세요.";
     if (!form.phone.trim()) {
       nextFieldErrors.phone = "휴대폰 번호를 입력해 주세요.";
@@ -472,9 +664,25 @@ export function SignupForm() {
         nextFieldErrors.phoneVerificationCode = "휴대폰 문자 인증을 먼저 진행해 주세요.";
       } else if (!phoneVerificationCode.trim()) {
         nextFieldErrors.phoneVerificationCode = "문자로 받은 인증번호를 입력해 주세요.";
+      } else if (phoneVerificationStatus !== "confirmed") {
+        nextFieldErrors.phoneVerificationCode = "휴대폰 인증 확인을 완료해 주세요.";
+      } else if (
+        !phoneVerificationExpiresAt ||
+        Date.now() >= phoneVerificationExpiresAt
+      ) {
+        nextFieldErrors.phoneVerificationCode = PHONE_VERIFICATION_EXPIRED_MESSAGE;
       }
     }
-    if (!form.email.trim()) nextFieldErrors.email = "농협 이메일을 입력해 주세요.";
+    if (!normalizedEmail) {
+      nextFieldErrors.email = "농협 이메일을 입력해 주세요.";
+    } else if (!isValidSignupEmail(normalizedEmail)) {
+      nextFieldErrors.email = EMAIL_INVALID_FORMAT_MESSAGE;
+    } else if (
+      emailCheckStatus !== "available" ||
+      emailCheckedValue !== normalizedEmail
+    ) {
+      nextFieldErrors.email = EMAIL_CHECK_REQUIRED_MESSAGE;
+    }
     if (!form.password) {
       nextFieldErrors.password = "비밀번호를 입력해 주세요.";
     } else if (form.password.length < 8) {
@@ -483,17 +691,28 @@ export function SignupForm() {
     if (!form.passwordConfirm) {
       nextFieldErrors.passwordConfirm = "비밀번호 확인을 입력해 주세요.";
     } else if (form.password !== form.passwordConfirm) {
-      nextFieldErrors.passwordConfirm = "비밀번호 확인이 일치하지 않습니다.";
+      nextFieldErrors.passwordConfirm = "비밀번호가 일치하지 않습니다.";
     }
     if (!form.cooperativeId) {
-      nextFieldErrors.cooperativeId = "소속 농협을 선택해 주세요.";
+      nextFieldErrors.cooperativeId = COOPERATIVE_REQUIRED_MESSAGE;
     }
-    if (!form.position.trim()) nextFieldErrors.position = "직책을 입력해 주세요.";
+    if (!form.position.trim()) {
+      nextFieldErrors.position = "직책을 입력해 주세요.";
+    } else if (!form.cooperativeId) {
+      nextFieldErrors.position = COOPERATIVE_REQUIRED_MESSAGE;
+    }
     if (!form.duty) nextFieldErrors.duty = "담당업무를 선택해 주세요.";
     if (!form.termsConsent || !form.privacyConsent) {
       nextFieldErrors.consents = "필수 약관과 개인정보 수집·이용에 동의해 주세요.";
     }
     if (Object.keys(nextFieldErrors).length > 0) {
+      if (nextFieldErrors.phoneVerificationCode === PHONE_VERIFICATION_EXPIRED_MESSAGE) {
+        setPhoneVerificationId("");
+        setPhoneVerificationPhone("");
+        setPhoneVerificationCode("");
+        setPhoneVerificationStatus("idle");
+        setPhoneVerificationExpiresAt(null);
+      }
       setFieldErrors(nextFieldErrors);
       setError("");
       return;
@@ -502,6 +721,7 @@ export function SignupForm() {
     setSubmitting(true);
     setError("");
     setFieldErrors({});
+    let phoneCredentialConsumed = false;
 
     try {
       const auth = getFirebaseAuth();
@@ -515,8 +735,14 @@ export function SignupForm() {
         );
         const phoneUserCredential = await signInWithCredential(auth, phoneCredential);
         phoneVerificationIdToken = await phoneUserCredential.user.getIdToken(true);
+        phoneCredentialConsumed = true;
         setPhoneVerificationStatus("verified");
       } catch (phoneError) {
+        setPhoneVerificationId("");
+        setPhoneVerificationPhone("");
+        setPhoneVerificationCode("");
+        setPhoneVerificationStatus("idle");
+        setPhoneVerificationExpiresAt(null);
         setFieldErrors((prev) => ({
           ...prev,
           phoneVerificationCode: getPhoneVerificationErrorMessage(phoneError),
@@ -598,6 +824,17 @@ export function SignupForm() {
       router.push("/login");
       router.refresh();
     } catch (err) {
+      if (phoneCredentialConsumed) {
+        setPhoneVerificationId("");
+        setPhoneVerificationPhone("");
+        setPhoneVerificationCode("");
+        setPhoneVerificationStatus("idle");
+        setPhoneVerificationExpiresAt(null);
+        setFieldErrors((prev) => ({
+          ...prev,
+          phoneVerificationCode: PHONE_VERIFICATION_RETRY_MESSAGE,
+        }));
+      }
       setError(getSignupErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -659,7 +896,7 @@ export function SignupForm() {
                         ✓
                       </span>
                       <span className="auth-phone-confirmed__text">
-                        인증이 완료되었습니다
+                        인증이 완료되었습니다. 인증은 30분간 유지됩니다
                       </span>
                     </div>
                   ) : (
@@ -736,17 +973,40 @@ export function SignupForm() {
             </div>
             <label className="auth-field">
               <span className="auth-field__label">농협 이메일</span>
-              <input
-                className={`auth-field__input${fieldErrors.email ? " is-invalid" : ""}`}
-                type="email"
-                autoComplete="email"
-                value={form.email}
-                onChange={(event) => update("email", event.target.value)}
-                placeholder="예: name@nonghyup.com"
-                aria-invalid={Boolean(fieldErrors.email)}
-              />
+              <span className="auth-email-check">
+                <input
+                  className={`auth-field__input${fieldErrors.email ? " is-invalid" : ""}`}
+                  type="email"
+                  autoComplete="email"
+                  value={form.email}
+                  onChange={(event) => updateEmail(event.target.value)}
+                  onBlur={() => {
+                    if (form.email.trim()) void checkEmailAvailability();
+                  }}
+                  placeholder="예: name@nonghyup.com"
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  aria-describedby="signup-email-status"
+                />
+                <button
+                  type="button"
+                  className="auth-email-check__button"
+                  onClick={() => void checkEmailAvailability()}
+                  disabled={submitting || emailCheckStatus === "checking"}
+                >
+                  {emailCheckStatus === "checking" ? "확인 중..." : "중복확인"}
+                </button>
+              </span>
               {fieldErrors.email && (
-                <span className="auth-field__error">{fieldErrors.email}</span>
+                <span className="auth-field__error" id="signup-email-status">
+                  {fieldErrors.email}
+                </span>
+              )}
+              {!fieldErrors.email &&
+                emailCheckStatus === "available" &&
+                emailCheckedValue === form.email.trim().toLowerCase() && (
+                  <span className="auth-field__success" id="signup-email-status">
+                    사용 가능한 이메일입니다.
+                  </span>
               )}
             </label>
             <label className="auth-field">
@@ -757,7 +1017,7 @@ export function SignupForm() {
                   type={showPassword ? "text" : "password"}
                   autoComplete="new-password"
                   value={form.password}
-                  onChange={(event) => update("password", event.target.value)}
+                  onChange={(event) => updatePassword(event.target.value)}
                   placeholder="8자 이상 입력하세요"
                   aria-invalid={Boolean(fieldErrors.password)}
                 />
@@ -783,7 +1043,7 @@ export function SignupForm() {
                   type={showPasswordConfirm ? "text" : "password"}
                   autoComplete="new-password"
                   value={form.passwordConfirm}
-                  onChange={(event) => update("passwordConfirm", event.target.value)}
+                  onChange={(event) => updatePasswordConfirm(event.target.value)}
                   placeholder="비밀번호를 한 번 더 입력하세요"
                   aria-invalid={Boolean(fieldErrors.passwordConfirm)}
                 />
@@ -867,7 +1127,7 @@ export function SignupForm() {
               <input
                 className={`auth-field__input${fieldErrors.position ? " is-invalid" : ""}`}
                 value={form.position}
-                onChange={(event) => update("position", event.target.value)}
+                onChange={(event) => updatePosition(event.target.value)}
                 placeholder="예: 과장, 팀장"
                 aria-invalid={Boolean(fieldErrors.position)}
               />

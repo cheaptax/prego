@@ -19,6 +19,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "user.deactivated": "회원 비활성화",
   "user.reactivated": "회원 재활성화",
   "points.adjusted": "포인트 조정",
+  "operator.created": "운영자 계정 생성",
+  "operator.updated": "운영자 정보 수정",
+  "operator.permission_changed": "운영자 권한 변경",
+  "operator.password_reset": "운영자 비밀번호 재설정",
+  "operator.deleted": "운영자 계정 삭제",
   "faq.created": "FAQ 등록",
   "faq.updated": "FAQ 수정",
   "faq.deleted": "FAQ 삭제",
@@ -71,6 +76,10 @@ function metadataString(
   return "";
 }
 
+function isOperatorAudit(log: AuditLogRecord, targetUser?: UserRecord) {
+  return log.action.startsWith("operator.") || targetUser?.role === "admin";
+}
+
 function resolveRequest(
   log: AuditLogRecord,
   ctx: AuditLogDisplayContext,
@@ -116,8 +125,16 @@ export function describeAuditLog(
 
   if (log.targetType === "user") {
     const targetUser = ctx.userByUid.get(log.targetId);
-    targetLabel = targetUser?.name?.trim() || targetUser?.email || "회원";
+    targetLabel =
+      targetUser?.name?.trim() ||
+      targetUser?.email ||
+      metadataString(log.metadata, "targetName") ||
+      metadataString(log.metadata, "targetEmail") ||
+      "회원";
     targetSub = targetUser?.cooperativeName?.trim() ?? "";
+    if (!targetSub && isOperatorAudit(log, targetUser)) {
+      targetSub = targetUser?.email ?? metadataString(log.metadata, "targetEmail");
+    }
   } else if (log.targetType === "request" || log.targetType === "answer") {
     const request = resolveRequest(log, ctx);
     targetLabel = request?.subject?.trim() || "문의";
@@ -150,7 +167,10 @@ export function describeAuditLog(
     actorName,
     targetLabel,
     targetSub,
-    targetTypeLabel: AUDIT_TARGET_TYPE_LABELS[log.targetType] ?? "기타",
+    targetTypeLabel:
+      log.targetType === "user" && isOperatorAudit(log, ctx.userByUid.get(log.targetId))
+        ? "운영자"
+        : AUDIT_TARGET_TYPE_LABELS[log.targetType] ?? "기타",
     tone: ACTIVITY_TONE[log.targetType] ?? "slate",
   };
 }

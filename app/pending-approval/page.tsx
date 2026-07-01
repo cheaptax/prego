@@ -5,7 +5,7 @@ import { Footer } from "@/components/Footer";
 
 export const metadata: Metadata = {
   title: "가입 승인 대기 · 농협지원센터",
-  description: "관리자 가입 승인 후 농협지원센터 서비스를 이용할 수 있습니다.",
+  description: "관리자가 가입 신청 정보를 확인한 뒤 농협지원센터 이용을 안내합니다.",
 };
 
 export default function PendingApprovalPage() {
@@ -20,21 +20,21 @@ export default function PendingApprovalPage() {
               Approval pending
             </span>
             <h1 className="login-head__title">
-              관리자가 가입 승인을
+              관리자가 가입 신청을
               <br />
-              <em>확인 중입니다</em>
+              <em>빠르게 확인 중이에요</em>
             </h1>
             <p className="login-head__lede">
-              가입 신청 정보와 소속 농협을 확인한 뒤 이용이 가능합니다.
-              승인 전에는 상담·견적 요청과 마이페이지 이용이 제한됩니다.
+              가입 신청 정보와 소속 농협을 확인하고 있어요.
+              확인이 끝나면 상담·견적 요청과 마이페이지를 바로 이용하실 수 있습니다.
             </p>
           </header>
 
           <div className="login-card">
             <span className="login-card__tag">가입 승인 대기</span>
-            <h2 className="login-card__title">가입 승인 후 다시 로그인해 주세요.</h2>
+            <h2 className="login-card__title">확인이 완료되면 다시 로그인해 주세요.</h2>
             <p className="login-card__lede">
-              승인이 완료되면 농협 포인트 지갑과 문의 작성 기능을 사용할 수 있습니다.
+              관리자가 빠르게 확인 후 승인해 드릴 예정이에요.
             </p>
             <Link className="login-card__primary" href="/login">
               로그인 화면으로 이동

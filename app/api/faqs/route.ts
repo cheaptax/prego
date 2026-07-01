@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
+import { ensureDefaultFaqRecords } from "@/lib/default-faqs";
 import type { FaqRecord } from "@/lib/firebase/schema";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const snapshot = await adminDb().collection("faqs").get();
+    const db = adminDb();
+    await ensureDefaultFaqRecords(db);
+    const snapshot = await db.collection("faqs").get();
     const faqs = snapshot.docs
       .map((doc) => doc.data() as FaqRecord)
       .filter((faq) => faq.isPublic && faq.displayStatus === "published")
