@@ -27,6 +27,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "faq.created": "FAQ 등록",
   "faq.updated": "FAQ 수정",
   "faq.deleted": "FAQ 삭제",
+  "audit_quote.updated": "회계감사 견적 접수 수정",
+  "audit_quote.notify_retry": "회계감사 견적 알림 재시도",
 };
 
 export const AUDIT_TARGET_TYPE_LABELS: Record<AuditLogRecord["targetType"], string> = {
@@ -36,6 +38,7 @@ export const AUDIT_TARGET_TYPE_LABELS: Record<AuditLogRecord["targetType"], stri
   faq: "FAQ",
   answer: "답변",
   pointLedger: "포인트",
+  auditQuote: "회계감사 견적",
 };
 
 export type AuditActivityTone = "blue" | "green" | "amber" | "violet" | "slate";
@@ -47,6 +50,7 @@ const ACTIVITY_TONE: Record<AuditLogRecord["targetType"], AuditActivityTone> = {
   request: "amber",
   answer: "green",
   pointLedger: "violet",
+  auditQuote: "amber",
 };
 
 export type AuditLogDisplayContext = {
@@ -160,6 +164,14 @@ export function describeAuditLog(
     targetLabel = question || "FAQ";
     const category = metadataString(log.metadata, "category");
     if (category) targetSub = category;
+  } else if (log.targetType === "auditQuote") {
+    targetLabel =
+      metadataString(log.metadata, "publicReference") || "회계감사 견적";
+    const fromStatus = metadataString(log.metadata, "fromStatus");
+    const toStatus = metadataString(log.metadata, "toStatus");
+    if (fromStatus && toStatus) {
+      targetSub = `${fromStatus} → ${toStatus}`;
+    }
   }
 
   return {

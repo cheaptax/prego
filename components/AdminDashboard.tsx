@@ -54,12 +54,19 @@ import type {
   PointTransactionRecord,
   UserRecord,
 } from "@/lib/firebase/schema";
+import { AdminAuditQuotesPanel } from "@/components/AdminAuditQuotesPanel";
 
 const ADMIN_EMAIL = "admin@gmail.com";
 
 type State = "loading" | "ready" | "denied" | "error";
 
-type TabKey = "overview" | "members" | "inquiries" | "points" | "audit";
+type TabKey =
+  | "overview"
+  | "members"
+  | "inquiries"
+  | "auditQuotes"
+  | "points"
+  | "audit";
 type MemberSubtab = "members" | "operators";
 type OperatorEditorState = {
   mode: "create" | "edit";
@@ -70,6 +77,11 @@ const TABS: { key: TabKey; label: string; description: string }[] = [
   { key: "overview", label: "Overview", description: "운영 지표 한눈에 보기" },
   { key: "members", label: "Members", description: "회원 및 운영자 계정 관리" },
   { key: "inquiries", label: "Inquiries", description: "문의 접수와 답변 처리" },
+  {
+    key: "auditQuotes",
+    label: "Audit quotes",
+    description: "FY27 회계감사 견적 접수 운영",
+  },
   { key: "points", label: "Points", description: "농협 지갑과 포인트 정산" },
   { key: "audit", label: "Audit log", description: "주요 변경 이력" },
 ];
@@ -2493,6 +2505,10 @@ export function AdminDashboard() {
               </div>
             </div>
           </div>
+        )}
+
+        {tab === "auditQuotes" && (
+          <AdminAuditQuotesPanel onMessage={setActionMessage} />
         )}
 
         {tab === "points" && (

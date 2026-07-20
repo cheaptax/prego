@@ -182,7 +182,14 @@ export type AuditLogRecord = {
   actorUid: string;
   actorEmail?: string;
   action: string;
-  targetType: "user" | "organization" | "request" | "answer" | "pointLedger" | "faq";
+  targetType:
+    | "user"
+    | "organization"
+    | "request"
+    | "answer"
+    | "pointLedger"
+    | "faq"
+    | "auditQuote";
   targetId: string;
   metadata?: Record<string, string | number | boolean | null>;
   createdAt: string;
@@ -203,3 +210,8 @@ export type FaqRecord = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type {
+  AuditQuoteRequestRecord,
+  AuditQuoteStatus,
+} from "@/lib/audit-quote/types";

@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:audit-quote": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/audit-quote/testing/*.test.ts\" \"scripts/audit-quote/rules-emulator.test.mjs\"",
+    "smoke:audit-quote-page": "node scripts/smoke-audit-quote-page.mjs",
     "smoke:mvp:integrated": "node scripts/smoke-mvp-integrated.mjs",
     "seed:admin": "node scripts/seed-admin.mjs"
   },

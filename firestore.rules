@@ -33,5 +33,22 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
       allow update, delete: if isAdmin();
     }
+
+    // Audit-quote intake is server/Admin SDK only. Deny all client access.
+    match /auditQuoteRequests/{requestId} {
+      allow read, write: if false;
+    }
+    match /auditQuoteIdempotency/{keyHash} {
+      allow read, write: if false;
+    }
+    match /auditQuoteEmailDedup/{dedupId} {
+      allow read, write: if false;
+    }
+    match /auditQuoteRateLimits/{limitId} {
+      allow read, write: if false;
+    }
+    match /auditQuoteNotifications/{requestId} {
+      allow read, write: if false;
+    }
   }
 }
