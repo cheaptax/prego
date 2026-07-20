@@ -1,15 +1,13 @@
+import { CmsHighlightedText } from "@/components/cms/CmsHighlightedText";
+import type { CmsSection } from "@/lib/cms/schemas";
+import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+
 type Item = {
-  title: string;
-  desc: string;
-  highlight: string;
   illustration: React.ReactNode;
 };
 
 const ITEMS: Item[] = [
   {
-    title: "농협 업무 이해",
-    desc: "농협·조합 관련 법인의 회계, 감사, 세무, 인사노무, 계약 업무 특성을 고려해 문의를 검토합니다.",
-    highlight: "NH",
     illustration: (
       <svg viewBox="0 0 80 80" width="64" height="64" aria-hidden="true">
         <rect x="14" y="10" width="52" height="60" rx="8" fill="#D7E8FF" />
@@ -30,9 +28,6 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    title: "8대 전문직 네트워크",
-    desc: "회계사, 세무사, 노무사, 변호사, 법무사, 감정평가사, 변리사, 관세사 등 다양한 전문가와 협업합니다.",
-    highlight: "8 Fields",
     illustration: (
       <svg viewBox="0 0 80 80" width="64" height="64" aria-hidden="true">
         <rect x="18" y="14" width="44" height="52" rx="6" fill="#D7E8FF" />
@@ -55,9 +50,6 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    title: "복합 문의 분류",
-    desc: "하나의 문의에 여러 분야가 섞여 있어도 필요한 전문 영역을 구분해 안내합니다.",
-    highlight: "Classify",
     illustration: (
       <svg viewBox="0 0 80 80" width="64" height="64" aria-hidden="true">
         <rect x="10" y="34" width="60" height="36" rx="4" fill="#D7E8FF" />
@@ -85,9 +77,6 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    title: "상담과 견적 연결",
-    desc: "필요한 경우 후속 상담, 견적, 정식 업무 진행까지 안내합니다.",
-    highlight: "Connect",
     illustration: (
       <svg viewBox="0 0 80 80" width="64" height="64" aria-hidden="true">
         <rect x="14" y="10" width="52" height="60" rx="8" fill="#D7E8FF" />
@@ -114,27 +103,30 @@ const ITEMS: Item[] = [
   },
 ];
 
-export function Expertise() {
+export function Expertise({ section }: { section: CmsSection }) {
+  const items = section.items.filter((item) => item.visible && !item.deleted);
   return (
-    <section className="section" id="expertise">
+    <section {...cmsSectionRootProps(section, "section")} id="expertise">
       <div className="section__head">
-        <span className="kicker">Expertise</span>
+        <span className="kicker">{section.eyebrow}</span>
         <h2 className="display">
-          농협 업무에 맞춘 <em>전문성</em>
+          <CmsHighlightedText
+            text={section.title}
+            highlight={section.text.highlight}
+          />
         </h2>
         <p className="section__lede">
-          회계와 감사 문의를 구분하고, 복합 문의는 필요한 전문 영역으로 나누어
-          상담 또는 견적 절차를 안내합니다.
+          {section.description}
         </p>
       </div>
 
       <div className="expertise">
-        {ITEMS.map((item) => (
-          <article className="expertise__card" key={item.title}>
-            <div className="expertise__art">{item.illustration}</div>
-            <span className="expertise__highlight">{item.highlight}</span>
+        {items.map((item, index) => (
+          <article className="expertise__card" key={item.id}>
+            <div className="expertise__art">{ITEMS[index]?.illustration}</div>
+            <span className="expertise__highlight">{item.value}</span>
             <h3>{item.title}</h3>
-            <p>{item.desc}</p>
+            <p>{item.description}</p>
           </article>
         ))}
       </div>

@@ -1,21 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AuditQuoteDetail, AuditQuoteListItem } from "@/lib/audit-quote/admin";
 import {
   AUDIT_QUOTE_STATUSES,
-  AUDIT_QUOTE_STATUS_LABELS,
   allowedNextStatuses,
 } from "@/lib/audit-quote/status";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import {
+  ADMIN_AUDIT_QUOTE_FILTERS,
+  createAdminOperationsCopy,
+  formatAdminOperationsMessage,
+} from "@/lib/cms/admin-operations-content";
+import type { CmsPageContent } from "@/lib/cms/schemas";
 
 type Props = {
   onMessage: (message: { tone: "success" | "error"; text: string }) => void;
+  content: CmsPageContent;
+  previewMode?: boolean;
 };
+
+class AdminRequestError extends Error {
+  constructor(readonly code: string) {
+    super("Admin request failed");
+  }
+}
 
 async function adminFetch(path: string, init?: RequestInit) {
   const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("로그인이 필요합니다.");
+  if (!user) throw new AdminRequestError("auth_required");
   const idToken = await user.getIdToken();
   const res = await fetch(path, {
     ...init,
@@ -27,18 +40,55 @@ async function adminFetch(path: string, init?: RequestInit) {
   });
   const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!res.ok || !data?.ok) {
-    throw new Error(String(data?.error ?? "request_failed"));
+    throw new AdminRequestError(String(data?.error ?? "request_failed"));
   }
   return data;
 }
 
-export function AdminAuditQuotesPanel({ onMessage }: Props) {
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<AuditQuoteListItem[]>([]);
-  const [receivedCount, setReceivedCount] = useState(0);
+const previewQuote: AuditQuoteDetail = {
+  requestId: "preview-audit-quote",
+  publicReference: "AQ-2026-0720",
+  emailMasked: "au***@example.com",
+  contactName: "최감사",
+  status: "received",
+  quoteCount: 2,
+  campaign: "FY27",
+  channel: "web",
+  assignedTo: "박운영",
+  createdAt: "2026-07-20T08:30:00.000Z",
+  updatedAt: "2026-07-20T09:00:00.000Z",
+  marketingConsent: true,
+  email: "audit@example.com",
+  phone: "010-5555-1234",
+  privacyPolicyVersion: "2026-07",
+  pagePath: "/events/audit-quote",
+};
+
+export function AdminAuditQuotesPanel({
+  onMessage,
+  content,
+  previewMode = false,
+}: Props) {
+  const copy = useMemo(() => createAdminOperationsCopy(content), [content]);
+  const section = copy.section("auditQuotes");
+  const statusLabel = (status: string) => {
+    const option = ADMIN_AUDIT_QUOTE_FILTERS.find(
+      (candidate) => candidate.value === status,
+    );
+    return option ? section.item(`status.${option.id}`) : status;
+  };
+  const [loading, setLoading] = useState(!previewMode);
+  const [items, setItems] = useState<AuditQuoteListItem[]>(
+    previewMode ? [previewQuote] : [],
+  );
+  const [receivedCount, setReceivedCount] = useState(previewMode ? 1 : 0);
   const [statusFilter, setStatusFilter] = useState("received");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<AuditQuoteDetail | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    previewMode ? previewQuote.requestId : null,
+  );
+  const [detail, setDetail] = useState<AuditQuoteDetail | null>(
+    previewMode ? previewQuote : null,
+  );
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftStatus, setDraftStatus] = useState("");
@@ -47,6 +97,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
   const [listVersion, setListVersion] = useState(0);
 
   useEffect(() => {
+    if (previewMode) return;
     let cancelled = false;
 
     (async () => {
@@ -64,9 +115,10 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
         onMessage({
           tone: "error",
           text:
-            error instanceof Error
-              ? error.message
-              : "견적 접수 목록을 불러오지 못했습니다.",
+            error instanceof AdminRequestError &&
+            error.code === "auth_required"
+              ? copy.message("authRequired")
+              : copy.message("auditQuoteListFailed"),
         });
       } finally {
         if (!cancelled) setLoading(false);
@@ -76,9 +128,14 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [statusFilter, listVersion, onMessage]);
+  }, [statusFilter, listVersion, onMessage, previewMode, copy]);
 
   async function loadDetail(requestId: string) {
+    if (previewMode) {
+      setSelectedId(requestId);
+      setDetail(previewQuote);
+      return;
+    }
     setSelectedId(requestId);
     setDetailLoading(true);
     try {
@@ -92,9 +149,9 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
       onMessage({
         tone: "error",
         text:
-          error instanceof Error
-            ? error.message
-            : "상세 정보를 불러오지 못했습니다.",
+          error instanceof AdminRequestError && error.code === "auth_required"
+            ? copy.message("authRequired")
+            : copy.message("auditQuoteDetailFailed"),
       });
     } finally {
       setDetailLoading(false);
@@ -106,7 +163,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
     : [];
 
   async function saveDetail() {
-    if (!detail) return;
+    if (!detail || previewMode) return;
     setSaving(true);
     try {
       const quoteCount = Number(draftQuoteCount);
@@ -124,19 +181,21 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
       setDraftStatus(item.status);
       setDraftAssignee(item.assignedTo ?? "");
       setDraftQuoteCount(String(item.quoteCount));
-      onMessage({ tone: "success", text: "접수 정보를 저장했습니다." });
+      onMessage({ tone: "success", text: copy.message("auditQuoteSaved") });
       setLoading(true);
       setListVersion((value) => value + 1);
     } catch (error) {
-      const code = error instanceof Error ? error.message : "";
+      const code = error instanceof AdminRequestError ? error.code : "";
       onMessage({
         tone: "error",
         text:
-          code === "conflict"
-            ? "다른 담당자가 먼저 수정했습니다. 다시 불러온 뒤 저장해 주세요."
+          code === "auth_required"
+            ? copy.message("authRequired")
+            : code === "conflict"
+            ? copy.message("auditQuoteConflict")
             : code === "invalid_transition"
-              ? "허용되지 않은 상태 변경입니다."
-              : "저장에 실패했습니다.",
+              ? copy.message("auditQuoteInvalidTransition")
+              : copy.message("auditQuoteSaveFailed"),
       });
       if (selectedId) await loadDetail(selectedId);
     } finally {
@@ -145,7 +204,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
   }
 
   async function retryNotify() {
-    if (!detail) return;
+    if (!detail || previewMode) return;
     setSaving(true);
     try {
       const data = await adminFetch(
@@ -154,10 +213,22 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
       );
       onMessage({
         tone: "success",
-        text: `알림 상태: ${String(data.notifyStatus)} (시도 ${String(data.attempts)})`,
+        text: formatAdminOperationsMessage(
+          copy.message("auditQuoteNotifySuccess"),
+          {
+            status: String(data.notifyStatus),
+            attempts: String(data.attempts),
+          },
+        ),
       });
-    } catch {
-      onMessage({ tone: "error", text: "알림 재시도에 실패했습니다." });
+    } catch (error) {
+      onMessage({
+        tone: "error",
+        text:
+          error instanceof AdminRequestError && error.code === "auth_required"
+            ? copy.message("authRequired")
+            : copy.message("auditQuoteNotifyFailed"),
+      });
     } finally {
       setSaving(false);
     }
@@ -168,15 +239,16 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
       <div className="admin-card admin-card--span-2">
         <div className="admin-card__head">
           <div>
-            <h2>회계감사 견적 접수</h2>
+            <h2>{section.title}</h2>
             <p>
-              미처리 received {receivedCount}건 · 목록은 이메일 마스킹, 상세에서만
-              원문 확인
+              {section.text("receivedPrefix")} {statusLabel("received")}{" "}
+              {receivedCount}
+              {section.text("receivedSuffix")}
             </p>
           </div>
           <div className="admin-topbar__actions">
             <label className="admin-field">
-              <span>상태 필터</span>
+              <span>{section.text("statusFilter")}</span>
               <select
                 value={statusFilter}
                 onChange={(event) => {
@@ -184,10 +256,10 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
                   setStatusFilter(event.target.value);
                 }}
               >
-                <option value="all">전체</option>
+                <option value="all">{section.item("status.all")}</option>
                 {AUDIT_QUOTE_STATUSES.map((status) => (
                   <option key={status} value={status}>
-                    {AUDIT_QUOTE_STATUS_LABELS[status]}
+                    {statusLabel(status)}
                   </option>
                 ))}
               </select>
@@ -201,7 +273,9 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
               }}
               disabled={loading}
             >
-              {loading ? "불러오는 중..." : "새로고침"}
+              {loading
+                ? section.text("refreshing")
+                : section.text("refresh")}
             </button>
           </div>
         </div>
@@ -210,13 +284,13 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
           <table className="admin-table">
             <thead>
               <tr>
-                <th>접수번호</th>
-                <th>담당자</th>
-                <th>이메일</th>
-                <th>상태</th>
-                <th>견적수</th>
-                <th>담당</th>
-                <th>접수시각</th>
+                <th>{section.text("referenceColumn")}</th>
+                <th>{section.text("contactColumn")}</th>
+                <th>{section.text("emailColumn")}</th>
+                <th>{section.text("statusColumn")}</th>
+                <th>{section.text("quoteCountColumn")}</th>
+                <th>{section.text("assigneeColumn")}</th>
+                <th>{section.text("receivedAtColumn")}</th>
               </tr>
             </thead>
             <tbody>
@@ -240,7 +314,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
                   </td>
                   <td>{item.contactName || "-"}</td>
                   <td>{item.emailMasked}</td>
-                  <td>{AUDIT_QUOTE_STATUS_LABELS[item.status]}</td>
+                  <td>{statusLabel(item.status)}</td>
                   <td>{item.quoteCount}</td>
                   <td>{item.assignedTo || "-"}</td>
                   <td>
@@ -252,7 +326,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
               ))}
               {items.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7}>조건에 맞는 접수가 없습니다.</td>
+                  <td colSpan={7}>{section.text("empty")}</td>
                 </tr>
               )}
             </tbody>
@@ -263,69 +337,77 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
       <div className="admin-card">
         <div className="admin-card__head">
           <div>
-            <h2>상세</h2>
-            <p>권한 있는 운영자만 원문 이메일을 확인합니다.</p>
+            <h2>{section.text("detailTitle")}</h2>
+            <p>{section.text("detailDescription")}</p>
           </div>
         </div>
 
-        {!selectedId && <p className="admin-empty">목록에서 접수를 선택하세요.</p>}
-        {selectedId && detailLoading && <p>상세를 불러오는 중...</p>}
+        {!selectedId && (
+          <p className="admin-empty">{section.text("selectDetail")}</p>
+        )}
+        {selectedId && detailLoading && (
+          <p>{section.text("detailLoading")}</p>
+        )}
         {detail && !detailLoading && (
           <div className="admin-form">
             <dl className="admin-define">
               <div>
-                <dt>접수번호</dt>
+                <dt>{section.text("referenceColumn")}</dt>
                 <dd>{detail.publicReference}</dd>
               </div>
               <div>
-                <dt>담당자 이름</dt>
+                <dt>{section.text("contactName")}</dt>
                 <dd>{detail.contactName || "-"}</dd>
               </div>
               <div>
-                <dt>휴대폰 번호</dt>
+                <dt>{section.text("phone")}</dt>
                 <dd>{detail.phone || "-"}</dd>
               </div>
               <div>
-                <dt>원문 이메일</dt>
+                <dt>{section.text("originalEmail")}</dt>
                 <dd>
                   <code>{detail.email}</code>
                 </dd>
               </div>
               <div>
-                <dt>캠페인</dt>
+                <dt>{section.text("campaign")}</dt>
                 <dd>{detail.campaign}</dd>
               </div>
               <div>
-                <dt>마케팅 동의</dt>
-                <dd>{detail.marketingConsent ? "동의" : "미동의"}</dd>
+                <dt>{section.text("marketingConsent")}</dt>
+                <dd>
+                  {detail.marketingConsent
+                    ? section.text("agreed")
+                    : section.text("notAgreed")}
+                </dd>
               </div>
             </dl>
 
             <label className="admin-field">
-              <span>상태</span>
+              <span>{section.text("status")}</span>
               <select
                 value={draftStatus}
                 onChange={(event) => setDraftStatus(event.target.value)}
               >
                 {nextStatuses.map((status) => (
                   <option key={status} value={status}>
-                    {AUDIT_QUOTE_STATUS_LABELS[status]}
+                    {statusLabel(status)}
                   </option>
                 ))}
               </select>
             </label>
 
             <label className="admin-field">
-              <span>담당자</span>
+              <span>{section.text("assignee")}</span>
               <input
                 value={draftAssignee}
                 onChange={(event) => setDraftAssignee(event.target.value)}
-                placeholder="담당자 이메일 또는 이름"
+                placeholder={section.text("assigneePlaceholder")}
               />
             </label>
 
             <label className="admin-field">
-              <span>견적 수 (quoteCount)</span>
+              <span>{section.text("quoteCount")}</span>
               <input
                 type="number"
                 min={0}
@@ -342,7 +424,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
                 disabled={saving}
                 onClick={() => void saveDetail()}
               >
-                {saving ? "저장 중..." : "저장"}
+                {saving ? section.text("saving") : section.text("save")}
               </button>
               <button
                 type="button"
@@ -350,7 +432,7 @@ export function AdminAuditQuotesPanel({ onMessage }: Props) {
                 disabled={saving}
                 onClick={() => void retryNotify()}
               >
-                알림 재시도
+                {section.text("retryNotification")}
               </button>
             </div>
           </div>

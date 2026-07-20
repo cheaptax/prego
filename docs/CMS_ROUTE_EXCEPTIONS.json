@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "route": "/admin/pages/[pageKey]",
+      "kind": "cms-editor",
+      "reason": "CMS 페이지 콘텐츠를 편집하는 보호된 도구 route이며 사용자 콘텐츠 화면으로 중복 등록하지 않습니다.",
+      "owner": "콘텐츠 운영",
+      "reviewBy": "2027-01-31"
+    },
+    {
+      "route": "/admin/globals/[documentKey]",
+      "kind": "cms-editor",
+      "reason": "공통 헤더·푸터·지원 영역을 편집하는 보호된 도구 route이며 사용자 콘텐츠 화면으로 중복 등록하지 않습니다.",
+      "owner": "콘텐츠 운영",
+      "reviewBy": "2027-01-31"
+    }
+  ]
+}

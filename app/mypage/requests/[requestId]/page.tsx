@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { Footer } from "@/components/Footer";
 import { RequestDetailPage } from "@/components/RequestDetailPage";
 import { Topbar } from "@/components/Topbar";
+import { cmsPageMetadata } from "@/lib/cms/metadata";
+import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 
-export const metadata: Metadata = {
-  title: "문의 상세 · 농협지원센터",
-  description: "마이페이지에서 선택한 문의의 상태와 공개범위를 확인합니다.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const bundle = await loadPublishedCmsPage("member.requestDetail");
+  return cmsPageMetadata(bundle.content, bundle.assetUrls);
+}
 
 type Props = {
   params: Promise<{ requestId: string }>;
@@ -14,12 +16,13 @@ type Props = {
 
 export default async function MyRequestDetail({ params }: Props) {
   const { requestId } = await params;
+  const { content } = await loadPublishedCmsPage("member.requestDetail");
 
   return (
     <>
       <Topbar />
       <main id="main" className="request-detail-page">
-        <RequestDetailPage requestId={requestId} />
+        <RequestDetailPage requestId={requestId} content={content} />
       </main>
       <Footer />
     </>

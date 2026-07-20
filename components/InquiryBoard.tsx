@@ -4,6 +4,8 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import type { CmsPageContent } from "@/lib/cms/schemas";
+import { getCmsSection } from "@/lib/cms/runtime";
 
 type BoardFilter = "all" | "org" | "mine";
 
@@ -38,16 +40,6 @@ type InquiryBoardResponse = {
   items?: InquiryBoardItem[];
 };
 
-const PUBLIC_FILTERS: { value: BoardFilter; label: string }[] = [
-  { value: "all", label: "전체문의" },
-];
-
-const MEMBER_FILTERS: { value: BoardFilter; label: string }[] = [
-  { value: "all", label: "전체문의" },
-  { value: "org", label: "우리농협문의" },
-  { value: "mine", label: "나의문의" },
-];
-
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -70,18 +62,83 @@ function matchesBoardFilter(item: InquiryBoardItem, filter: BoardFilter) {
   return true;
 }
 
-export function InquiryBoard() {
+function createPreviewItems(copy: CmsPageContent["sections"][number]["text"]) {
+  return [
+    {
+      id: "preview-public",
+      requestNumber: "REQ-20260721-1001",
+      subject: copy.previewPublicSubject,
+      visibility: "public",
+      visibilityLabel: "",
+      status: "ANSWERED",
+      statusLabel: "",
+      createdAt: "2026-07-21T00:00:00.000Z",
+      canReadDetails: true,
+      isMine: false,
+      isOrgInquiry: false,
+      detailNotice: "",
+      message: copy.previewPublicMessage,
+      answer: {
+        body: copy.previewPublicAnswer,
+        status: "published",
+        pointCost: 0,
+        createdAt: "2026-07-21T00:00:00.000Z",
+      },
+    },
+    {
+      id: "preview-locked",
+      requestNumber: "REQ-20260721-1002",
+      subject: copy.previewLockedSubject,
+      visibility: "nonghyup",
+      visibilityLabel: "",
+      status: "SUBMITTED",
+      statusLabel: "",
+      createdAt: "2026-07-20T00:00:00.000Z",
+      canReadDetails: false,
+      isMine: false,
+      isOrgInquiry: true,
+      detailNotice: "",
+      message: null,
+      answer: null,
+    },
+  ] satisfies InquiryBoardItem[];
+}
+
+export function InquiryBoard({
+  content,
+  previewMode = false,
+}: {
+  content: CmsPageContent;
+  previewMode?: boolean;
+}) {
+  const filterCopy = getCmsSection(content, "public.inquiries", "filters");
+  const listCopy = getCmsSection(content, "public.inquiries", "list");
   const [items, setItems] = useState<InquiryBoardItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!previewMode);
   const [error, setError] = useState("");
-  const [authMode, setAuthMode] = useState<"member" | "public">("public");
+  const [authMode, setAuthMode] = useState<"member" | "public">(
+    previewMode ? "member" : "public",
+  );
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [query, setQuery] = useState("");
+  const effectiveItems = useMemo(
+    () => (previewMode ? createPreviewItems(listCopy.text) : items),
+    [items, listCopy.text, previewMode],
+  );
 
-  const filters = authMode === "member" ? MEMBER_FILTERS : PUBLIC_FILTERS;
+  const publicFilters: { value: BoardFilter; label: string }[] = [
+    { value: "all", label: filterCopy.text.allFilter },
+  ];
+  const memberFilters: { value: BoardFilter; label: string }[] = [
+    ...publicFilters,
+    { value: "org", label: filterCopy.text.organizationFilter },
+    { value: "mine", label: filterCopy.text.mineFilter },
+  ];
+  const filters = authMode === "member" ? memberFilters : publicFilters;
   const effectiveFilter = authMode === "public" ? "all" : filter;
 
   useEffect(() => {
+    if (previewMode) return;
     const auth = getFirebaseAuth();
     const load = async (user: User | null) => {
       setLoading(true);
@@ -99,7 +156,7 @@ export function InquiryBoard() {
         setItems(data.items ?? []);
         setAuthMode(data.auth ?? "public");
       } catch {
-        setError("문의 게시판을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setError(content.messages.genericError);
       } finally {
         setLoading(false);
       }
@@ -109,11 +166,11 @@ export function InquiryBoard() {
       void load(user);
     });
     return () => unsubscribe();
-  }, []);
+  }, [content.messages.genericError, previewMode]);
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return items.filter((item) => {
+    return effectiveItems.filter((item) => {
       const matchesFilter = matchesBoardFilter(item, effectiveFilter);
       const matchesQuery =
         !normalizedQuery ||
@@ -121,36 +178,57 @@ export function InquiryBoard() {
         item.requestNumber?.toLowerCase().includes(normalizedQuery);
       return matchesFilter && matchesQuery;
     });
-  }, [effectiveFilter, items, query]);
+  }, [effectiveFilter, effectiveItems, query]);
 
   const toolbarSummary = useMemo(() => {
     if (effectiveFilter === "org") {
-      return "우리 농협에 공유된 문의만 모아 보여드려요.";
+      return filterCopy.text.organizationSummary;
     }
     if (effectiveFilter === "mine") {
-      return "내가 작성한 문의만 모아 보여드려요.";
+      return filterCopy.text.mineSummary;
     }
     if (authMode === "member") {
-      return "선택하신 공개 범위에 맞춰 본문과 답변을 보여드려요.";
+      return filterCopy.text.allMemberSummary;
     }
-    return "전체공개 문의는 로그인 없이 바로 열어볼 수 있어요.";
-  }, [authMode, effectiveFilter]);
+    return filterCopy.text.allGuestSummary;
+  }, [authMode, effectiveFilter, filterCopy.text]);
+
+  function visibilityLabel(item: InquiryBoardItem) {
+    if (item.visibility === "public") return listCopy.text.visibilityPublic;
+    if (item.visibility === "nonghyup") {
+      return listCopy.text.visibilityOrganization;
+    }
+    return listCopy.text.visibilityPrivate;
+  }
+
+  function statusLabel(item: InquiryBoardItem) {
+    if (item.answer) return listCopy.text.statusAnswered;
+    const normalized = item.status.toUpperCase();
+    if (normalized === "COMPLETED") return listCopy.text.statusCompleted;
+    if (normalized === "FOLLOWUP") return listCopy.text.statusFollowup;
+    return listCopy.text.statusReceived;
+  }
 
   return (
-    <section className="inquiry-board" aria-label="문의 게시판">
+    <section
+      className="inquiry-board"
+      aria-label={filterCopy.text.boardAriaLabel}
+    >
       <div className="inquiry-board__toolbar">
         <div>
           <strong>
-            게시판 문의 {filteredItems.length.toLocaleString("ko-KR")}건
+            {filterCopy.text.countPrefix}{" "}
+            {filteredItems.length.toLocaleString("ko-KR")}
+            {filterCopy.text.countSuffix}
           </strong>
           <span>{toolbarSummary}</span>
         </div>
         <label className="inquiry-board__search">
-          <span>문의 검색</span>
+          <span>{filterCopy.text.searchLabel}</span>
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="제목 또는 접수번호 검색"
+            placeholder={filterCopy.text.searchPlaceholder}
           />
         </label>
       </div>
@@ -159,7 +237,7 @@ export function InquiryBoard() {
         className={`inquiry-board__filters${
           filters.length === 1 ? " inquiry-board__filters--single" : ""
         }`}
-        aria-label="문의 목록 필터"
+        aria-label={filterCopy.text.filtersAriaLabel}
       >
         {filters.map((item) => (
           <button
@@ -174,28 +252,28 @@ export function InquiryBoard() {
       </div>
 
       {loading ? (
-        <div className="inquiry-board__state">문의 목록을 불러오는 중입니다.</div>
+        <div className="inquiry-board__state">{content.messages.loading}</div>
       ) : error ? (
         <div className="inquiry-board__state inquiry-board__state--error">
           {error}
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="inquiry-board__state">조건에 맞는 문의가 없습니다.</div>
+        <div className="inquiry-board__state">{content.messages.empty}</div>
       ) : (
         <div className="inquiry-list">
           {filteredItems.map((item) => (
             <details className="inquiry-row" key={item.id}>
               <summary>
                 <span className="inquiry-row__number">
-                  {item.requestNumber ?? "접수번호 없음"}
+                  {item.requestNumber ?? listCopy.text.missingRequestNumber}
                 </span>
                 <strong>{item.subject}</strong>
                 <span className="inquiry-row__meta">
                   <span className={`inquiry-chip ${visibilityClass(item.visibility)}`}>
-                    {item.visibilityLabel}
+                    {visibilityLabel(item)}
                   </span>
                   <span className="inquiry-chip inquiry-chip--status">
-                    {item.statusLabel}
+                    {statusLabel(item)}
                   </span>
                   <time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time>
                 </span>
@@ -205,26 +283,35 @@ export function InquiryBoard() {
                 {item.canReadDetails ? (
                   <>
                     <section>
-                      <h3>문의 내용</h3>
+                      <h3>{listCopy.text.requestHeading}</h3>
                       <p>{item.message}</p>
                     </section>
                     <section>
-                      <h3>답변</h3>
+                      <h3>{listCopy.text.answerHeading}</h3>
                       {item.answer ? (
                         <p>{item.answer.body}</p>
                       ) : (
                         <p className="inquiry-row__muted">
-                          아직 등록된 답변이 없습니다.
+                          {listCopy.text.answerPending}
                         </p>
                       )}
                     </section>
                   </>
                 ) : (
                   <div className="inquiry-row__locked">
-                    <strong>이 문의는 선택한 공개 범위로 보호되고 있어요.</strong>
-                    <p>{item.detailNotice}</p>
+                    <strong>{listCopy.text.lockedTitle}</strong>
+                    <p>{listCopy.text.lockedDescription}</p>
                     {authMode === "public" && (
-                      <Link href="/login">로그인하고 내용 확인하기</Link>
+                      <Link
+                        href="/login"
+                        onClick={
+                          previewMode
+                            ? (event) => event.preventDefault()
+                            : undefined
+                        }
+                      >
+                        {listCopy.text.loginLabel}
+                      </Link>
                     )}
                   </div>
                 )}

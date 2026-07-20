@@ -3,20 +3,27 @@ import { Topbar } from "@/components/Topbar";
 import { Footer } from "@/components/Footer";
 import { AuditQuoteEventPage } from "@/components/AuditQuoteEventPage";
 import { getPublicAuditQuoteConfig } from "@/lib/audit-quote/public-config";
+import { loadPublishedAuditQuote } from "@/lib/cms/public-content";
 
-export const metadata: Metadata = {
-  title: "FY27 회계감사 견적 요청 · 농협지원센터",
-  description:
-    "지역농협 회계감사 견적을 한 번 요청으로 비교할 수 있도록 지원하는 FY27 임시 이벤트 페이지입니다.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { content } = await loadPublishedAuditQuote();
+  return {
+    title: content.seo.title,
+    description: content.seo.description,
+    robots: content.seo.indexable
+      ? { index: true, follow: true }
+      : { index: false, follow: false },
+  };
+}
 
-export default function AuditQuoteEventRoutePage() {
+export default async function AuditQuoteEventRoutePage() {
   const config = getPublicAuditQuoteConfig();
+  const { content } = await loadPublishedAuditQuote();
 
   return (
     <>
       <Topbar />
-      <AuditQuoteEventPage config={config} />
+      <AuditQuoteEventPage config={config} content={content} />
       <Footer />
     </>
   );

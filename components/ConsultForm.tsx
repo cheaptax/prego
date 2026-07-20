@@ -3,10 +3,8 @@
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { useEffect, useRef, useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
-import {
-  INQUIRY_CATEGORY_AUTO_LABEL,
-  INQUIRY_SUPPORT_FIELD_OPTIONS,
-} from "@/lib/inquiry-categories";
+import type { CmsPageContent } from "@/lib/cms/schemas";
+import { getCmsSection } from "@/lib/cms/runtime";
 
 type PhotoItem = {
   id: string;
@@ -42,35 +40,24 @@ const INITIAL: FormState = {
   visibility: "PRIVATE",
 };
 
-const CATEGORY_OPTIONS: { value: InquiryCategory; label: string }[] = [
-  { value: "AUTO", label: INQUIRY_CATEGORY_AUTO_LABEL },
-  ...INQUIRY_SUPPORT_FIELD_OPTIONS.map((option) => ({
-    value: option.value as InquiryCategory,
-    label: option.label,
-  })),
-];
+const CATEGORY_VALUES: Record<string, InquiryCategory> = {
+  auto: "AUTO",
+  tax: "TAX",
+  accounting: "ACCOUNTING",
+  legal: "LEGAL",
+  labor: "LABOR",
+  registration: "REGISTRATION",
+  appraisal: "APPRAISAL",
+  ip: "IP",
+  customs: "CUSTOMS",
+  audit: "AUDIT",
+};
 
-const VISIBILITY_OPTIONS: {
-  value: FormState["visibility"];
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: "PUBLIC",
-    label: "전체 공개",
-    description: "다른 농협 사용자도 볼 수 있어요.",
-  },
-  {
-    value: "ORG_ONLY",
-    label: "우리 농협 공개",
-    description: "같은 소속 농협 사용자만 볼 수 있어요.",
-  },
-  {
-    value: "PRIVATE",
-    label: "비공개",
-    description: "작성자와 관리자만 볼 수 있어요.",
-  },
-];
+const VISIBILITY_VALUES: Record<string, FormState["visibility"]> = {
+  public: "PUBLIC",
+  organization: "ORG_ONLY",
+  private: "PRIVATE",
+};
 
 const MAX_MESSAGE = 2000;
 const MAX_PHOTOS = 6;
@@ -115,13 +102,53 @@ function waitForCurrentUser(timeoutMs = 3000) {
   });
 }
 
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatSize(
+  bytes: number,
+  units: { bytes: string; kilobytes: string; megabytes: string },
+) {
+  if (bytes < 1024) return `${bytes} ${units.bytes}`;
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} ${units.kilobytes}`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} ${units.megabytes}`;
 }
 
-export function ConsultForm() {
+export function ConsultForm({
+  content,
+  previewMode = false,
+}: {
+  content: CmsPageContent;
+  previewMode?: boolean;
+}) {
+  const categoryCopy = getCmsSection(
+    content,
+    "public.consult",
+    "categorySelector",
+  );
+  const visibilityCopy = getCmsSection(
+    content,
+    "public.consult",
+    "visibilitySelector",
+  );
+  const fieldsCopy = getCmsSection(
+    content,
+    "public.consult",
+    "requestFields",
+  );
+  const successCopy = getCmsSection(content, "public.consult", "success");
+  const messages = content.messages;
+  const categoryOptions = categoryCopy.items.flatMap((item) => {
+    const value = CATEGORY_VALUES[item.id];
+    return value && item.visible && !item.deleted
+      ? [{ value, label: item.title }]
+      : [];
+  });
+  const visibilityOptions = visibilityCopy.items.flatMap((item) => {
+    const value = VISIBILITY_VALUES[item.id];
+    return value && item.visible && !item.deleted
+      ? [{ value, label: item.title, description: item.description ?? "" }]
+      : [];
+  });
   const [followupContext] = useState(getFollowupContext);
   const { parentRequestId, suggestedSubject } = followupContext;
   const [form, setForm] = useState<FormState>(() => ({
@@ -151,7 +178,7 @@ export function ConsultForm() {
 
     const slotsLeft = MAX_PHOTOS - photos.length;
     if (slotsLeft <= 0) {
-      setErrorMsg(`사진은 최대 ${MAX_PHOTOS}장까지 첨부할 수 있어요.`);
+      setErrorMsg(messages.tooManyAttachments);
       return;
     }
 
@@ -183,8 +210,8 @@ export function ConsultForm() {
       setPhotos((prev) => [...prev, ...accepted]);
       setErrorMsg("");
     }
-    if (invalidType) setErrorMsg("이미지 파일만 첨부할 수 있어요.");
-    else if (oversize) setErrorMsg("사진 한 장은 최대 10MB까지 업로드할 수 있어요.");
+    if (invalidType) setErrorMsg(messages.imageOnly);
+    else if (oversize) setErrorMsg(messages.imageTooLarge);
   };
 
   const removePhoto = (id: string) => {
@@ -197,9 +224,10 @@ export function ConsultForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (previewMode) return;
 
-    if (!form.subject.trim()) return setErrorMsg("문의 제목을 입력해 주세요.");
-    if (!form.message.trim()) return setErrorMsg("문의 내용을 입력해 주세요.");
+    if (!form.subject.trim()) return setErrorMsg(messages.subjectRequired);
+    if (!form.message.trim()) return setErrorMsg(messages.messageRequired);
 
     setErrorMsg("");
     setStatus("submitting");
@@ -207,7 +235,7 @@ export function ConsultForm() {
       const currentUser = await waitForCurrentUser();
       if (!currentUser) {
         setStatus("error");
-        return setErrorMsg("로그인 후 상담·견적 요청을 등록해 주세요.");
+        return setErrorMsg(messages.authRequired);
       }
 
       const token = await currentUser.getIdToken();
@@ -242,13 +270,13 @@ export function ConsultForm() {
       setStatus("error");
       const message = err instanceof Error ? err.message : "";
       if (message === "missing_user_cooperative") {
-        setErrorMsg("회원가입 소속 농협 정보가 없어 문의를 등록할 수 없습니다.");
+        setErrorMsg(messages.organizationRequired);
       } else if (message === "invalid_attachment") {
-        setErrorMsg("사진은 이미지 파일만 가능하며 한 장당 10MB 이하로 첨부해 주세요.");
+        setErrorMsg(messages.invalidAttachment);
       } else if (message === "too_many_attachments") {
-        setErrorMsg(`사진은 최대 ${MAX_PHOTOS}장까지 첨부할 수 있어요.`);
+        setErrorMsg(messages.tooManyAttachments);
       } else {
-        setErrorMsg("전송 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+        setErrorMsg(messages.genericError);
       }
     }
   };
@@ -268,11 +296,11 @@ export function ConsultForm() {
             />
           </svg>
         </span>
-        <h3>문의가 접수되었습니다</h3>
-        <p>답변은 마이페이지에서 확인할 수 있어요.</p>
+        <h3>{successCopy.title}</h3>
+        <p>{successCopy.description}</p>
         <dl className="consult-success__meta">
           <div>
-            <dt>접수번호</dt>
+            <dt>{successCopy.text.requestNumberLabel}</dt>
             <dd>
               <code>{requestNumber}</code>
             </dd>
@@ -289,7 +317,7 @@ export function ConsultForm() {
             setRequestNumber("");
           }}
         >
-          새 문의 작성
+          {successCopy.text.resetLabel}
         </button>
       </div>
     );
@@ -299,19 +327,22 @@ export function ConsultForm() {
     <form className="consult-form" onSubmit={handleSubmit} noValidate>
       {parentRequestId && (
         <p className="consult-form__notice">
-          기존 문의와 연결된 후속 문의로 접수됩니다.
+          {fieldsCopy.text.followupNotice}
         </p>
       )}
 
       <div className="consult-form__choices">
         <fieldset className="consult-form__field consult-category">
-          <legend className="consult-form__label">문의 유형</legend>
+          <legend className="consult-form__label">{categoryCopy.title}</legend>
           <p className="consult-form__field-hint">
-            어떤 분야인지 잘 모르겠다면 자동 배정을 선택해 주세요. 문의 내용을 보고
-            알맞은 담당자가 확인해 드립니다.
+            {categoryCopy.description}
           </p>
-          <div className="consult-choice__grid" role="radiogroup" aria-label="문의 유형">
-            {CATEGORY_OPTIONS.map((option) => {
+          <div
+            className="consult-choice__grid"
+            role="radiogroup"
+            aria-label={categoryCopy.text.ariaLabel}
+          >
+            {categoryOptions.map((option) => {
               const checked = form.category === option.value;
               return (
                 <label
@@ -333,14 +364,14 @@ export function ConsultForm() {
         </fieldset>
 
         <fieldset className="consult-form__field consult-visibility">
-          <legend className="consult-form__label">공개 유형</legend>
+          <legend className="consult-form__label">{visibilityCopy.title}</legend>
           <div
             className="consult-choice__grid consult-choice__grid--visibility"
             role="radiogroup"
-            aria-label="공개 유형"
+            aria-label={visibilityCopy.text.ariaLabel}
             aria-describedby="consult-visibility-hint"
           >
-            {VISIBILITY_OPTIONS.map((option) => {
+            {visibilityOptions.map((option) => {
               const checked = form.visibility === option.value;
               return (
                 <label
@@ -361,7 +392,7 @@ export function ConsultForm() {
           </div>
           <p className="consult-form__field-hint" id="consult-visibility-hint">
             {
-              VISIBILITY_OPTIONS.find((option) => option.value === form.visibility)
+              visibilityOptions.find((option) => option.value === form.visibility)
                 ?.description
             }
           </p>
@@ -369,25 +400,29 @@ export function ConsultForm() {
       </div>
 
       <label className="consult-form__field">
-        <span className="consult-form__label">제목</span>
+        <span className="consult-form__label">
+          {fieldsCopy.text.subjectLabel}
+        </span>
         <input
           type="text"
           required
           value={form.subject}
           onChange={(e) => update("subject", e.target.value)}
-          placeholder="문의 제목을 입력해 주세요"
+          placeholder={fieldsCopy.text.subjectPlaceholder}
         />
       </label>
 
       <label className="consult-form__field">
-        <span className="consult-form__label">내용</span>
+        <span className="consult-form__label">
+          {fieldsCopy.text.messageLabel}
+        </span>
         <textarea
           rows={10}
           required
           maxLength={MAX_MESSAGE}
           value={form.message}
           onChange={(e) => update("message", e.target.value)}
-          placeholder="궁금한 내용을 편하게 적어주세요."
+          placeholder={fieldsCopy.text.messagePlaceholder}
         />
         <span className="consult-form__counter" aria-live="polite">
           {form.message.length.toLocaleString()} / {MAX_MESSAGE.toLocaleString()}
@@ -396,7 +431,7 @@ export function ConsultForm() {
 
       <div className="consult-form__field">
         <span className="consult-form__label">
-          사진 첨부 <em>선택</em>
+          {fieldsCopy.text.photoLabel} <em>{fieldsCopy.text.optionalLabel}</em>
         </span>
 
         <button
@@ -423,8 +458,8 @@ export function ConsultForm() {
             </svg>
           </span>
           <span className="consult-form__dropzone-text">
-            <strong>사진을 추가해 주세요</strong>
-            <em>JPG, PNG, GIF · 한 장당 10MB 이하 · 최대 {MAX_PHOTOS}장</em>
+            <strong>{fieldsCopy.text.photoButtonTitle}</strong>
+            <em>{fieldsCopy.text.photoHelp}</em>
           </span>
         </button>
 
@@ -441,19 +476,28 @@ export function ConsultForm() {
         />
 
         {photos.length > 0 && (
-          <ul className="consult-form__previews" aria-label="첨부한 사진">
+          <ul
+            className="consult-form__previews"
+            aria-label={fieldsCopy.text.photoListAriaLabel}
+          >
             {photos.map((photo) => (
               <li key={photo.id} className="consult-form__preview">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={photo.url} alt={photo.name} />
                 <div className="consult-form__preview-meta">
                   <strong title={photo.name}>{photo.name}</strong>
-                  <span>{formatSize(photo.size)}</span>
+                  <span>
+                    {formatSize(photo.size, {
+                      bytes: fieldsCopy.text.bytesUnit,
+                      kilobytes: fieldsCopy.text.kilobytesUnit,
+                      megabytes: fieldsCopy.text.megabytesUnit,
+                    })}
+                  </span>
                 </div>
                 <button
                   type="button"
                   className="consult-form__preview-remove"
-                  aria-label={`${photo.name} 삭제`}
+                  aria-label={`${photo.name} ${fieldsCopy.text.deleteSuffix}`}
                   onClick={() => removePhoto(photo.id)}
                 >
                   <svg viewBox="0 0 16 16" width="12" height="12" fill="none">
@@ -483,7 +527,9 @@ export function ConsultForm() {
           className="consult-form__submit"
           disabled={status === "submitting"}
         >
-          {status === "submitting" ? "등록 중..." : "문의 등록하기"}
+          {status === "submitting"
+            ? fieldsCopy.text.submittingLabel
+            : fieldsCopy.text.submitLabel}
         </button>
       </div>
     </form>

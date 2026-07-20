@@ -43,6 +43,3 @@ export function getFirebaseAdminApp() {
 export const adminAuth = () => getAuth(getFirebaseAdminApp());
 export const adminDb = () => getFirestore(getFirebaseAdminApp());
 export const adminStorage = () => getStorage(getFirebaseAdminApp());
-
-export const ADMIN_EMAIL = (process.env.ADMIN_EMAIL ?? "admin@gmail.com").trim();
-export const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD ?? "admin").trim();

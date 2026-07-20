@@ -7,15 +7,15 @@ import {
   RecaptchaVerifier,
   signInWithCredential,
   updateProfile,
+  validatePassword,
   type Auth,
+  type PasswordValidationStatus,
 } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  nonghyupMaster,
-  signupDutyOptions,
-} from "@/lib/platform";
+import { nonghyupMaster } from "@/lib/platform";
 import {
   getFirebaseAuth,
   getFirebaseStorage,
@@ -28,6 +28,8 @@ import {
   normalizeKrMobilePhone,
   toKrMobilePhoneE164,
 } from "@/lib/phone";
+import type { CmsPageContent } from "@/lib/cms/schemas";
+import { getCmsSection } from "@/lib/cms/runtime";
 
 type Cooperative = (typeof nonghyupMaster)[number];
 
@@ -98,14 +100,8 @@ const INITIAL_FORM: FormState = {
 };
 
 const MAX_BUSINESS_CARD_SIZE = 10 * 1024 * 1024;
-const COOPERATIVE_REQUIRED_MESSAGE = "소속 농협을 선택해 주세요.";
+const PASSWORD_MIN_LENGTH = 8;
 const PHONE_VERIFICATION_TTL_MS = 30 * 60 * 1000;
-const PHONE_VERIFICATION_EXPIRED_MESSAGE =
-  "휴대폰 인증이 만료되었습니다. 인증번호를 다시 받아 주세요.";
-const PHONE_VERIFICATION_RETRY_MESSAGE =
-  "회원가입을 완료하지 못해 휴대폰 인증을 다시 진행해 주세요.";
-const EMAIL_CHECK_REQUIRED_MESSAGE = "이메일 중복확인을 먼저 진행해 주세요.";
-const EMAIL_INVALID_FORMAT_MESSAGE = "이메일 형식이 올바르지 않습니다.";
 const ALLOWED_BUSINESS_CARD_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -124,80 +120,142 @@ function isValidSignupEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function getSignupErrorMessage(error: unknown) {
+function getSignupErrorMessage(
+  error: unknown,
+  messages: CmsPageContent["messages"],
+) {
   if (!(error instanceof FirebaseError)) {
     if (error instanceof Error) {
       switch (error.message) {
         case "missing_fields":
-          return "필수 입력값이 누락되었습니다. 입력 내용을 다시 확인해 주세요.";
+          return messages.missingFields;
         case "invalid_token":
-          return "로그인 인증 정보가 만료되었습니다. 새로고침 후 다시 시도해 주세요.";
+          return messages.invalidToken;
         case "email_mismatch":
-          return "가입 이메일과 인증 이메일이 일치하지 않습니다.";
+          return messages.emailMismatch;
         case "invalid_cooperative_id":
-          return "선택한 농협 정보를 확인할 수 없습니다. 농협명을 다시 검색해 선택해 주세요.";
+          return messages.invalidCooperative;
         case "invalid_phone":
-          return "휴대폰 번호는 010-0000-0000 형식으로 입력해 주세요.";
+          return messages.phoneInvalid;
         case "missing_phone_verification":
-          return "휴대폰 문자 인증을 먼저 완료해 주세요.";
+          return messages.phoneVerificationRequired;
         case "invalid_phone_verification":
-          return "휴대폰 인증 정보가 일치하지 않습니다. 인증번호를 다시 받아 주세요.";
+          return messages.invalidPhoneVerification;
         case "phone_verification_expired":
-          return "휴대폰 인증 시간이 만료되었습니다. 인증번호를 다시 받아 주세요.";
+          return messages.phoneVerificationExpired;
         case "phone_account_limit_exceeded":
-          return "동일한 휴대폰 번호로는 최대 2개 계정까지만 가입할 수 있습니다.";
+          return messages.phoneAccountLimit;
         default:
-          return `회원가입 저장 중 문제가 발생했습니다: ${error.message}`;
+          return messages.genericError;
       }
     }
-    return "회원가입 저장 중 문제가 발생했습니다. Firebase 설정을 확인해 주세요.";
+    return messages.genericError;
   }
 
   switch (error.code) {
     case "auth/email-already-in-use":
-      return "이미 가입된 이메일입니다. 로그인해 주세요.";
+      return messages.emailDuplicate;
     case "auth/invalid-email":
-      return "이메일 형식이 올바르지 않습니다.";
+      return messages.emailInvalid;
     case "auth/weak-password":
-      return "비밀번호는 6자 이상이어야 합니다.";
+      return messages.passwordMin;
     case "auth/invalid-verification-code":
-      return "인증번호가 올바르지 않습니다. 문자로 받은 번호를 다시 확인해 주세요.";
+      return messages.phoneCodeInvalid;
     case "auth/code-expired":
-      return "인증번호가 만료되었습니다. 인증번호를 다시 받아 주세요.";
+      return messages.phoneCodeExpired;
     case "auth/invalid-phone-number":
-      return "휴대폰 번호는 010-0000-0000 형식으로 입력해 주세요.";
+      return messages.phoneInvalid;
     case "auth/too-many-requests":
-      return "인증 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.";
+      return messages.phoneTooMany;
     case "permission-denied":
-      return "Firebase 권한 설정 때문에 저장할 수 없습니다. 보안 규칙을 확인해 주세요.";
+      return messages.permissionError;
     default:
-      return "회원가입 저장 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+      return messages.genericError;
   }
 }
 
-function getPhoneVerificationErrorMessage(error: unknown) {
+function getPhoneVerificationErrorMessage(
+  error: unknown,
+  messages: CmsPageContent["messages"],
+) {
   if (error instanceof FirebaseError) {
     switch (error.code) {
       case "auth/invalid-phone-number":
-        return "휴대폰 번호는 010-0000-0000 형식으로 입력해 주세요.";
+        return messages.phoneInvalid;
       case "auth/invalid-verification-code":
-        return "인증번호가 올바르지 않습니다. 문자로 받은 번호를 다시 확인해 주세요.";
+        return messages.phoneCodeInvalid;
       case "auth/code-expired":
-        return "인증번호가 만료되었습니다. 인증번호를 다시 받아 주세요.";
+        return messages.phoneCodeExpired;
       case "auth/too-many-requests":
-        return "인증 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.";
+        return messages.phoneTooMany;
       case "auth/quota-exceeded":
-        return "문자 인증 발송 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.";
+        return messages.phoneQuota;
+      case "auth/unauthorized-domain":
+        return messages.phoneUnauthorizedDomain;
+      case "auth/operation-not-allowed":
+        return messages.phoneDisabled;
+      case "auth/captcha-check-failed":
+      case "auth/missing-app-credential":
+        return messages.phoneCaptcha;
+      case "auth/network-request-failed":
+        return messages.networkError;
       default:
-        return "휴대폰 문자 인증 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+        return messages.phoneGenericError;
     }
   }
 
-  return "휴대폰 문자 인증 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+  return messages.phoneGenericError;
 }
 
-export function SignupForm() {
+function getPasswordValidationMessage(
+  _status: PasswordValidationStatus,
+  messages: CmsPageContent["messages"],
+) {
+  return messages.passwordPolicyError;
+}
+
+const DUTY_VALUES: Record<string, string> = {
+  accounting: "회계",
+  tax: "세무",
+  general: "총무",
+  hr: "인사",
+  audit: "감사",
+  member: "조합원 관리",
+  other: "기타",
+};
+
+export function SignupForm({
+  content,
+  previewMode = false,
+}: {
+  content: CmsPageContent;
+  previewMode?: boolean;
+}) {
   const router = useRouter();
+  const identityCopy = getCmsSection(content, "auth.signup", "identity");
+  const organizationCopy = getCmsSection(
+    content,
+    "auth.signup",
+    "organization",
+  );
+  const workCopy = getCmsSection(content, "auth.signup", "work");
+  const cardCopy = getCmsSection(content, "auth.signup", "businessCard");
+  const consentsCopy = getCmsSection(content, "auth.signup", "consents");
+  const benefitsCopy = getCmsSection(content, "auth.signup", "benefits");
+  const submitCopy = getCmsSection(content, "auth.signup", "submit");
+  const messages = content.messages;
+  const termsAction = consentsCopy.actions.find(
+    (action) => action.id === "terms",
+  );
+  const privacyAction = consentsCopy.actions.find(
+    (action) => action.id === "privacy",
+  );
+  const dutyOptions = workCopy.items.flatMap((item) => {
+    const value = DUTY_VALUES[item.id];
+    return value && item.visible && !item.deleted
+      ? [{ value, label: item.title }]
+      : [];
+  });
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -238,7 +296,7 @@ export function SignupForm() {
       setPhoneVerificationExpiresAt(null);
       setFieldErrors((prev) => ({
         ...prev,
-        phoneVerificationCode: PHONE_VERIFICATION_EXPIRED_MESSAGE,
+        phoneVerificationCode: messages.phoneVerificationExpired,
       }));
     };
 
@@ -250,12 +308,18 @@ export function SignupForm() {
 
     const timerId = window.setTimeout(expireVerification, remainingTime);
     return () => window.clearTimeout(timerId);
-  }, [phoneVerificationExpiresAt, phoneVerificationStatus]);
+  }, [
+    messages.phoneVerificationExpired,
+    phoneVerificationExpiresAt,
+    phoneVerificationStatus,
+  ]);
 
   const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes < 1024) return `${bytes} ${cardCopy.text.bytesUnit}`;
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)} ${cardCopy.text.kilobytesUnit}`;
+    }
+    return `${(bytes / (1024 * 1024)).toFixed(1)} ${cardCopy.text.megabytesUnit}`;
   };
 
   const consentKeys: (keyof FormState)[] = [
@@ -334,9 +398,13 @@ export function SignupForm() {
     setError("");
     setFieldErrors((prev) => {
       const nextErrors = { ...prev };
-      delete nextErrors.password;
+      if (value && value.length < PASSWORD_MIN_LENGTH) {
+        nextErrors.password = messages.passwordMin;
+      } else {
+        delete nextErrors.password;
+      }
       if (form.passwordConfirm && value !== form.passwordConfirm) {
-        nextErrors.passwordConfirm = "비밀번호가 일치하지 않습니다.";
+        nextErrors.passwordConfirm = messages.passwordMismatch;
       } else {
         delete nextErrors.passwordConfirm;
       }
@@ -350,7 +418,7 @@ export function SignupForm() {
     setFieldErrors((prev) => {
       const nextErrors = { ...prev };
       if (value && form.password && value !== form.password) {
-        nextErrors.passwordConfirm = "비밀번호가 일치하지 않습니다.";
+        nextErrors.passwordConfirm = messages.passwordMismatch;
       } else {
         delete nextErrors.passwordConfirm;
       }
@@ -369,7 +437,7 @@ export function SignupForm() {
     setFieldErrors((prev) => {
       const nextErrors = { ...prev };
       if (nextEmail && !isValidSignupEmail(nextEmail)) {
-        nextErrors.email = EMAIL_INVALID_FORMAT_MESSAGE;
+        nextErrors.email = messages.emailInvalid;
       } else {
         delete nextErrors.email;
       }
@@ -378,11 +446,12 @@ export function SignupForm() {
   };
 
   const checkEmailAvailability = async () => {
+    if (previewMode) return false;
     const email = form.email.trim().toLowerCase();
     if (!email) {
       setFieldErrors((prev) => ({
         ...prev,
-        email: "농협 이메일을 입력해 주세요.",
+        email: messages.emailRequired,
       }));
       setEmailCheckStatus("idle");
       setEmailCheckedValue("");
@@ -391,7 +460,7 @@ export function SignupForm() {
     if (!isValidSignupEmail(email)) {
       setFieldErrors((prev) => ({
         ...prev,
-        email: EMAIL_INVALID_FORMAT_MESSAGE,
+        email: messages.emailInvalid,
       }));
       setEmailCheckStatus("idle");
       setEmailCheckedValue("");
@@ -425,7 +494,7 @@ export function SignupForm() {
         setEmailCheckedValue(email);
         setFieldErrors((prev) => ({
           ...prev,
-          email: "이미 가입된 이메일입니다. 로그인해 주세요.",
+          email: messages.emailDuplicate,
         }));
         return false;
       }
@@ -437,7 +506,7 @@ export function SignupForm() {
       setEmailCheckedValue("");
       setFieldErrors((prev) => ({
         ...prev,
-        email: "이메일 중복확인 중 문제가 발생했습니다. 다시 시도해 주세요.",
+        email: messages.emailCheckError,
       }));
       return false;
     }
@@ -450,8 +519,8 @@ export function SignupForm() {
       const nextErrors = { ...prev };
 
       if (value.trim() && !form.cooperativeId) {
-        nextErrors.position = COOPERATIVE_REQUIRED_MESSAGE;
-        nextErrors.cooperativeId = COOPERATIVE_REQUIRED_MESSAGE;
+        nextErrors.position = messages.cooperativeRequired;
+        nextErrors.cooperativeId = messages.cooperativeRequired;
       } else {
         delete nextErrors.position;
       }
@@ -503,10 +572,11 @@ export function SignupForm() {
   };
 
   const sendPhoneVerificationCode = async () => {
+    if (previewMode) return;
     if (!form.name.trim()) {
       setFieldErrors((prev) => ({
         ...prev,
-        name: "이름을 입력해 주세요.",
+        name: messages.nameRequired,
       }));
       return;
     }
@@ -515,7 +585,7 @@ export function SignupForm() {
     if (!isValidKrMobilePhone(normalizedPhone)) {
       setFieldErrors((prev) => ({
         ...prev,
-        phone: "휴대폰 번호는 010-0000-0000 형식으로 입력해 주세요.",
+        phone: messages.phoneInvalid,
       }));
       return;
     }
@@ -524,7 +594,7 @@ export function SignupForm() {
     if (!phoneNumber) {
       setFieldErrors((prev) => ({
         ...prev,
-        phone: "휴대폰 번호는 010-0000-0000 형식으로 입력해 주세요.",
+        phone: messages.phoneInvalid,
       }));
       return;
     }
@@ -560,24 +630,25 @@ export function SignupForm() {
       setPhoneVerificationExpiresAt(null);
       setFieldErrors((prev) => ({
         ...prev,
-        phoneVerificationCode: getPhoneVerificationErrorMessage(err),
+        phoneVerificationCode: getPhoneVerificationErrorMessage(err, messages),
       }));
     }
   };
 
   const confirmPhoneVerificationCode = () => {
+    if (previewMode) return;
     const trimmed = phoneVerificationCode.trim();
     if (!phoneVerificationId) {
       setFieldErrors((prev) => ({
         ...prev,
-        phoneVerificationCode: "먼저 '인증번호 받기'로 인증번호를 받아 주세요.",
+        phoneVerificationCode: messages.phoneReceiveFirst,
       }));
       return;
     }
     if (trimmed.length !== 6) {
       setFieldErrors((prev) => ({
         ...prev,
-        phoneVerificationCode: "문자로 받은 6자리 인증번호를 입력해 주세요.",
+        phoneVerificationCode: messages.phoneCodeSixDigits,
       }));
       return;
     }
@@ -603,7 +674,7 @@ export function SignupForm() {
     setFieldErrors((prev) => {
       const nextErrors = { ...prev };
       delete nextErrors.cooperativeId;
-      if (nextErrors.position === COOPERATIVE_REQUIRED_MESSAGE) {
+      if (nextErrors.position === messages.cooperativeRequired) {
         delete nextErrors.position;
       }
       return nextErrors;
@@ -619,10 +690,10 @@ export function SignupForm() {
     if (!ALLOWED_BUSINESS_CARD_TYPES.has(file.type)) {
       setBusinessCard(null);
       if (businessCardInputRef.current) businessCardInputRef.current.value = "";
-      setError("명함 파일은 JPG, PNG, PDF 형식만 첨부할 수 있습니다.");
+      setError(messages.businessCardType);
       setFieldErrors((prev) => ({
         ...prev,
-        businessCard: "명함 파일은 JPG, PNG, PDF 형식만 첨부할 수 있습니다.",
+        businessCard: messages.businessCardType,
       }));
       return;
     }
@@ -630,10 +701,10 @@ export function SignupForm() {
     if (file.size > MAX_BUSINESS_CARD_SIZE) {
       setBusinessCard(null);
       if (businessCardInputRef.current) businessCardInputRef.current.value = "";
-      setError("명함 파일은 최대 10MB까지 첨부할 수 있습니다.");
+      setError(messages.businessCardSize);
       setFieldErrors((prev) => ({
         ...prev,
-        businessCard: "명함 파일은 최대 10MB까지 첨부할 수 있습니다.",
+        businessCard: messages.businessCardSize,
       }));
       return;
     }
@@ -649,64 +720,70 @@ export function SignupForm() {
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (previewMode) return;
 
     const nextFieldErrors: FieldErrors = {};
     const normalizedPhone = normalizeKrMobilePhone(form.phone);
     const normalizedEmail = form.email.trim().toLowerCase();
-    if (!form.name.trim()) nextFieldErrors.name = "이름을 입력해 주세요.";
+    if (!form.name.trim()) nextFieldErrors.name = messages.nameRequired;
     if (!form.phone.trim()) {
-      nextFieldErrors.phone = "휴대폰 번호를 입력해 주세요.";
+      nextFieldErrors.phone = messages.phoneRequired;
     } else if (!isValidKrMobilePhone(normalizedPhone)) {
-      nextFieldErrors.phone = "휴대폰 번호는 010-0000-0000 형식으로 입력해 주세요.";
+      nextFieldErrors.phone = messages.phoneInvalid;
     }
     if (isValidKrMobilePhone(normalizedPhone)) {
       if (!phoneVerificationId || phoneVerificationPhone !== normalizedPhone) {
-        nextFieldErrors.phoneVerificationCode = "휴대폰 문자 인증을 먼저 진행해 주세요.";
+        nextFieldErrors.phoneVerificationCode =
+          messages.phoneVerificationRequired;
       } else if (!phoneVerificationCode.trim()) {
-        nextFieldErrors.phoneVerificationCode = "문자로 받은 인증번호를 입력해 주세요.";
+        nextFieldErrors.phoneVerificationCode = messages.phoneCodeRequired;
       } else if (phoneVerificationStatus !== "confirmed") {
-        nextFieldErrors.phoneVerificationCode = "휴대폰 인증 확인을 완료해 주세요.";
+        nextFieldErrors.phoneVerificationCode = messages.phoneConfirmRequired;
       } else if (
         !phoneVerificationExpiresAt ||
         Date.now() >= phoneVerificationExpiresAt
       ) {
-        nextFieldErrors.phoneVerificationCode = PHONE_VERIFICATION_EXPIRED_MESSAGE;
+        nextFieldErrors.phoneVerificationCode =
+          messages.phoneVerificationExpired;
       }
     }
     if (!normalizedEmail) {
-      nextFieldErrors.email = "농협 이메일을 입력해 주세요.";
+      nextFieldErrors.email = messages.emailRequired;
     } else if (!isValidSignupEmail(normalizedEmail)) {
-      nextFieldErrors.email = EMAIL_INVALID_FORMAT_MESSAGE;
+      nextFieldErrors.email = messages.emailInvalid;
     } else if (
       emailCheckStatus !== "available" ||
       emailCheckedValue !== normalizedEmail
     ) {
-      nextFieldErrors.email = EMAIL_CHECK_REQUIRED_MESSAGE;
+      nextFieldErrors.email = messages.emailCheckRequired;
     }
     if (!form.password) {
-      nextFieldErrors.password = "비밀번호를 입력해 주세요.";
-    } else if (form.password.length < 8) {
-      nextFieldErrors.password = "비밀번호는 8자 이상 입력해 주세요.";
+      nextFieldErrors.password = messages.passwordRequired;
+    } else if (form.password.length < PASSWORD_MIN_LENGTH) {
+      nextFieldErrors.password = messages.passwordMin;
     }
     if (!form.passwordConfirm) {
-      nextFieldErrors.passwordConfirm = "비밀번호 확인을 입력해 주세요.";
+      nextFieldErrors.passwordConfirm = messages.passwordConfirmRequired;
     } else if (form.password !== form.passwordConfirm) {
-      nextFieldErrors.passwordConfirm = "비밀번호가 일치하지 않습니다.";
+      nextFieldErrors.passwordConfirm = messages.passwordMismatch;
     }
     if (!form.cooperativeId) {
-      nextFieldErrors.cooperativeId = COOPERATIVE_REQUIRED_MESSAGE;
+      nextFieldErrors.cooperativeId = messages.cooperativeRequired;
     }
     if (!form.position.trim()) {
-      nextFieldErrors.position = "직책을 입력해 주세요.";
+      nextFieldErrors.position = messages.positionRequired;
     } else if (!form.cooperativeId) {
-      nextFieldErrors.position = COOPERATIVE_REQUIRED_MESSAGE;
+      nextFieldErrors.position = messages.cooperativeRequired;
     }
-    if (!form.duty) nextFieldErrors.duty = "담당업무를 선택해 주세요.";
+    if (!form.duty) nextFieldErrors.duty = messages.dutyRequired;
     if (!form.termsConsent || !form.privacyConsent) {
-      nextFieldErrors.consents = "필수 약관과 개인정보 수집·이용에 동의해 주세요.";
+      nextFieldErrors.consents = messages.consentsRequired;
     }
     if (Object.keys(nextFieldErrors).length > 0) {
-      if (nextFieldErrors.phoneVerificationCode === PHONE_VERIFICATION_EXPIRED_MESSAGE) {
+      if (
+        nextFieldErrors.phoneVerificationCode ===
+        messages.phoneVerificationExpired
+      ) {
         setPhoneVerificationId("");
         setPhoneVerificationPhone("");
         setPhoneVerificationCode("");
@@ -727,6 +804,15 @@ export function SignupForm() {
       const auth = getFirebaseAuth();
       const storage = getFirebaseStorage();
 
+      const passwordStatus = await validatePassword(auth, form.password);
+      if (!passwordStatus.isValid) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          password: getPasswordValidationMessage(passwordStatus, messages),
+        }));
+        return;
+      }
+
       let phoneVerificationIdToken = "";
       try {
         const phoneCredential = PhoneAuthProvider.credential(
@@ -745,7 +831,10 @@ export function SignupForm() {
         setPhoneVerificationExpiresAt(null);
         setFieldErrors((prev) => ({
           ...prev,
-          phoneVerificationCode: getPhoneVerificationErrorMessage(phoneError),
+          phoneVerificationCode: getPhoneVerificationErrorMessage(
+            phoneError,
+            messages,
+          ),
         }));
         throw phoneError;
       }
@@ -832,10 +921,10 @@ export function SignupForm() {
         setPhoneVerificationExpiresAt(null);
         setFieldErrors((prev) => ({
           ...prev,
-          phoneVerificationCode: PHONE_VERIFICATION_RETRY_MESSAGE,
+          phoneVerificationCode: messages.phoneVerificationRetry,
         }));
       }
-      setError(getSignupErrorMessage(err));
+      setError(getSignupErrorMessage(err, messages));
     } finally {
       setSubmitting(false);
     }
@@ -844,16 +933,16 @@ export function SignupForm() {
   return (
     <form className="auth-form" onSubmit={submit} noValidate>
         <section className="auth-stage">
-          <h2>기본 정보 입력</h2>
+          <h2>{identityCopy.title}</h2>
           <div className="auth-grid">
             <label className="auth-field">
-              <span className="auth-field__label">이름</span>
+              <span className="auth-field__label">{identityCopy.text.nameLabel}</span>
               <input
                 className={`auth-field__input${fieldErrors.name ? " is-invalid" : ""}`}
                 autoComplete="name"
                 value={form.name}
                 onChange={(event) => update("name", event.target.value)}
-                placeholder="이름을 입력하세요"
+                placeholder={identityCopy.text.namePlaceholder}
                 aria-invalid={Boolean(fieldErrors.name)}
               />
               {fieldErrors.name && (
@@ -861,7 +950,7 @@ export function SignupForm() {
               )}
             </label>
             <label className="auth-field">
-              <span className="auth-field__label">휴대폰 번호</span>
+              <span className="auth-field__label">{identityCopy.text.phoneLabel}</span>
               <input
                 className={`auth-field__input${fieldErrors.phone ? " is-invalid" : ""}`}
                 autoComplete="tel"
@@ -869,7 +958,7 @@ export function SignupForm() {
                 maxLength={KR_MOBILE_PHONE_MAX_INPUT_LENGTH}
                 value={form.phone}
                 onChange={(event) => updatePhone(event.target.value)}
-                placeholder="010-0000-0000"
+                placeholder={identityCopy.text.phonePlaceholder}
                 aria-invalid={Boolean(fieldErrors.phone)}
               />
               {fieldErrors.phone && (
@@ -896,7 +985,7 @@ export function SignupForm() {
                         ✓
                       </span>
                       <span className="auth-phone-confirmed__text">
-                        인증이 완료되었습니다. 인증은 30분간 유지됩니다
+                        {identityCopy.text.verifiedNotice}
                       </span>
                     </div>
                   ) : (
@@ -918,9 +1007,10 @@ export function SignupForm() {
                             return nextErrors;
                           });
                         }}
-                        placeholder="인증번호 6자리"
+                        placeholder={identityCopy.text.verificationCodePlaceholder}
                         disabled={!phoneVerificationId}
                         aria-invalid={Boolean(fieldErrors.phoneVerificationCode)}
+                        aria-label={identityCopy.text.verificationCodePlaceholder}
                       />
                       <button
                         type="button"
@@ -932,7 +1022,7 @@ export function SignupForm() {
                           phoneVerificationCode.trim().length !== 6
                         }
                       >
-                        인증 확인
+                        {identityCopy.text.verifyCodeLabel}
                       </button>
                     </div>
                   )}
@@ -946,22 +1036,21 @@ export function SignupForm() {
                   disabled={submitting || phoneVerificationStatus === "sending"}
                 >
                   {phoneVerificationStatus === "sending"
-                    ? "발송 중..."
+                    ? identityCopy.text.sendingLabel
                     : phoneVerificationId &&
                         phoneVerificationPhone === normalizeKrMobilePhone(form.phone)
-                      ? "인증번호 재발송"
-                      : "인증번호 받기"}
+                      ? identityCopy.text.resendLabel
+                      : identityCopy.text.sendLabel}
                 </button>
               )}
               {phoneVerificationStatus === "idle" && (
                 <span className="auth-field__hint">
-                  동일한 휴대폰 번호로는 최대 2개 계정까지만 가입할 수 있습니다.
+                  {identityCopy.text.phoneLimitHelp}
                 </span>
               )}
               {phoneVerificationStatus === "sent" && (
                 <span className="auth-field__hint">
-                  입력하신 번호로 인증번호가 발송되었어요. 받은 6자리 숫자를 입력해
-                  주세요.
+                  {identityCopy.text.codeSentHelp}
                 </span>
               )}
               {fieldErrors.phoneVerificationCode && (
@@ -972,7 +1061,7 @@ export function SignupForm() {
               <span id="signup-phone-recaptcha" className="auth-phone-recaptcha" />
             </div>
             <label className="auth-field">
-              <span className="auth-field__label">농협 이메일</span>
+              <span className="auth-field__label">{identityCopy.text.emailLabel}</span>
               <span className="auth-email-check">
                 <input
                   className={`auth-field__input${fieldErrors.email ? " is-invalid" : ""}`}
@@ -983,7 +1072,7 @@ export function SignupForm() {
                   onBlur={() => {
                     if (form.email.trim()) void checkEmailAvailability();
                   }}
-                  placeholder="예: name@nonghyup.com"
+                  placeholder={identityCopy.text.emailPlaceholder}
                   aria-invalid={Boolean(fieldErrors.email)}
                   aria-describedby="signup-email-status"
                 />
@@ -993,7 +1082,9 @@ export function SignupForm() {
                   onClick={() => void checkEmailAvailability()}
                   disabled={submitting || emailCheckStatus === "checking"}
                 >
-                  {emailCheckStatus === "checking" ? "확인 중..." : "중복확인"}
+                  {emailCheckStatus === "checking"
+                    ? identityCopy.text.checkingEmailLabel
+                    : identityCopy.text.checkEmailLabel}
                 </button>
               </span>
               {fieldErrors.email && (
@@ -1005,12 +1096,12 @@ export function SignupForm() {
                 emailCheckStatus === "available" &&
                 emailCheckedValue === form.email.trim().toLowerCase() && (
                   <span className="auth-field__success" id="signup-email-status">
-                    사용 가능한 이메일입니다.
+                    {identityCopy.text.emailAvailable}
                   </span>
               )}
             </label>
             <label className="auth-field">
-              <span className="auth-field__label">비밀번호</span>
+              <span className="auth-field__label">{identityCopy.text.passwordLabel}</span>
               <span className="auth-field__inputbox">
                 <input
                   className={`auth-field__input auth-field__input--with-action${fieldErrors.password ? " is-invalid" : ""}`}
@@ -1018,14 +1109,20 @@ export function SignupForm() {
                   autoComplete="new-password"
                   value={form.password}
                   onChange={(event) => updatePassword(event.target.value)}
-                  placeholder="8자 이상 입력하세요"
+                  placeholder={identityCopy.text.passwordPlaceholder}
                   aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby="signup-password-requirements"
+                  minLength={PASSWORD_MIN_LENGTH}
                 />
                 <button
                   type="button"
                   className="auth-field__action"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  aria-label={showPassword ? "비밀번호 숨기기" : "비밀번호 보기"}
+                  aria-label={
+                    showPassword
+                      ? identityCopy.text.hidePasswordLabel
+                      : identityCopy.text.showPasswordLabel
+                  }
                   aria-pressed={showPassword}
                 >
                   <PasswordIcon visible={showPassword} />
@@ -1034,9 +1131,14 @@ export function SignupForm() {
               {fieldErrors.password && (
                 <span className="auth-field__error">{fieldErrors.password}</span>
               )}
+              <span className="auth-field__hint" id="signup-password-requirements">
+                {messages.passwordMin}
+              </span>
             </label>
             <label className="auth-field">
-              <span className="auth-field__label">비밀번호 확인</span>
+              <span className="auth-field__label">
+                {identityCopy.text.passwordConfirmLabel}
+              </span>
               <span className="auth-field__inputbox">
                 <input
                   className={`auth-field__input auth-field__input--with-action${fieldErrors.passwordConfirm ? " is-invalid" : ""}`}
@@ -1044,14 +1146,18 @@ export function SignupForm() {
                   autoComplete="new-password"
                   value={form.passwordConfirm}
                   onChange={(event) => updatePasswordConfirm(event.target.value)}
-                  placeholder="비밀번호를 한 번 더 입력하세요"
+                  placeholder={identityCopy.text.passwordConfirmPlaceholder}
                   aria-invalid={Boolean(fieldErrors.passwordConfirm)}
                 />
                 <button
                   type="button"
                   className="auth-field__action"
                   onClick={() => setShowPasswordConfirm((prev) => !prev)}
-                  aria-label={showPasswordConfirm ? "비밀번호 숨기기" : "비밀번호 보기"}
+                  aria-label={
+                    showPasswordConfirm
+                      ? identityCopy.text.hidePasswordLabel
+                      : identityCopy.text.showPasswordLabel
+                  }
                   aria-pressed={showPasswordConfirm}
                 >
                   <PasswordIcon visible={showPasswordConfirm} />
@@ -1065,10 +1171,12 @@ export function SignupForm() {
         </section>
 
         <section className="auth-stage">
-          <h2>소속 농협 선택</h2>
+          <h2>{organizationCopy.title}</h2>
           <div className="auth-grid">
             <label className="auth-field auth-field--wide">
-              <span className="auth-field__label">농협명 검색</span>
+              <span className="auth-field__label">
+                {organizationCopy.text.searchLabel}
+              </span>
               <input
                 className={`auth-field__input${fieldErrors.cooperativeId ? " is-invalid" : ""}`}
                 value={form.cooperativeQuery}
@@ -1076,7 +1184,7 @@ export function SignupForm() {
                   update("cooperativeQuery", event.target.value);
                   setForm((prev) => ({ ...prev, cooperativeId: "" }));
                 }}
-                placeholder="예: 상주농협, 서울중앙농협"
+                placeholder={organizationCopy.text.searchPlaceholder}
                 aria-invalid={Boolean(fieldErrors.cooperativeId)}
               />
               {fieldErrors.cooperativeId && (
@@ -1087,7 +1195,10 @@ export function SignupForm() {
 
           {showCooperativeSuggestions && (
             filteredCooperatives.length > 0 ? (
-              <div className="signup-coop-results" aria-label="농협 검색 결과">
+              <div
+                className="signup-coop-results"
+                aria-label={organizationCopy.text.resultsAriaLabel}
+              >
                 {filteredCooperatives.map((item) => (
                   <button
                     type="button"
@@ -1106,29 +1217,31 @@ export function SignupForm() {
               </div>
             ) : (
               <p className="signup-coop-empty" role="status">
-                <strong>{cooperativeQueryTrimmed}</strong>(으)로 검색된 농협이
-                없습니다. 마스터 목록에 있는 농협명으로 다시 검색해 주세요.
+                {organizationCopy.text.emptyPrefix}
+                <strong>{cooperativeQueryTrimmed}</strong>
+                {organizationCopy.text.emptySuffix}
               </p>
             )
           )}
 
           {selectedCooperative && (
             <p className="auth-selected">
-              선택한 농협: <strong>{cooperativeDisplay(selectedCooperative)}</strong>
+              {organizationCopy.text.selectedPrefix}{" "}
+              <strong>{cooperativeDisplay(selectedCooperative)}</strong>
             </p>
           )}
         </section>
 
         <section className="auth-stage">
-          <h2>담당자 정보 입력</h2>
+          <h2>{workCopy.title}</h2>
           <div className="auth-grid">
             <label className="auth-field">
-              <span className="auth-field__label">직책</span>
+              <span className="auth-field__label">{workCopy.text.positionLabel}</span>
               <input
                 className={`auth-field__input${fieldErrors.position ? " is-invalid" : ""}`}
                 value={form.position}
                 onChange={(event) => updatePosition(event.target.value)}
-                placeholder="예: 과장, 팀장"
+                placeholder={workCopy.text.positionPlaceholder}
                 aria-invalid={Boolean(fieldErrors.position)}
               />
               {fieldErrors.position && (
@@ -1136,17 +1249,17 @@ export function SignupForm() {
               )}
             </label>
             <label className="auth-field">
-              <span className="auth-field__label">담당업무</span>
+              <span className="auth-field__label">{workCopy.text.dutyLabel}</span>
               <select
                 className={`auth-field__input${fieldErrors.duty ? " is-invalid" : ""}`}
                 value={form.duty}
                 onChange={(event) => update("duty", event.target.value)}
                 aria-invalid={Boolean(fieldErrors.duty)}
               >
-                <option value="">담당업무 선택</option>
-                {signupDutyOptions.map((duty) => (
-                  <option key={duty} value={duty}>
-                    {duty}
+                <option value="">{workCopy.text.dutyPlaceholder}</option>
+                {dutyOptions.map((duty) => (
+                  <option key={duty.value} value={duty.value}>
+                    {duty.label}
                   </option>
                 ))}
               </select>
@@ -1156,12 +1269,13 @@ export function SignupForm() {
             </label>
           </div>
           <div className="auth-field">
-            <span className="auth-field__label">명함 첨부</span>
+            <span className="auth-field__label">{cardCopy.title}</span>
             <input
               ref={businessCardInputRef}
               type="file"
               accept=".jpg,.jpeg,.png,.pdf"
               className="auth-file__input"
+              aria-label={cardCopy.title}
               onChange={(event) => handleBusinessCardChange(event.target.files?.[0] ?? null)}
             />
             {businessCard ? (
@@ -1179,7 +1293,7 @@ export function SignupForm() {
                     className="auth-file__btn"
                     onClick={() => businessCardInputRef.current?.click()}
                   >
-                    변경
+                    {cardCopy.text.changeLabel}
                   </button>
                   <button
                     type="button"
@@ -1191,7 +1305,7 @@ export function SignupForm() {
                       }
                     }}
                   >
-                    삭제
+                    {cardCopy.text.deleteLabel}
                   </button>
                 </div>
               </div>
@@ -1205,13 +1319,13 @@ export function SignupForm() {
                   <UploadIcon />
                 </span>
                 <span className="auth-file__text">
-                  <strong>명함 이미지를 업로드하세요</strong>
-                  <span>JPG, PNG, PDF · 최대 10MB</span>
+                  <strong>{cardCopy.text.uploadTitle}</strong>
+                  <span>{cardCopy.text.uploadHelp}</span>
                 </span>
-                <span className="auth-file__cta">파일 선택</span>
+                <span className="auth-file__cta">{cardCopy.text.selectLabel}</span>
               </button>
             )}
-            <span className="auth-field__hint">직원 인증 및 관리자 승인 시 확인합니다.</span>
+            <span className="auth-field__hint">{cardCopy.description}</span>
             {fieldErrors.businessCard && (
               <span className="auth-field__error">{fieldErrors.businessCard}</span>
             )}
@@ -1219,7 +1333,7 @@ export function SignupForm() {
         </section>
 
         <section className="auth-stage">
-          <h2>약관 및 동의</h2>
+          <h2>{consentsCopy.title}</h2>
 
           <label className="auth-check auth-check--all">
             <input
@@ -1231,53 +1345,75 @@ export function SignupForm() {
               onChange={(event) => toggleAllConsent(event.target.checked)}
             />
             <span>
-              <strong>전체 동의</strong>
-              <em>필수 및 선택 항목에 모두 동의합니다.</em>
+              <strong>{consentsCopy.text.allLabel}</strong>
+              <em>{consentsCopy.text.allHelp}</em>
             </span>
           </label>
 
           <div className="auth-consent-list">
-            <label className="auth-check auth-check--row">
-              <input
-                type="checkbox"
-                checked={form.termsConsent}
-                onChange={(event) => update("termsConsent", event.target.checked)}
-              />
-              <span>
-                <em className="auth-check__tag auth-check__tag--required">필수</em>
-                이용약관 동의
-              </span>
-              <span className="auth-check__more" aria-hidden="true">보기</span>
-            </label>
-            <label className="auth-check auth-check--row">
-              <input
-                type="checkbox"
-                checked={form.privacyConsent}
-                onChange={(event) => update("privacyConsent", event.target.checked)}
-              />
-              <span>
-                <em className="auth-check__tag auth-check__tag--required">필수</em>
-                개인정보 수집·이용 동의
-              </span>
-              <span className="auth-check__more" aria-hidden="true">보기</span>
-            </label>
+            <div className="auth-check auth-check--row">
+              <label className="auth-check__control">
+                <input
+                  type="checkbox"
+                  checked={form.termsConsent}
+                  onChange={(event) => update("termsConsent", event.target.checked)}
+                />
+                <span>
+                  <em className="auth-check__tag auth-check__tag--required">
+                    {consentsCopy.text.requiredBadge}
+                  </em>
+                  {consentsCopy.text.termsLabel}
+                </span>
+              </label>
+              <Link
+                className="auth-check__more"
+                href={termsAction?.href ?? "/terms"}
+                onClick={previewMode ? (event) => event.preventDefault() : undefined}
+              >
+                {consentsCopy.text.termsLinkLabel}
+              </Link>
+            </div>
+            <div className="auth-check auth-check--row">
+              <label className="auth-check__control">
+                <input
+                  type="checkbox"
+                  checked={form.privacyConsent}
+                  onChange={(event) => update("privacyConsent", event.target.checked)}
+                />
+                <span>
+                  <em className="auth-check__tag auth-check__tag--required">
+                    {consentsCopy.text.requiredBadge}
+                  </em>
+                  {consentsCopy.text.privacyLabel}
+                </span>
+              </label>
+              <Link
+                className="auth-check__more"
+                href={privacyAction?.href ?? "/privacy"}
+                onClick={previewMode ? (event) => event.preventDefault() : undefined}
+              >
+                {consentsCopy.text.privacyLinkLabel}
+              </Link>
+            </div>
           </div>
 
           <fieldset className="auth-consent-card">
             <legend>
-              <span className="auth-check__tag auth-check__tag--optional">선택</span>
-              마케팅 및 수신 동의
+              <span className="auth-check__tag auth-check__tag--optional">
+                {consentsCopy.text.optionalBadge}
+              </span>
+              {consentsCopy.text.marketingTitle}
             </legend>
             <p className="auth-consent-card__lede">
-              아래 항목은 가입 후 마이페이지에서 언제든 변경할 수 있어요.
+              {consentsCopy.text.marketingHelp}
             </p>
             <div className="auth-consent-card__items">
               {(
                 [
-                  ["marketingConsent", "마케팅 정보 수신"],
-                  ["emailConsent", "이메일 수신"],
-                  ["smsConsent", "문자/SMS 수신"],
-                  ["kakaoConsent", "카카오톡 수신"],
+                  ["marketingConsent", consentsCopy.text.marketingLabel],
+                  ["emailConsent", consentsCopy.text.emailLabel],
+                  ["smsConsent", consentsCopy.text.smsLabel],
+                  ["kakaoConsent", consentsCopy.text.kakaoLabel],
                 ] as const
               ).map(([key, label]) => (
                 <label className="auth-check auth-check--inline" key={key}>
@@ -1300,10 +1436,13 @@ export function SignupForm() {
         </section>
 
         <div className="auth-points-panel">
-          <strong>가입 혜택</strong>
+          <strong>{benefitsCopy.title}</strong>
           <ul>
-            <li>농협 최초 가입 시 전문 상담에 사용할 수 있는 100,000P를 지급합니다.</li>
-            <li>이후 임직원 1인당 10,000P를 지급합니다.</li>
+            {benefitsCopy.items
+              .filter((item) => item.visible && !item.deleted)
+              .map((item) => (
+                <li key={item.id}>{item.title}</li>
+              ))}
           </ul>
         </div>
 
@@ -1314,7 +1453,9 @@ export function SignupForm() {
         )}
 
         <button className="cta cta--solid cta--block" type="submit" disabled={submitting}>
-          {submitting ? "가입 신청 저장 중..." : "가입 신청 완료"}
+          {submitting
+            ? submitCopy.text.submittingLabel
+            : submitCopy.text.submitLabel}
         </button>
     </form>
   );

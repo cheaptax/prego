@@ -8,7 +8,16 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "cms:audit": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms-audit.mjs",
+    "cms:audit:self-test": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms-audit.mjs --self-test",
+    "cms:create": "node scripts/create-cms-feature.mjs",
+    "test": "npm run test:audit-quote && npm run test:cms",
     "test:audit-quote": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/audit-quote/testing/*.test.ts\" \"scripts/audit-quote/rules-emulator.test.mjs\"",
+    "test:cms": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/cms/testing/*.test.ts\" \"scripts/cms/*.test.mjs\"",
+    "test:integration": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/cms/testing/full-lifecycle.test.ts\" \"scripts/cms/audit-quote-lifecycle.test.mjs\"",
+    "test:e2e": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms-e2e.mjs",
+    "test:cms:rules": "firebase emulators:exec --project demo-cms-local --only firestore,storage \"npm run test:cms\"",
+    "cms:bootstrap": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms/bootstrap.ts",
     "smoke:audit-quote-page": "node scripts/smoke-audit-quote-page.mjs",
     "smoke:mvp:integrated": "node scripts/smoke-mvp-integrated.mjs",
     "seed:admin": "node scripts/seed-admin.mjs"
@@ -19,14 +28,17 @@
     "firebase-admin": "^13.8.0",
     "next": "^16.2.4",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/node": "22.10.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.4",
+    "firebase-tools": "^15.24.0",
     "playwright": "^1.59.1",
     "typescript": "5.7.3"
   }

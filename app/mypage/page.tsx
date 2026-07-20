@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { MyPageDashboard } from "@/components/MyPageDashboard";
+import { cmsPageMetadata } from "@/lib/cms/metadata";
+import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 
-export const metadata: Metadata = {
-  title: "마이페이지 · 농협지원센터",
-  description: "내 문의, 답변 공개범위, 농협별 통합 포인트 지갑을 확인합니다.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const bundle = await loadPublishedCmsPage("member.mypage");
+  return cmsPageMetadata(bundle.content, bundle.assetUrls);
+}
 
 type Props = {
   searchParams?: Promise<{
@@ -14,9 +16,10 @@ type Props = {
 
 export default async function MyPage({ searchParams }: Props) {
   const params = await searchParams;
+  const { content } = await loadPublishedCmsPage("member.mypage");
   return (
     <main id="main" className="admin-app">
-      <MyPageDashboard initialTab={params?.tab} />
+      <MyPageDashboard content={content} initialTab={params?.tab} />
     </main>
   );
 }

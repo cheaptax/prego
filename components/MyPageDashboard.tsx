@@ -1,13 +1,17 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
-  getRequestStatusLabel,
   getRequestStatusTone,
   resolveRequestStatus,
   type ResolvedRequestStatus,
@@ -21,25 +25,20 @@ import type {
   PointLedgerRecord,
   UserRecord,
 } from "@/lib/firebase/schema";
+import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
+import { getCmsSection } from "@/lib/cms/runtime";
 
 type State = "loading" | "ready" | "error";
 
 type TabKey = "overview" | "inquiries" | "points" | "profile";
 
-const TABS: { key: TabKey; label: string; description: string }[] = [
-  { key: "overview", label: "Overview", description: "내 활동과 보유 포인트 요약" },
-  {
-    key: "inquiries",
-    label: "Inquiries",
-    description: "내가 등록한 문의와 답변",
-  },
-  { key: "points", label: "Points", description: "농협 지갑 포인트 사용 내역" },
-  { key: "profile", label: "Profile", description: "내 소속과 계정 정보" },
-];
+const TAB_KEYS: TabKey[] = ["overview", "inquiries", "points", "profile"];
 
 function normalizeTab(value?: string | string[]) {
   const tabValue = Array.isArray(value) ? value[0] : value;
-  return TABS.some((item) => item.key === tabValue) ? (tabValue as TabKey) : "overview";
+  return TAB_KEYS.includes(tabValue as TabKey)
+    ? (tabValue as TabKey)
+    : "overview";
 }
 
 type Overview = {
@@ -53,28 +52,78 @@ type Overview = {
   profileIncomplete: boolean;
 };
 
+const PREVIEW_USER_ID = "cms-preview-member";
+const MY_PAGE_PREVIEW_OVERVIEW = {
+  user: {
+    uid: PREVIEW_USER_ID,
+    name: "김농협",
+    email: "member@nonghyup.com",
+    phone: "010-1234-5678",
+    cooperativeName: "샘플농협",
+    cooperativeId: "preview-cooperative",
+    position: "과장",
+    duty: "회계",
+    status: "active",
+    role: "member",
+    createdAt: "2026-07-01T09:00:00.000Z",
+    updatedAt: "2026-07-21T09:00:00.000Z",
+    consents: {
+      terms: true,
+      privacy: true,
+      marketing: true,
+      email: true,
+      sms: false,
+      kakao: false,
+    },
+  },
+  organization: {
+    id: "preview-cooperative",
+    cooperativeName: "샘플농협",
+    walletBalance: 120000,
+    users: [PREVIEW_USER_ID],
+    createdAt: "2026-07-01T09:00:00.000Z",
+    updatedAt: "2026-07-21T09:00:00.000Z",
+  },
+  requests: [
+    {
+      id: "preview-request",
+      uid: PREVIEW_USER_ID,
+      requestNumber: "REQ-20260721-1001",
+      subject: "회계 업무 처리 기준 문의",
+      message: "관리자 미리보기용 문의 내용입니다.",
+      visibility: "ORG_ONLY",
+      status: "ANSWERED",
+      createdAt: "2026-07-20T09:00:00.000Z",
+    },
+  ],
+  answers: [
+    {
+      id: "preview-answer",
+      requestId: "preview-request",
+      body: "관리자 미리보기용 답변입니다.",
+      pointCost: 30000,
+      createdAt: "2026-07-21T09:00:00.000Z",
+    },
+  ],
+  views: [],
+  ratings: [],
+  ledger: [
+    {
+      id: "preview-ledger",
+      event: "first_org_signup",
+      reason: "가입 보너스",
+      points: 100000,
+      balanceAfter: 100000,
+      createdAt: "2026-07-01T09:00:00.000Z",
+    },
+  ],
+  profileIncomplete: false,
+} as unknown as Overview;
+
 type EditableConsentKey = "marketing" | "email" | "sms" | "kakao";
 
-const VISIBILITY_LABELS: Record<string, string> = {
-  PUBLIC: "전체 공개",
-  public: "전체 공개",
-  ORG_ONLY: "농협 공개",
-  nonghyup: "농협 공개",
-  PRIVATE: "비공개",
-  private: "비공개",
-};
-
-const LEDGER_LABELS: Record<string, string> = {
-  first_org_signup: "농협 최초 가입 보너스",
-  user_signup: "회원 가입 적립",
-  answer_view: "답변 열람 사용",
-  manual_adjustment: "수동 조정",
-  admin_adjustment_credit: "운영자 적립",
-  admin_adjustment_debit: "운영자 차감",
-};
-
-function formatDate(value?: string) {
-  if (!value) return "-";
+function formatDate(value: string | undefined, missingValue: string) {
+  if (!value) return missingValue;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("ko-KR", {
@@ -83,8 +132,13 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
-function formatRelative(value: string | undefined, reference: number) {
-  if (!value) return "-";
+function formatRelative(
+  value: string | undefined,
+  reference: number,
+  messages: CmsPageContent["messages"],
+  missingValue: string,
+) {
+  if (!value) return missingValue;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   if (!reference) {
@@ -95,41 +149,123 @@ function formatRelative(value: string | undefined, reference: number) {
   }
   const diff = reference - date.getTime();
   const minutes = Math.round(diff / 60000);
-  if (minutes < 1) return "방금 전";
-  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 1) return messages.relativeNow;
+  if (minutes < 60) {
+    return messages.relativeMinutes.replace("{count}", String(minutes));
+  }
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
+  if (hours < 24) {
+    return messages.relativeHours.replace("{count}", String(hours));
+  }
   const days = Math.round(hours / 24);
-  if (days < 7) return `${days}일 전`;
+  if (days < 7) {
+    return messages.relativeDays.replace("{count}", String(days));
+  }
   return new Intl.DateTimeFormat("ko-KR", {
     month: "short",
     day: "numeric",
   }).format(date);
 }
 
-function StatusPill({ value }: { value: ResolvedRequestStatus }) {
+function preventPreviewLinkNavigation(event: ReactMouseEvent<HTMLElement>) {
+  if ((event.target as HTMLElement).closest("a")) {
+    event.preventDefault();
+  }
+}
+
+function StatusPill({
+  value,
+  section,
+}: {
+  value: ResolvedRequestStatus;
+  section: CmsSection;
+}) {
+  const labels: Record<ResolvedRequestStatus, string> = {
+    SUBMITTED: section.text.statusSubmitted,
+    ANSWERED: section.text.statusAnswered,
+    ANSWER_PUBLISHED: section.text.statusPublished,
+    FOLLOWUP: section.text.statusFollowup,
+    COMPLETED: section.text.statusCompleted,
+  };
   return (
     <span className={`admin-pill admin-pill--${getRequestStatusTone(value)}`}>
       <span className="admin-pill__dot" aria-hidden="true" />
-      {getRequestStatusLabel(value)}
+      {labels[value]}
     </span>
   );
 }
 
-function VisibilityChip({ value }: { value?: string }) {
-  const label = VISIBILITY_LABELS[value ?? ""] ?? value ?? "-";
+function VisibilityChip({
+  value,
+  section,
+}: {
+  value?: string;
+  section: CmsSection;
+}) {
+  const labels: Record<string, string> = {
+    PUBLIC: section.text.visibilityPublic,
+    public: section.text.visibilityPublic,
+    ORG_ONLY: section.text.visibilityOrganization,
+    nonghyup: section.text.visibilityOrganization,
+    PRIVATE: section.text.visibilityPrivate,
+    private: section.text.visibilityPrivate,
+  };
+  const label = labels[value ?? ""] ?? section.text.unknownValue;
   return <span className="admin-chip">{label}</span>;
 }
 
-export function MyPageDashboard({ initialTab }: { initialTab?: string | string[] } = {}) {
+export function MyPageDashboard({
+  content,
+  initialTab,
+  previewMode = false,
+}: {
+  content: CmsPageContent;
+  initialTab?: string | string[];
+  previewMode?: boolean;
+}) {
   const router = useRouter();
-  const [state, setState] = useState<State>("loading");
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const navigationCopy = getCmsSection(
+    content,
+    "member.mypage",
+    "navigation",
+  );
+  const overviewCopy = getCmsSection(content, "member.mypage", "overview");
+  const inquiriesCopy = getCmsSection(content, "member.mypage", "inquiries");
+  const pointsCopy = getCmsSection(content, "member.mypage", "points");
+  const profileCopy = getCmsSection(content, "member.mypage", "profile");
+  const messages = content.messages;
+  const tabs = navigationCopy.items.flatMap((item) =>
+    TAB_KEYS.includes(item.id as TabKey) && item.visible && !item.deleted
+      ? [
+          {
+            key: item.id as TabKey,
+            label: item.title,
+            description: item.description ?? "",
+          },
+        ]
+      : [],
+  );
+  const ledgerLabels: Record<string, string> = {
+    first_org_signup: overviewCopy.text.ledgerFirstSignup,
+    user_signup: overviewCopy.text.ledgerUserSignup,
+    answer_view: overviewCopy.text.ledgerAnswerView,
+    manual_adjustment: overviewCopy.text.ledgerManual,
+    admin_adjustment_credit: overviewCopy.text.ledgerAdminCredit,
+    admin_adjustment_debit: overviewCopy.text.ledgerAdminDebit,
+  };
+  const [state, setState] = useState<State>(previewMode ? "ready" : "loading");
+  const [currentUser, setCurrentUser] = useState<User | null>(
+    previewMode ? ({ uid: PREVIEW_USER_ID } as User) : null,
+  );
+  const [overview, setOverview] = useState<Overview | null>(
+    previewMode ? MY_PAGE_PREVIEW_OVERVIEW : null,
+  );
   const [error, setError] = useState("");
   const [tab, setTab] = useState<TabKey>(() => normalizeTab(initialTab));
   const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    previewMode ? new Date("2026-07-21T09:00:00.000Z") : null,
+  );
   const [savingConsentKey, setSavingConsentKey] = useState<EditableConsentKey | null>(null);
   const [actionMessage, setActionMessage] = useState<{
     tone: "info" | "success" | "error";
@@ -138,7 +274,7 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
 
   const fetchOverview = useCallback(async () => {
     const user = getFirebaseAuth().currentUser;
-    if (!user) throw new Error("로그인이 필요합니다.");
+    if (!user) throw new Error(messages.loginRequired);
     const idToken = await user.getIdToken();
     const res = await fetch("/api/me/overview", {
       headers: { authorization: `Bearer ${idToken}` },
@@ -149,7 +285,7 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
       profileIncomplete?: boolean;
     } & Partial<Overview>;
     if (!res.ok || !data.ok || !data.user) {
-      throw new Error(data.error ?? "마이페이지 데이터를 불러오지 못했습니다.");
+      throw new Error(data.error ?? messages.loadFailed);
     }
     setOverview({
       user: data.user,
@@ -162,25 +298,32 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
       profileIncomplete: Boolean(data.profileIncomplete),
     });
     setLastUpdated(new Date());
-  }, []);
+  }, [messages.loadFailed, messages.loginRequired]);
 
   const refreshOverview = useCallback(async () => {
+    if (previewMode) return;
     setRefreshing(true);
     try {
       await fetchOverview();
-      setActionMessage({ tone: "info", text: "데이터를 새로 불러왔습니다." });
+      setActionMessage({ tone: "info", text: messages.refreshed });
     } catch (err) {
       setActionMessage({
         tone: "error",
         text:
-          err instanceof Error ? err.message : "새로고침에 실패했습니다.",
+          err instanceof Error ? err.message : messages.refreshFailed,
       });
     } finally {
       setRefreshing(false);
     }
-  }, [fetchOverview]);
+  }, [
+    fetchOverview,
+    messages.refreshed,
+    messages.refreshFailed,
+    previewMode,
+  ]);
 
   useEffect(() => {
+    if (previewMode) return;
     const auth = getFirebaseAuth();
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -198,16 +341,20 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
         }
         setState("error");
         setError(
-          err instanceof FirebaseError
-            ? `${err.code}: ${err.message}`
-            : err instanceof Error
-              ? err.message
-              : "마이페이지 데이터를 불러오지 못했습니다."
+          err instanceof Error && err.message !== "approval_pending"
+            ? messages.loadFailed
+            : messages.genericError,
         );
       }
     });
     return () => unsubscribe();
-  }, [router, fetchOverview]);
+  }, [
+    router,
+    fetchOverview,
+    messages.genericError,
+    messages.loadFailed,
+    previewMode,
+  ]);
 
   const referenceTime = lastUpdated?.getTime() ?? 0;
 
@@ -268,21 +415,26 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
   );
 
   const handleLogout = async () => {
+    if (previewMode) return;
     try {
       await signOut(getFirebaseAuth());
       router.push("/login");
-    } catch (err) {
+    } catch {
       setActionMessage({
         tone: "error",
-        text: err instanceof Error ? err.message : "로그아웃에 실패했습니다.",
+        text: messages.logoutFailed,
       });
     }
   };
 
   const updateConsent = async (key: EditableConsentKey, value: boolean) => {
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user) {
-      setActionMessage({ tone: "error", text: "로그인 후 동의 항목을 변경할 수 있습니다." });
+      setActionMessage({
+        tone: "error",
+        text: messages.consentLoginRequired,
+      });
       return;
     }
 
@@ -321,15 +473,12 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             }
           : current
       );
-      setActionMessage({ tone: "success", text: "수신 동의 항목을 저장했습니다." });
+      setActionMessage({ tone: "success", text: messages.consentSaved });
       setLastUpdated(new Date());
-    } catch (err) {
+    } catch {
       setActionMessage({
         tone: "error",
-        text:
-          err instanceof Error
-            ? "동의 항목을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
-            : "동의 항목을 저장하지 못했습니다.",
+        text: messages.consentSaveFailed,
       });
     } finally {
       setSavingConsentKey(null);
@@ -341,8 +490,8 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
       <div className="admin-state">
         <div className="admin-state__card">
           <div className="admin-state__spinner" aria-hidden="true" />
-          <h2>마이페이지를 준비하고 있습니다</h2>
-          <p>로그인 정보와 농협 지갑을 확인하고 있습니다.</p>
+          <h2>{messages.loading}</h2>
+          <p>{messages.loadingDescription}</p>
         </div>
       </div>
     );
@@ -352,45 +501,52 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
     return (
       <div className="admin-state">
         <div className="admin-state__card admin-state__card--error">
-          <h2>마이페이지를 불러오지 못했습니다</h2>
-          <p>{error || "잠시 후 다시 시도해 주세요."}</p>
+          <h2>{messages.loadFailed}</h2>
+          <p>{error || messages.retryDescription}</p>
           <button
             type="button"
             className="admin-btn admin-btn--primary"
             onClick={() => void refreshOverview()}
           >
-            다시 시도
+            {messages.retryLabel}
           </button>
           <button type="button" className="admin-btn" onClick={handleLogout}>
-            다른 계정으로 로그인
+            {messages.otherLoginLabel}
           </button>
         </div>
       </div>
     );
   }
 
-  const activeTab = TABS.find((item) => item.key === tab);
-  const topbarTitle = tab === "inquiries" ? "문의 내역" : activeTab?.label;
+  const activeTab = tabs.find((item) => item.key === tab);
+  const topbarTitle =
+    tab === "inquiries" ? overviewCopy.text.inquiriesTopbarTitle : activeTab?.label;
   const topbarDescription =
     tab === "inquiries"
-      ? "등록한 문의와 답변 내역을 상세하게 확인할 수 있습니다."
+      ? overviewCopy.text.inquiriesTopbarDescription
       : activeTab?.description;
 
   return (
-    <div className="admin-shell">
-      <aside className="admin-sidebar" aria-label="마이페이지 내비게이션">
+    <div
+      className="admin-shell"
+      onClickCapture={previewMode ? preventPreviewLinkNavigation : undefined}
+    >
+      <aside
+        className="admin-sidebar"
+        aria-label={navigationCopy.text.navigationAriaLabel}
+      >
         <div className="admin-brand">
           <div className="admin-brand__mark" aria-hidden="true">
-            N
+            {navigationCopy.text.brandMark}
           </div>
           <div className="admin-brand__meta">
-            <strong>농협지원센터</strong>
-            <span>My Page</span>
+            <strong>{navigationCopy.text.serviceName}</strong>
+            <span>{navigationCopy.text.brandSubtitle}</span>
           </div>
         </div>
 
         <nav className="admin-nav">
-          {TABS.map((item) => (
+          {tabs.map((item) => (
             <button
               key={item.key}
               type="button"
@@ -406,7 +562,9 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
         <div className="admin-sidebar__footer">
           <div className="admin-user">
             <div className="admin-user__avatar" aria-hidden="true">
-              {(overview.user.name ?? overview.user.email ?? "M")
+              {(overview.user.name ??
+                overview.user.email ??
+                navigationCopy.text.avatarFallback)
                 .slice(0, 1)
                 .toUpperCase()}
             </div>
@@ -414,29 +572,33 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
               <strong>
                 {overview.user.name?.trim() ||
                   overview.user.email ||
-                  "회원"}
+                  navigationCopy.text.fallbackMemberName}
               </strong>
               <span>
                 {overview.user.cooperativeName ??
                   (overview.profileIncomplete
-                    ? "프로필 미완료"
-                    : "소속 확인 중")}
+                    ? navigationCopy.text.profileIncomplete
+                    : navigationCopy.text.organizationPending)}
               </span>
             </div>
           </div>
           <button
             className="admin-btn admin-btn--ghost admin-btn--block"
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => {
+              if (!previewMode) router.push("/");
+            }}
+            disabled={previewMode}
           >
-            홈으로
+            {navigationCopy.text.homeLabel}
           </button>
           <button
             className="admin-btn admin-btn--ghost admin-btn--block"
             type="button"
             onClick={handleLogout}
+            disabled={previewMode}
           >
-            로그아웃
+            {navigationCopy.text.logoutLabel}
           </button>
         </div>
       </aside>
@@ -444,41 +606,49 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
       <section className="admin-main">
         <header className="admin-topbar">
           <div>
-            <p className="admin-topbar__crumb">My page / {activeTab?.label}</p>
+            <p className="admin-topbar__crumb">
+              {navigationCopy.text.breadcrumbPrefix} / {activeTab?.label}
+            </p>
             <h1 className="admin-topbar__title">{topbarTitle}</h1>
             <p className="admin-topbar__hint">{topbarDescription}</p>
           </div>
           <div className="admin-topbar__actions">
             <span className="admin-topbar__updated">
-              마지막 동기화{" "}
+              {navigationCopy.text.lastSyncPrefix}{" "}
               {lastUpdated
-                ? formatRelative(lastUpdated.toISOString(), referenceTime)
-                : "-"}
+                ? formatRelative(
+                    lastUpdated.toISOString(),
+                    referenceTime,
+                    messages,
+                    navigationCopy.text.missingValue,
+                  )
+                : navigationCopy.text.missingValue}
             </span>
             <button
               type="button"
               className="admin-btn"
               onClick={() => void refreshOverview()}
-              disabled={refreshing}
+              disabled={previewMode || refreshing}
             >
-              {refreshing ? "새로고침 중..." : "새로고침"}
+              {refreshing
+                ? navigationCopy.text.refreshingLabel
+                : navigationCopy.text.refreshLabel}
             </button>
             <Link className="admin-btn admin-btn--primary" href="/consult">
-              + 새 문의 등록
+              {navigationCopy.text.newInquiryLabel}
             </Link>
           </div>
         </header>
 
         {overview.profileIncomplete && (
           <div className="admin-toast admin-toast--info" role="status">
-            소속 농협 정보를 등록하지 않았어요. 회원가입을 마무리하면
-            농협 통합 지갑과 답변 열람을 사용할 수 있어요.
+            {navigationCopy.text.incompleteNotice}
             <Link
               href="/signup"
               className="admin-btn admin-btn--ghost admin-btn--sm"
               style={{ marginLeft: "auto" }}
             >
-              회원가입 이어가기
+              {navigationCopy.text.continueSignupLabel}
             </Link>
           </div>
         )}
@@ -492,7 +662,7 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <button
               type="button"
               className="admin-toast__close"
-              aria-label="닫기"
+              aria-label={navigationCopy.text.closeLabel}
               onClick={() => setActionMessage(null)}
             >
               ×
@@ -505,74 +675,88 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-kpi-grid">
               <article className="admin-kpi admin-kpi--blue">
                 <header>
-                  <span>보유 포인트</span>
+                  <span>{overviewCopy.text.balanceLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {walletBalance.toLocaleString()}
-                  <span className="admin-kpi__suffix">P</span>
+                  <span className="admin-kpi__suffix">
+                    {navigationCopy.text.pointUnit}
+                  </span>
                 </p>
                 <p className="admin-kpi__helper">
                   {overview.organization?.cooperativeName ??
                     overview.user.cooperativeName ??
-                    "소속 농협"}{" "}
-                  통합 지갑
+                    overviewCopy.text.organizationFallback}{" "}
+                  {overviewCopy.text.walletSuffix}
                 </p>
               </article>
               <article className="admin-kpi admin-kpi--amber">
                 <header>
-                  <span>등록 문의</span>
+                  <span>{overviewCopy.text.inquiryCountLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {myRequests.length.toLocaleString()}
-                  <span className="admin-kpi__suffix">건</span>
+                  <span className="admin-kpi__suffix">
+                    {overviewCopy.text.countSuffix}
+                  </span>
                 </p>
-                <p className="admin-kpi__helper">내가 등록한 전체 문의</p>
+                <p className="admin-kpi__helper">
+                  {overviewCopy.text.inquiryCountHelp}
+                </p>
               </article>
               <article className="admin-kpi admin-kpi--green">
                 <header>
-                  <span>미열람 답변</span>
+                  <span>{overviewCopy.text.unreadAnswersLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {waitingAnswerCount.toLocaleString()}
-                  <span className="admin-kpi__suffix">건</span>
+                  <span className="admin-kpi__suffix">
+                    {overviewCopy.text.countSuffix}
+                  </span>
                 </p>
-                <p className="admin-kpi__helper">아직 확인하지 않은 답변</p>
+                <p className="admin-kpi__helper">
+                  {overviewCopy.text.unreadAnswersHelp}
+                </p>
               </article>
               <article className="admin-kpi admin-kpi--violet">
                 <header>
-                  <span>확인한 답변</span>
+                  <span>{overviewCopy.text.viewedAnswersLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {viewedCount.toLocaleString()}
-                  <span className="admin-kpi__suffix">건</span>
+                  <span className="admin-kpi__suffix">
+                    {overviewCopy.text.countSuffix}
+                  </span>
                 </p>
-                <p className="admin-kpi__helper">열람을 완료한 답변</p>
+                <p className="admin-kpi__helper">
+                  {overviewCopy.text.viewedAnswersHelp}
+                </p>
               </article>
             </div>
 
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>최근 내 문의</h2>
-                  <p>최근 등록한 문의 5건입니다.</p>
+                  <h2>{overviewCopy.text.recentInquiriesTitle}</h2>
+                  <p>{overviewCopy.text.recentInquiriesDescription}</p>
                 </div>
                 <button
                   type="button"
                   className="admin-btn admin-btn--ghost admin-btn--sm"
                   onClick={() => setTab("inquiries")}
                 >
-                  전체 보기
+                  {overviewCopy.text.viewAllLabel}
                 </button>
               </header>
               <div className="admin-table-wrap">
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>문의번호</th>
-                      <th>제목</th>
-                      <th>공개범위</th>
-                      <th>상태</th>
-                      <th>등록일</th>
+                      <th>{overviewCopy.text.requestNumberHeading}</th>
+                      <th>{overviewCopy.text.subjectHeading}</th>
+                      <th>{overviewCopy.text.visibilityHeading}</th>
+                      <th>{overviewCopy.text.statusHeading}</th>
+                      <th>{overviewCopy.text.createdHeading}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -594,13 +778,24 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                           </Link>
                         </td>
                         <td>
-                          <VisibilityChip value={request.visibility} />
+                          <VisibilityChip
+                            value={request.visibility}
+                            section={overviewCopy}
+                          />
                         </td>
                         <td>
-                          <StatusPill value={resolvedStatus} />
+                          <StatusPill
+                            value={resolvedStatus}
+                            section={overviewCopy}
+                          />
                         </td>
                         <td>
-                          {formatRelative(request.createdAt, referenceTime)}
+                          {formatRelative(
+                            request.createdAt,
+                            referenceTime,
+                            messages,
+                            navigationCopy.text.missingValue,
+                          )}
                         </td>
                       </tr>
                     );
@@ -608,8 +803,10 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                     {myRequests.length === 0 && (
                       <tr>
                         <td colSpan={5} className="admin-table__empty">
-                          등록한 문의가 아직 없습니다.{" "}
-                          <Link href="/consult">새 문의를 작성해 보세요.</Link>
+                          {content.messages.emptyInquiries}{" "}
+                          <Link href="/consult">
+                            {overviewCopy.text.emptyInquiriesLink}
+                          </Link>
                         </td>
                       </tr>
                     )}
@@ -621,15 +818,15 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-card">
               <header className="admin-card__head">
                 <div>
-                  <h2>최근 포인트 이력</h2>
-                  <p>최근 적립과 사용 내역 5건입니다.</p>
+                  <h2>{overviewCopy.text.recentPointsTitle}</h2>
+                  <p>{overviewCopy.text.recentPointsDescription}</p>
                 </div>
                 <button
                   type="button"
                   className="admin-btn admin-btn--ghost admin-btn--sm"
                   onClick={() => setTab("points")}
                 >
-                  전체 보기
+                  {overviewCopy.text.viewAllLabel}
                 </button>
               </header>
               <ul className="admin-feed">
@@ -637,11 +834,16 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                   <li key={entry.id} className="admin-feed__item">
                     <div>
                       <strong>
-                        {LEDGER_LABELS[entry.event] ??
+                        {ledgerLabels[entry.event] ??
                           entry.reason ??
-                          "포인트 변동"}
+                          overviewCopy.text.ledgerFallback}
                       </strong>
-                      <span>{formatDate(entry.createdAt)}</span>
+                      <span>
+                        {formatDate(
+                          entry.createdAt,
+                          navigationCopy.text.missingValue,
+                        )}
+                      </span>
                     </div>
                     <em
                       className={
@@ -651,13 +853,14 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                       }
                     >
                       {entry.points > 0 ? "+" : ""}
-                      {entry.points.toLocaleString()}P
+                      {entry.points.toLocaleString()}
+                      {navigationCopy.text.pointUnit}
                     </em>
                   </li>
                 ))}
                 {sortedLedger.length === 0 && (
                   <li className="admin-feed__empty">
-                    포인트 변동 내역이 아직 없습니다.
+                    {content.messages.emptyPoints}
                   </li>
                 )}
               </ul>
@@ -670,27 +873,27 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>문의 내역</h2>
-                  <p>등록한 문의와 답변 내역을 상세하게 확인할 수 있습니다.</p>
+                  <h2>{inquiriesCopy.title}</h2>
+                  <p>{inquiriesCopy.description}</p>
                 </div>
                 <Link
                   className="admin-btn admin-btn--primary admin-btn--sm"
                   href="/consult"
                 >
-                  + 새 문의 등록
+                  {inquiriesCopy.text.newInquiryLabel}
                 </Link>
               </header>
               <div className="admin-table-wrap">
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>문의번호</th>
-                      <th>제목</th>
-                      <th>공개범위</th>
-                      <th>상태</th>
-                      <th>답변</th>
-                      <th>등록일</th>
-                      <th></th>
+                      <th>{inquiriesCopy.text.requestNumberHeading}</th>
+                      <th>{inquiriesCopy.text.subjectHeading}</th>
+                      <th>{inquiriesCopy.text.visibilityHeading}</th>
+                      <th>{inquiriesCopy.text.statusHeading}</th>
+                      <th>{inquiriesCopy.text.answerHeading}</th>
+                      <th>{inquiriesCopy.text.createdHeading}</th>
+                      <th aria-label={inquiriesCopy.text.actionsHeading} />
                     </tr>
                   </thead>
                   <tbody>
@@ -714,32 +917,47 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                             </Link>
                           </td>
                           <td>
-                            <VisibilityChip value={request.visibility} />
+                            <VisibilityChip
+                              value={request.visibility}
+                              section={overviewCopy}
+                            />
                           </td>
                           <td>
-                            <StatusPill value={resolvedStatus} />
+                            <StatusPill
+                              value={resolvedStatus}
+                              section={overviewCopy}
+                            />
                           </td>
                           <td>
                             {answer ? (
                               <span className="admin-chip">
-                                {viewed ? "확인 완료" : "답변 확인"} ·{" "}
-                                {answer.pointCost.toLocaleString()}P
+                                {viewed
+                                  ? inquiriesCopy.text.viewedAnswerLabel
+                                  : inquiriesCopy.text.viewAnswerLabel}{" "}
+                                ·{" "}
+                                {answer.pointCost.toLocaleString()}
+                                {navigationCopy.text.pointUnit}
                               </span>
                             ) : (
                               <span className="admin-chip admin-chip--muted">
-                                답변 대기
+                                {inquiriesCopy.text.answerPendingLabel}
                               </span>
                             )}
                           </td>
                           <td>
-                            {formatRelative(request.createdAt, referenceTime)}
+                            {formatRelative(
+                              request.createdAt,
+                              referenceTime,
+                              messages,
+                              navigationCopy.text.missingValue,
+                            )}
                           </td>
                           <td className="admin-table__actions">
                             <Link
                               className="admin-btn admin-btn--detail"
                               href={`/mypage/requests/${request.id}`}
                             >
-                              상세 보기
+                              {inquiriesCopy.text.detailLabel}
                             </Link>
                           </td>
                         </tr>
@@ -748,8 +966,10 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                     {myRequests.length === 0 && (
                       <tr>
                         <td colSpan={7} className="admin-table__empty">
-                          등록한 문의가 아직 없습니다.{" "}
-                          <Link href="/consult">새 문의를 작성해 보세요.</Link>
+                          {content.messages.emptyInquiries}{" "}
+                          <Link href="/consult">
+                            {inquiriesCopy.text.emptyLinkLabel}
+                          </Link>
                         </td>
                       </tr>
                     )}
@@ -765,93 +985,115 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-kpi-grid">
               <article className="admin-kpi admin-kpi--blue">
                 <header>
-                  <span>현재 잔액</span>
+                  <span>{pointsCopy.text.balanceLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {walletBalance.toLocaleString()}
-                  <span className="admin-kpi__suffix">P</span>
+                  <span className="admin-kpi__suffix">
+                    {navigationCopy.text.pointUnit}
+                  </span>
                 </p>
                 <p className="admin-kpi__helper">
                   {overview.organization?.cooperativeName ??
                     overview.user.cooperativeName ??
-                    "소속 농협"}{" "}
-                  통합 지갑
+                    overviewCopy.text.organizationFallback}{" "}
+                  {pointsCopy.text.walletSuffix}
                 </p>
               </article>
               <article className="admin-kpi admin-kpi--amber">
                 <header>
-                  <span>총 적립 포인트</span>
+                  <span>{pointsCopy.text.earnedLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {earnedPoints.toLocaleString()}
-                  <span className="admin-kpi__suffix">P</span>
+                  <span className="admin-kpi__suffix">
+                    {navigationCopy.text.pointUnit}
+                  </span>
                 </p>
-                <p className="admin-kpi__helper">가입 보너스와 운영자 적립 포함</p>
+                <p className="admin-kpi__helper">{pointsCopy.text.earnedHelp}</p>
               </article>
               <article className="admin-kpi admin-kpi--green">
                 <header>
-                  <span>총 사용 포인트</span>
+                  <span>{pointsCopy.text.usedLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {usedPoints.toLocaleString()}
-                  <span className="admin-kpi__suffix">P</span>
+                  <span className="admin-kpi__suffix">
+                    {navigationCopy.text.pointUnit}
+                  </span>
                 </p>
-                <p className="admin-kpi__helper">답변 열람과 운영자 차감 포함</p>
+                <p className="admin-kpi__helper">{pointsCopy.text.usedHelp}</p>
               </article>
               <article className="admin-kpi admin-kpi--violet">
                 <header>
-                  <span>포인트 이력</span>
+                  <span>{pointsCopy.text.countLabel}</span>
                 </header>
                 <p className="admin-kpi__value">
                   {sortedLedger.length.toLocaleString()}
-                  <span className="admin-kpi__suffix">건</span>
+                  <span className="admin-kpi__suffix">
+                    {overviewCopy.text.countSuffix}
+                  </span>
                 </p>
-                <p className="admin-kpi__helper">전체 포인트 내역 기준</p>
+                <p className="admin-kpi__helper">{pointsCopy.text.countHelp}</p>
               </article>
             </div>
 
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>포인트 안내</h2>
-                  <p>농협 통합 지갑 포인트는 상담 답변을 열람할 때 사용됩니다.</p>
+                  <h2>{pointsCopy.text.guideTitle}</h2>
+                  <p>{pointsCopy.text.guideDescription}</p>
                 </div>
               </header>
               <ul className="admin-info-list">
-                <li>최초 승인 시 농협 지갑에 가입 보너스가 적립됩니다.</li>
-                <li>답변을 처음 열람할 때만 포인트가 차감되고, 다시 보기는 중복 차감되지 않습니다.</li>
-                <li>포인트가 부족하면 운영자에게 충전 또는 조정을 요청해 주세요.</li>
+                {pointsCopy.items
+                  .filter((item) => item.visible && !item.deleted)
+                  .map((item) => (
+                    <li key={item.id}>{item.title}</li>
+                  ))}
               </ul>
             </div>
 
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>포인트 사용 내역</h2>
-                  <p>적립과 사용 내역을 시간 순으로 보여드려요.</p>
+                  <h2>{pointsCopy.text.historyTitle}</h2>
+                  <p>{pointsCopy.text.historyDescription}</p>
                 </div>
               </header>
               <div className="admin-table-wrap">
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>일시</th>
-                      <th>이벤트</th>
-                      <th>설명</th>
-                      <th style={{ textAlign: "right" }}>변동</th>
-                      <th style={{ textAlign: "right" }}>잔액</th>
+                      <th>{pointsCopy.text.dateHeading}</th>
+                      <th>{pointsCopy.text.eventHeading}</th>
+                      <th>{pointsCopy.text.descriptionHeading}</th>
+                      <th style={{ textAlign: "right" }}>
+                        {pointsCopy.text.changeHeading}
+                      </th>
+                      <th style={{ textAlign: "right" }}>
+                        {pointsCopy.text.balanceHeading}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedLedger.map((entry) => (
                       <tr key={entry.id}>
-                        <td>{formatDate(entry.createdAt)}</td>
+                        <td>
+                          {formatDate(
+                            entry.createdAt,
+                            navigationCopy.text.missingValue,
+                          )}
+                        </td>
                         <td>
                           <span className="admin-chip">
-                            {LEDGER_LABELS[entry.event] ?? entry.event}
+                            {ledgerLabels[entry.event] ??
+                              overviewCopy.text.ledgerFallback}
                           </span>
                         </td>
-                        <td>{entry.reason ?? "-"}</td>
+                        <td>
+                          {entry.reason ?? navigationCopy.text.missingValue}
+                        </td>
                         <td
                           style={{ textAlign: "right" }}
                           className={
@@ -863,17 +1105,19 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                           }
                         >
                           {entry.points > 0 ? "+" : ""}
-                          {entry.points.toLocaleString()}P
+                          {entry.points.toLocaleString()}
+                          {navigationCopy.text.pointUnit}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          {(entry.balanceAfter ?? 0).toLocaleString()}P
+                          {(entry.balanceAfter ?? 0).toLocaleString()}
+                          {navigationCopy.text.pointUnit}
                         </td>
                       </tr>
                     ))}
                     {sortedLedger.length === 0 && (
                       <tr>
                         <td colSpan={5} className="admin-table__empty">
-                          포인트 변동 내역이 아직 없습니다.
+                          {content.messages.emptyPoints}
                         </td>
                       </tr>
                     )}
@@ -889,54 +1133,73 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-card">
               <header className="admin-card__head">
                 <div>
-                  <h2>내 정보</h2>
-                  <p>회원가입 정보와 소속 농협을 확인할 수 있어요.</p>
+                  <h2>{profileCopy.title}</h2>
+                  <p>{profileCopy.description}</p>
                 </div>
               </header>
               <dl className="admin-define">
                 <div>
-                  <dt>이름</dt>
-                  <dd>{overview.user.name?.trim() || "-"}</dd>
+                  <dt>{profileCopy.text.nameLabel}</dt>
+                  <dd>
+                    {overview.user.name?.trim() ||
+                      navigationCopy.text.missingValue}
+                  </dd>
                 </div>
                 <div>
-                  <dt>이메일</dt>
-                  <dd>{overview.user.email || "-"}</dd>
+                  <dt>{profileCopy.text.emailLabel}</dt>
+                  <dd>
+                    {overview.user.email || navigationCopy.text.missingValue}
+                  </dd>
                 </div>
                 <div>
-                  <dt>연락처</dt>
-                  <dd>{overview.user.phone?.trim() || "-"}</dd>
+                  <dt>{profileCopy.text.phoneLabel}</dt>
+                  <dd>
+                    {overview.user.phone?.trim() ||
+                      navigationCopy.text.missingValue}
+                  </dd>
                 </div>
                 <div>
-                  <dt>소속 농협</dt>
+                  <dt>{profileCopy.text.organizationLabel}</dt>
                   <dd>
                     {overview.user.cooperativeName ??
                       overview.user.manualCooperativeName ??
                       (overview.profileIncomplete
-                        ? "등록되지 않음"
-                        : "확인 중")}
+                        ? profileCopy.text.organizationMissing
+                        : profileCopy.text.organizationPending)}
                   </dd>
                 </div>
                 <div>
-                  <dt>직책</dt>
-                  <dd>{overview.user.position?.trim() || "-"}</dd>
+                  <dt>{profileCopy.text.positionLabel}</dt>
+                  <dd>
+                    {overview.user.position?.trim() ||
+                      navigationCopy.text.missingValue}
+                  </dd>
                 </div>
                 <div>
-                  <dt>담당 업무</dt>
-                  <dd>{overview.user.duty?.trim() || "-"}</dd>
+                  <dt>{profileCopy.text.dutyLabel}</dt>
+                  <dd>
+                    {overview.user.duty?.trim() ||
+                      navigationCopy.text.missingValue}
+                  </dd>
                 </div>
                 <div>
-                  <dt>가입일</dt>
-                  <dd>{formatDate(overview.user.createdAt)}</dd>
+                  <dt>{profileCopy.text.joinedLabel}</dt>
+                  <dd>
+                    {formatDate(
+                      overview.user.createdAt,
+                      navigationCopy.text.missingValue,
+                    )}
+                  </dd>
                 </div>
                 <div>
-                  <dt>명함 첨부</dt>
+                  <dt>{profileCopy.text.businessCardLabel}</dt>
                   <dd>
                     {overview.user.businessCardUrl ? (
                       <a href={overview.user.businessCardUrl} target="_blank" rel="noreferrer">
-                        첨부 파일 보기
+                        {profileCopy.text.businessCardView}
                       </a>
                     ) : (
-                      "첨부 없음"
+                      profileCopy.text.businessCardEmpty
                     )}
                   </dd>
                 </div>
@@ -946,42 +1209,64 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-card">
               <header className="admin-card__head">
                 <div>
-                  <h2>소속 농협 지갑</h2>
-                  <p>회원가입으로 연결된 농협 통합 지갑 정보입니다.</p>
+                  <h2>{profileCopy.text.walletTitle}</h2>
+                  <p>{profileCopy.text.walletDescription}</p>
                 </div>
               </header>
               <dl className="admin-define">
                 <div>
-                  <dt>농협명</dt>
+                  <dt>{profileCopy.text.walletOrganizationLabel}</dt>
                   <dd>
                     {overview.organization?.cooperativeName ??
                       overview.user.cooperativeName ??
-                      "-"}
+                      navigationCopy.text.missingValue}
                   </dd>
                 </div>
                 <div>
-                  <dt>지갑 잔액</dt>
-                  <dd>{walletBalance.toLocaleString()}P</dd>
+                  <dt>{profileCopy.text.walletBalanceLabel}</dt>
+                  <dd>
+                    {walletBalance.toLocaleString()}
+                    {navigationCopy.text.pointUnit}
+                  </dd>
                 </div>
                 <div>
-                  <dt>누적 적립</dt>
-                  <dd>{earnedPoints.toLocaleString()}P</dd>
+                  <dt>{profileCopy.text.walletEarnedLabel}</dt>
+                  <dd>
+                    {earnedPoints.toLocaleString()}
+                    {navigationCopy.text.pointUnit}
+                  </dd>
                 </div>
                 <div>
-                  <dt>누적 사용</dt>
-                  <dd>{usedPoints.toLocaleString()}P</dd>
+                  <dt>{profileCopy.text.walletUsedLabel}</dt>
+                  <dd>
+                    {usedPoints.toLocaleString()}
+                    {navigationCopy.text.pointUnit}
+                  </dd>
                 </div>
                 <div>
-                  <dt>조직 회원 수</dt>
-                  <dd>{overview.organization?.users?.length ?? 0}명</dd>
+                  <dt>{profileCopy.text.walletMemberCountLabel}</dt>
+                  <dd>
+                    {overview.organization?.users?.length ?? 0}
+                    {profileCopy.text.memberSuffix}
+                  </dd>
                 </div>
                 <div>
-                  <dt>조직 생성일</dt>
-                  <dd>{formatDate(overview.organization?.createdAt)}</dd>
+                  <dt>{profileCopy.text.walletCreatedLabel}</dt>
+                  <dd>
+                    {formatDate(
+                      overview.organization?.createdAt,
+                      navigationCopy.text.missingValue,
+                    )}
+                  </dd>
                 </div>
                 <div>
-                  <dt>최근 업데이트</dt>
-                  <dd>{formatDate(overview.organization?.updatedAt)}</dd>
+                  <dt>{profileCopy.text.walletUpdatedLabel}</dt>
+                  <dd>
+                    {formatDate(
+                      overview.organization?.updatedAt,
+                      navigationCopy.text.missingValue,
+                    )}
+                  </dd>
                 </div>
               </dl>
             </div>
@@ -989,17 +1274,22 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>계정 동의 항목</h2>
-                  <p>회원가입 시 동의한 항목을 확인하고, 선택 수신 항목은 토글로 변경할 수 있습니다.</p>
+                  <h2>{profileCopy.text.consentsTitle}</h2>
+                  <p>{profileCopy.text.consentsDescription}</p>
                 </div>
               </header>
               <div className="admin-consent-list">
                 <div className="admin-consent-group">
-                  <h3 className="admin-consent-group__title">필수 동의</h3>
+                  <h3 className="admin-consent-group__title">
+                    {profileCopy.text.requiredConsentsTitle}
+                  </h3>
                   {[
-                    { label: "이용약관", value: overview.user.consents?.terms },
                     {
-                      label: "개인정보 수집·이용",
+                      label: profileCopy.text.termsLabel,
+                      value: overview.user.consents?.terms,
+                    },
+                    {
+                      label: profileCopy.text.privacyLabel,
                       value: overview.user.consents?.privacy,
                     },
                   ].map((item) => (
@@ -1013,23 +1303,28 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                         {item.value ? "✓" : "·"}
                       </span>
                       <strong>{item.label}</strong>
-                      <em>{item.value ? "동의" : "미동의"}</em>
+                      <em>
+                        {item.value
+                          ? profileCopy.text.agreedLabel
+                          : profileCopy.text.disagreedLabel}
+                      </em>
                     </div>
                   ))}
                 </div>
 
                 <div className="admin-consent-group">
-                  <h3 className="admin-consent-group__title">선택 수신 동의</h3>
+                  <h3 className="admin-consent-group__title">
+                    {profileCopy.text.optionalConsentsTitle}
+                  </h3>
                   <p className="admin-consent-group__hint">
-                    마케팅·이메일·SMS·카카오 알림 수신 여부를 직접 변경할 수
-                    있습니다.
+                    {profileCopy.text.optionalConsentsDescription}
                   </p>
                   {(
                     [
-                      ["marketing", "마케팅 정보 수신"],
-                      ["email", "이메일 수신"],
-                      ["sms", "SMS 수신"],
-                      ["kakao", "카카오 알림 수신"],
+                      ["marketing", profileCopy.text.marketingLabel],
+                      ["email", profileCopy.text.consentEmailLabel],
+                      ["sms", profileCopy.text.smsLabel],
+                      ["kakao", profileCopy.text.kakaoLabel],
                     ] as const
                   ).map(([key, label]) => {
                     const checked = Boolean(overview.user.consents?.[key]);
@@ -1048,14 +1343,24 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
                         <input
                           type="checkbox"
                           checked={checked}
-                          disabled={saving}
-                          aria-label={`${label} ${checked ? "동의" : "미동의"}`}
+                          disabled={previewMode || saving}
+                          aria-label={`${label} ${
+                            checked
+                              ? profileCopy.text.agreedLabel
+                              : profileCopy.text.disagreedLabel
+                          }`}
                           onChange={(event) =>
                             void updateConsent(key, event.target.checked)
                           }
                         />
                         <span aria-hidden="true" className="admin-consent-row__toggle" />
-                        <em>{saving ? "저장 중" : checked ? "동의" : "미동의"}</em>
+                        <em>
+                          {saving
+                            ? profileCopy.text.savingLabel
+                            : checked
+                              ? profileCopy.text.agreedLabel
+                              : profileCopy.text.disagreedLabel}
+                        </em>
                       </label>
                     );
                   })}
@@ -1067,14 +1372,11 @@ export function MyPageDashboard({ initialTab }: { initialTab?: string | string[]
               <div className="admin-card admin-card--span-2">
                 <header className="admin-card__head">
                   <div>
-                    <h2>회원가입 마무리</h2>
-                    <p>
-                      소속 농협 정보를 입력하면 통합 지갑과 답변 열람 기능을
-                      이용할 수 있어요.
-                    </p>
+                    <h2>{profileCopy.text.incompleteTitle}</h2>
+                    <p>{profileCopy.text.incompleteDescription}</p>
                   </div>
                   <Link className="admin-btn admin-btn--primary" href="/signup">
-                    회원가입 이어가기
+                    {profileCopy.text.continueSignupLabel}
                   </Link>
                 </header>
               </div>

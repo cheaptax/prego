@@ -3,10 +3,14 @@
 import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
-  getRequestStatusLabel,
   resolveRequestStatus,
 } from "@/lib/request-status";
 import type {
@@ -17,8 +21,14 @@ import type {
   OrganizationRecord,
   UserRecord,
 } from "@/lib/firebase/schema";
+import type { CmsPageContent } from "@/lib/cms/schemas";
+import { getCmsSection } from "@/lib/cms/runtime";
 
-type Props = { requestId: string };
+type Props = {
+  requestId: string;
+  content: CmsPageContent;
+  previewMode?: boolean;
+};
 type State = "loading" | "ready" | "not-found" | "error";
 type Overview = {
   user: UserRecord;
@@ -29,8 +39,11 @@ type Overview = {
   ratings: AnswerRatingRecord[];
 };
 
-function formatDate(value?: string) {
-  if (!value) return "-";
+const FOLLOWUP_SUBJECT_PREFIX = "[추가 문의]";
+const ESTIMATE_SUBJECT_PREFIX = "[추가상담·견적진행]";
+
+function formatDate(value: string | undefined, missingValue: string) {
+  if (!value) return missingValue;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("ko-KR", {
@@ -39,17 +52,99 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
-function visibilityLabel(value: string) {
-  const normalized = value.toLowerCase();
-  if (normalized === "public") return "전체공개";
-  if (normalized === "nonghyup" || normalized === "org_only") return "우리농협공개";
-  return "미공개";
+function preventPreviewLinkNavigation(event: ReactMouseEvent<HTMLElement>) {
+  if ((event.target as HTMLElement).closest("a")) {
+    event.preventDefault();
+  }
 }
 
-export function RequestDetailPage({ requestId }: Props) {
+function visibilityLabel(
+  value: string,
+  copy: ReturnType<typeof getCmsSection>,
+) {
+  const normalized = value.toLowerCase();
+  if (normalized === "public") return copy.text.visibilityPublic;
+  if (normalized === "nonghyup" || normalized === "org_only") {
+    return copy.text.visibilityOrganization;
+  }
+  return copy.text.visibilityPrivate;
+}
+
+const REQUEST_DETAIL_PREVIEW = {
+  user: {
+    uid: "cms-preview-member",
+    cooperativeName: "샘플농협",
+  },
+  organization: {
+    cooperativeName: "샘플농협",
+    walletBalance: 120000,
+  },
+  requests: [
+    {
+      id: "preview-request",
+      uid: "cms-preview-member",
+      requestNumber: "REQ-20260721-1001",
+      subject: "회계 업무 처리 기준 문의",
+      message: "관리자 미리보기용 문의 내용입니다.",
+      visibility: "ORG_ONLY",
+      status: "ANSWERED",
+      attachments: [],
+      createdAt: "2026-07-20T09:00:00.000Z",
+    },
+  ],
+  answers: [
+    {
+      id: "preview-answer",
+      requestId: "preview-request",
+      body: "관리자 미리보기용 답변입니다.",
+      pointCost: 30000,
+      createdAt: "2026-07-21T09:00:00.000Z",
+    },
+  ],
+  views: [
+    {
+      requestId: "preview-request",
+      uid: "cms-preview-member",
+      createdAt: "2026-07-21T09:00:00.000Z",
+    },
+  ],
+  ratings: [],
+} as unknown as Overview;
+
+export function RequestDetailPage({
+  requestId,
+  content,
+  previewMode = false,
+}: Props) {
   const router = useRouter();
-  const [state, setState] = useState<State>("loading");
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const summaryCopy = getCmsSection(
+    content,
+    "member.requestDetail",
+    "summary",
+  );
+  const requestCopy = getCmsSection(
+    content,
+    "member.requestDetail",
+    "requestBody",
+  );
+  const attachmentsCopy = getCmsSection(
+    content,
+    "member.requestDetail",
+    "attachments",
+  );
+  const answerCopy = getCmsSection(content, "member.requestDetail", "answer");
+  const followupCopy = getCmsSection(
+    content,
+    "member.requestDetail",
+    "followupActions",
+  );
+  const ratingCopy = getCmsSection(content, "member.requestDetail", "rating");
+  const dialogsCopy = getCmsSection(content, "member.requestDetail", "dialogs");
+  const messages = content.messages;
+  const [state, setState] = useState<State>(previewMode ? "ready" : "loading");
+  const [overview, setOverview] = useState<Overview | null>(
+    previewMode ? REQUEST_DETAIL_PREVIEW : null,
+  );
   const [error, setError] = useState("");
   const [revealedAnswer, setRevealedAnswer] = useState<AnswerRecord | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -66,6 +161,7 @@ export function RequestDetailPage({ requestId }: Props) {
   const [completionRatingOpen, setCompletionRatingOpen] = useState(false);
 
   useEffect(() => {
+    if (previewMode) return;
     const auth = getFirebaseAuth();
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (!user) {
@@ -80,7 +176,7 @@ export function RequestDetailPage({ requestId }: Props) {
         });
         const data = (await res.json()) as ({ ok?: boolean; error?: string } & Partial<Overview>);
         if (!res.ok || !data.ok || !data.user) {
-          throw new Error(data.error ?? "문의 상세를 불러오지 못했습니다.");
+          throw new Error(data.error ?? messages.loadFailed);
         }
         setOverview({
           user: data.user,
@@ -96,12 +192,12 @@ export function RequestDetailPage({ requestId }: Props) {
           router.push("/pending-approval");
           return;
         }
-        setError(err instanceof Error ? err.message : "문의 상세를 불러오지 못했습니다.");
+        setError(messages.loadFailed);
         setState("error");
       }
     });
     return () => unsubscribe();
-  }, [requestId, router]);
+  }, [messages.loadFailed, previewMode, requestId, router]);
 
   const request = useMemo(
     () => overview?.requests.find((item) => item.id === requestId),
@@ -137,8 +233,16 @@ export function RequestDetailPage({ requestId }: Props) {
       hasAnswerView: alreadyViewed,
     });
   }, [request, answer, alreadyViewed]);
+  const statusLabels = {
+    SUBMITTED: summaryCopy.text.statusSubmitted,
+    ANSWERED: summaryCopy.text.statusAnswered,
+    ANSWER_PUBLISHED: summaryCopy.text.statusPublished,
+    FOLLOWUP: summaryCopy.text.statusFollowup,
+    COMPLETED: summaryCopy.text.statusCompleted,
+  } as const;
 
-  const handleViewAnswer = useCallback(async () => {
+  async function handleViewAnswer() {
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user || !answer) return;
     setViewConfirmOpen(false);
@@ -157,7 +261,7 @@ export function RequestDetailPage({ requestId }: Props) {
         walletBalance?: number;
       };
       if (!res.ok || !data.ok || !data.answer) {
-        throw new Error(data.error ?? "답변을 열람하지 못했습니다.");
+        throw new Error(data.error ?? messages.viewFailed);
       }
       const viewedAnswer = data.answer;
       setRevealedAnswer(viewedAnswer);
@@ -190,18 +294,20 @@ export function RequestDetailPage({ requestId }: Props) {
           : current
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : "답변을 열람하지 못했습니다.";
+      const message =
+        err instanceof Error ? err.message : messages.viewFailed;
       setViewError(
         message === "insufficient_points"
-          ? "포인트가 부족하여 답변을 열람할 수 없습니다."
-          : message
+          ? messages.insufficientPoints
+          : messages.viewFailed,
       );
     } finally {
       setViewLoading(false);
     }
-  }, [alreadyViewed, answer, requestId]);
+  }
 
-  const handleSaveRating = useCallback(async () => {
+  async function handleSaveRating() {
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user || !visibleAnswer) return;
     setRatingLoading(true);
@@ -251,41 +357,35 @@ export function RequestDetailPage({ requestId }: Props) {
             }
           : current
       );
-      setRatingMessage("답변 평가를 저장했습니다. 이제 문의를 완료할 수 있습니다.");
+      setRatingMessage(messages.ratingSaved);
       setCompletionRatingOpen(true);
     } catch (err) {
       setRatingMessage(
         err instanceof Error && err.message === "answer_not_viewed"
-          ? "답변 열람 후 평가를 남길 수 있습니다."
-          : "답변 평가를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+          ? messages.ratingRequiresView
+          : messages.ratingFailed,
       );
     } finally {
       setRatingLoading(false);
     }
-  }, [
-    currentRating,
-    effectiveRatingComment,
-    effectiveRatingHelpful,
-    effectiveRatingScore,
-    requestId,
-    visibleAnswer,
-  ]);
+  }
 
-  const handleCompleteClick = useCallback(() => {
+  function handleCompleteClick() {
     if (isCompleted) return;
     if (!visibleAnswer) {
-      setCompleteMessage("답변을 먼저 열람한 뒤 문의를 완료할 수 있습니다.");
+      setCompleteMessage(messages.completeRequiresView);
       return;
     }
     if (!hasRating) {
       setCompletionRatingOpen(true);
-      setCompleteMessage("문의 완료 전 답변 평가를 작성해 주세요.");
+      setCompleteMessage(messages.completeRequiresRating);
       return;
     }
     setCompleteConfirmOpen(true);
-  }, [hasRating, isCompleted, visibleAnswer]);
+  }
 
-  const handleCompleteRequest = useCallback(async () => {
+  async function handleCompleteRequest() {
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user) return;
     setCompleteConfirmOpen(false);
@@ -323,27 +423,29 @@ export function RequestDetailPage({ requestId }: Props) {
             }
           : current
       );
-      setCompleteMessage("문의가 완료 처리되었습니다.");
+      setCompleteMessage(messages.completeSuccess);
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       setCompleteMessage(
         message === "rating_required"
-          ? "문의 완료 전 답변 평가를 먼저 작성해 주세요."
+          ? messages.completeRequiresRating
           : message === "answer_not_viewed"
-            ? "답변을 먼저 열람한 뒤 문의를 완료할 수 있습니다."
-            : "문의 완료 처리에 실패했습니다. 잠시 후 다시 시도해 주세요."
+            ? messages.completeRequiresView
+            : messages.completeFailed,
       );
     } finally {
       setCompleteLoading(false);
     }
-  }, [requestId]);
+  }
 
   const backLink = (
     <div className="request-detail-toolbar">
       <Link className="request-detail-back" href="/mypage?tab=inquiries">
-        ← 문의 내역으로 돌아가기
+        {summaryCopy.text.backLabel}
       </Link>
-      <span className="request-detail-toolbar__hint">문의 내역으로 돌아갑니다.</span>
+      <span className="request-detail-toolbar__hint">
+        {summaryCopy.text.backHint}
+      </span>
     </div>
   );
 
@@ -353,7 +455,7 @@ export function RequestDetailPage({ requestId }: Props) {
         <div className="portal-main">
           {backLink}
           <div className="portal-card">
-            <h2>문의 내용을 불러오는 중입니다.</h2>
+            <h2>{messages.loading}</h2>
           </div>
         </div>
       </section>
@@ -366,7 +468,7 @@ export function RequestDetailPage({ requestId }: Props) {
         <div className="portal-main">
           {backLink}
           <div className="portal-card">
-            <h2>문의 상세를 불러오지 못했습니다.</h2>
+            <h2>{messages.loadFailed}</h2>
             <p>{error}</p>
           </div>
         </div>
@@ -380,10 +482,10 @@ export function RequestDetailPage({ requestId }: Props) {
         <div className="portal-main">
           {backLink}
           <div className="portal-card">
-            <h2>조회할 수 없는 문의입니다.</h2>
-            <p>공개범위 또는 소속 농협 권한을 확인해 주세요.</p>
+            <h2>{messages.notFound}</h2>
+            <p>{messages.notFoundDescription}</p>
             <Link className="request-detail-back" href="/mypage?tab=inquiries">
-              ← 문의 내역으로 돌아가기
+              {summaryCopy.text.backLabel}
             </Link>
           </div>
         </div>
@@ -392,48 +494,62 @@ export function RequestDetailPage({ requestId }: Props) {
   }
 
   return (
-    <section className="portal-layout portal-layout--detail portal-layout--single">
+    <section
+      className="portal-layout portal-layout--detail portal-layout--single"
+      onClickCapture={previewMode ? preventPreviewLinkNavigation : undefined}
+    >
       <div className="portal-main">
         <div className="request-detail-toolbar">
           <Link className="request-detail-back" href="/mypage?tab=inquiries">
-            ← 문의 내역으로 돌아가기
+            {summaryCopy.text.backLabel}
           </Link>
-          <span className="request-detail-toolbar__hint">문의 내역으로 돌아갑니다.</span>
+          <span className="request-detail-toolbar__hint">
+            {summaryCopy.text.backHint}
+          </span>
         </div>
 
         <div className="wallet-hero wallet-hero--compact request-detail-hero">
           <div>
-            <span className="kicker">Inquiry Detail</span>
+            <span className="kicker">{summaryCopy.eyebrow}</span>
             <h2>{request.subject}</h2>
             <p>{request.requestNumber}</p>
           </div>
           <dl className="request-detail-summary">
             <div>
-              <dt>상태</dt>
-              <dd>{getRequestStatusLabel(displayStatus)}</dd>
+              <dt>{summaryCopy.text.statusLabel}</dt>
+              <dd>{statusLabels[displayStatus]}</dd>
             </div>
             <div>
-              <dt>공개범위</dt>
-              <dd>{visibilityLabel(request.visibility)}</dd>
+              <dt>{summaryCopy.text.visibilityLabel}</dt>
+              <dd>{visibilityLabel(request.visibility, summaryCopy)}</dd>
             </div>
             <div>
-              <dt>농협 포인트</dt>
-              <dd>{walletBalance.toLocaleString()}P</dd>
+              <dt>{summaryCopy.text.pointsLabel}</dt>
+              <dd>
+                {walletBalance.toLocaleString()}
+                {summaryCopy.text.pointUnit}
+              </dd>
             </div>
           </dl>
         </div>
 
         <article className="portal-card">
-          <span className="tag tag--gold">문의 내용</span>
+          <span className="tag tag--gold">{requestCopy.eyebrow}</span>
           <h3>{request.subject}</h3>
           <p>{request.message}</p>
-          <p>접수일: {formatDate(request.createdAt)}</p>
+          <p>
+            {requestCopy.text.receivedPrefix}{" "}
+            {formatDate(request.createdAt, summaryCopy.text.missingValue)}
+          </p>
         </article>
 
         {(request.attachments?.length ?? 0) > 0 && (
           <article className="portal-card">
-            <span className="tag tag--gold">첨부 사진</span>
-            <h3>등록한 사진 {request.attachments?.length ?? 0}장</h3>
+            <span className="tag tag--gold">{attachmentsCopy.eyebrow}</span>
+            <h3>
+              {attachmentsCopy.title} {request.attachments?.length ?? 0}
+              {attachmentsCopy.text.countSuffix}
+            </h3>
             <ul className="attachment-grid">
               {request.attachments?.map((attachment) => (
                 <li key={attachment.path} className="attachment-card">
@@ -449,20 +565,22 @@ export function RequestDetailPage({ requestId }: Props) {
         )}
 
         <article className="portal-card">
-          <span className="tag tag--gold">답변 내용</span>
-          <h3>{answer ? "답변이 등록되었습니다." : "운영자가 답변을 준비 중입니다."}</h3>
+          <span className="tag tag--gold">{answerCopy.eyebrow}</span>
+          <h3>{answer ? answerCopy.title : answerCopy.description}</h3>
           {answer && visibleAnswer ? (
             <div className="answer-body">
               <p>
                 {visibleAnswer.body?.trim() ||
-                  "등록된 답변 본문이 없습니다. 운영자에게 문의해 주세요."}
+                  answerCopy.text.emptyBody}
               </p>
             </div>
           ) : answer ? (
             <div className="answer-view-panel">
               <p className="answer-view-notice">
-                답변을 열람하면 {answer.pointCost.toLocaleString()}P가 차감됩니다.
-                이미 열람한 답변은 추가 차감되지 않습니다.
+                {answerCopy.text.pointPrefix}{" "}
+                {answer.pointCost.toLocaleString()}
+                {answerCopy.text.pointSuffix}{" "}
+                {answerCopy.text.noDuplicateCharge}
               </p>
               <button
                 type="button"
@@ -470,55 +588,52 @@ export function RequestDetailPage({ requestId }: Props) {
                 onClick={() => setViewConfirmOpen(true)}
                 disabled={viewLoading}
               >
-                {viewLoading ? "답변을 여는 중..." : "답변 열람하기"}
+                {viewLoading
+                  ? answerCopy.text.loadingLabel
+                  : answerCopy.text.openLabel}
               </button>
               {viewError && <p className="answer-view-panel__error">{viewError}</p>}
             </div>
           ) : (
-            <p>답변이 완료되면 이 화면에서 바로 확인할 수 있습니다.</p>
+            <p>{answerCopy.text.pendingDescription}</p>
           )}
         </article>
 
         {visibleAnswer && (
           <article className="portal-card request-actions-card">
-            <span className="tag tag--gold">후속 액션</span>
-            <h3>답변 확인 후 다음 단계를 선택해 주세요.</h3>
-            <p>
-              답변으로 해결되지 않은 내용은 후속 문의나 상담 요청으로 이어가고,
-              해결된 문의는 평가를 남긴 뒤 완료할 수 있습니다.
-            </p>
+            <span className="tag tag--gold">{followupCopy.eyebrow}</span>
+            <h3>{followupCopy.title}</h3>
+            <p>{followupCopy.description}</p>
 
             <div className="request-action-grid">
               <Link
                 className="request-action"
-                href={`/consult?parentRequestId=${encodeURIComponent(request.id)}&subject=${encodeURIComponent(`[추가 문의] ${request.subject}`)}`}
+                href={`/consult?parentRequestId=${encodeURIComponent(request.id)}&subject=${encodeURIComponent(`${FOLLOWUP_SUBJECT_PREFIX} ${request.subject}`)}`}
               >
-                <strong>추가 문의 작성</strong>
-                <span>답변과 연결된 후속 문의를 남깁니다.</span>
+                <strong>{followupCopy.text.followupTitle}</strong>
+                <span>{followupCopy.text.followupDescription}</span>
               </Link>
               <Link
                 className="request-action"
-                href={`/consult?parentRequestId=${encodeURIComponent(request.id)}&subject=${encodeURIComponent(`[추가상담·견적진행] ${request.subject}`)}`}
+                href={`/consult?parentRequestId=${encodeURIComponent(request.id)}&subject=${encodeURIComponent(`${ESTIMATE_SUBJECT_PREFIX} ${request.subject}`)}`}
               >
-                <strong>추가상담·견적진행 요청</strong>
-                <span>전문가 연결이나 견적이 필요한 경우 요청합니다.</span>
+                <strong>{followupCopy.text.estimateTitle}</strong>
+                <span>{followupCopy.text.estimateDescription}</span>
               </Link>
               {isCompleted ? (
                 <span className="request-action request-action--done">
-                  <strong>문의 완료됨</strong>
-                  <span>평가 작성 후 상담이 종료되었습니다.</span>
+                  <strong>{followupCopy.text.completedTitle}</strong>
+                  <span>{followupCopy.text.completedDescription}</span>
                 </span>
               ) : (
                 <button
                   type="button"
                   className="request-action"
                   onClick={handleCompleteClick}
-                  disabled={completeLoading}
+                  disabled={previewMode || completeLoading}
                 >
-                  <strong>문의 완료하기</strong>
-                  <span>
-                    문제가 해결되었다면 답변 평가를 작성하고 문의를 종료합니다.
-                  </span>
+                  <strong>{followupCopy.text.completeTitle}</strong>
+                  <span>{followupCopy.text.completeDescription}</span>
                 </button>
               )}
             </div>
@@ -526,20 +641,26 @@ export function RequestDetailPage({ requestId }: Props) {
             {(completionRatingOpen || hasRating) && !isCompleted && (
               <div className="answer-rating-box" id="answer-rating-section">
                 <div>
-                  <h4>답변 평가 {hasRating ? "(작성 완료)" : "(필수)"}</h4>
-                  <p>
-                    문의 완료 전 답변 평가를 작성해 주세요. 평가는 운영자가 답변 품질과
-                    후속 지원 필요 여부를 확인하는 데 사용됩니다.
-                  </p>
+                  <h4>
+                    {ratingCopy.title}{" "}
+                    {hasRating
+                      ? ratingCopy.text.completedBadge
+                      : ratingCopy.text.requiredBadge}
+                  </h4>
+                  <p>{ratingCopy.description}</p>
                 </div>
-                <div className="answer-rating-box__score" aria-label="답변 점수">
+                <div
+                  className="answer-rating-box__score"
+                  aria-label={ratingCopy.text.scoreAriaLabel}
+                >
                   {[1, 2, 3, 4, 5].map((score) => (
                     <button
                       key={score}
                       type="button"
                       className={effectiveRatingScore >= score ? "is-active" : undefined}
                       onClick={() => setRatingScore(score)}
-                      aria-label={`${score}점`}
+                      aria-label={`${score}${ratingCopy.text.scoreSuffix}`}
+                      disabled={previewMode}
                     >
                       ★
                     </button>
@@ -552,8 +673,9 @@ export function RequestDetailPage({ requestId }: Props) {
                       name="answer-helpful"
                       checked={effectiveRatingHelpful}
                       onChange={() => setRatingHelpful(true)}
+                      disabled={previewMode}
                     />
-                    도움이 되었어요
+                    {ratingCopy.text.helpfulLabel}
                   </label>
                   <label>
                     <input
@@ -561,36 +683,40 @@ export function RequestDetailPage({ requestId }: Props) {
                       name="answer-helpful"
                       checked={!effectiveRatingHelpful}
                       onChange={() => setRatingHelpful(false)}
+                      disabled={previewMode}
                     />
-                    보완이 필요해요
+                    {ratingCopy.text.needsWorkLabel}
                   </label>
                 </div>
                 <textarea
                   value={effectiveRatingComment}
                   onChange={(event) => setRatingComment(event.target.value)}
-                  placeholder="답변에 대한 의견이나 추가로 필요한 도움을 적어주세요."
+                  placeholder={ratingCopy.text.commentPlaceholder}
                   rows={4}
+                  disabled={previewMode}
                 />
                 <div className="answer-rating-box__actions">
                   <button
                     type="button"
                     className="cta cta--solid"
                     onClick={() => void handleSaveRating()}
-                    disabled={ratingLoading}
+                    disabled={previewMode || ratingLoading}
                   >
                     {ratingLoading
-                      ? "평가 저장 중..."
+                      ? ratingCopy.text.savingLabel
                       : hasRating
-                        ? "평가 수정하기"
-                        : "답변 평가 저장"}
+                        ? ratingCopy.text.updateLabel
+                        : ratingCopy.text.saveLabel}
                   </button>
                   <button
                     type="button"
                     className="cta cta--ghost"
                     onClick={handleCompleteClick}
-                    disabled={completeLoading || !hasRating}
+                    disabled={previewMode || completeLoading || !hasRating}
                   >
-                    {completeLoading ? "완료 처리 중..." : "문의 완료 처리"}
+                    {completeLoading
+                      ? ratingCopy.text.completingLabel
+                      : ratingCopy.text.completeLabel}
                   </button>
                 </div>
                 {ratingMessage && <p className="request-action-message">{ratingMessage}</p>}
@@ -602,14 +728,20 @@ export function RequestDetailPage({ requestId }: Props) {
       </div>
 
       {completeConfirmOpen && (
-        <div className="answer-confirm-modal" role="dialog" aria-modal="true">
+        <div
+          className="answer-confirm-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="complete-request-dialog-title"
+        >
           <div className="answer-confirm-modal__panel">
-            <span className="tag tag--gold">문의 완료</span>
-            <h3>상담을 종료하시겠습니까?</h3>
-            <p>
-              완료 처리 후에는 이 문의의 상담이 종료됩니다. 추가 지원이 필요하면
-              완료 전에 추가 문의나 후속 상담 요청을 먼저 진행해 주세요.
-            </p>
+            <span className="tag tag--gold">
+              {dialogsCopy.text.completeEyebrow}
+            </span>
+            <h3 id="complete-request-dialog-title">
+              {dialogsCopy.text.completeTitle}
+            </h3>
+            <p>{dialogsCopy.text.completeDescription}</p>
             <div className="answer-confirm-modal__actions">
               <button
                 type="button"
@@ -617,7 +749,7 @@ export function RequestDetailPage({ requestId }: Props) {
                 onClick={() => setCompleteConfirmOpen(false)}
                 disabled={completeLoading}
               >
-                계속 진행
+                {dialogsCopy.text.continueLabel}
               </button>
               <button
                 type="button"
@@ -625,7 +757,9 @@ export function RequestDetailPage({ requestId }: Props) {
                 onClick={() => void handleCompleteRequest()}
                 disabled={completeLoading}
               >
-                {completeLoading ? "완료 처리 중..." : "상담 종료하기"}
+                {completeLoading
+                  ? dialogsCopy.text.completingLabel
+                  : dialogsCopy.text.endLabel}
               </button>
             </div>
           </div>
@@ -640,25 +774,34 @@ export function RequestDetailPage({ requestId }: Props) {
           aria-labelledby="answer-view-dialog-title"
         >
           <div className="answer-confirm-modal__panel answer-confirm-modal__panel--view">
-            <h3 id="answer-view-dialog-title">답변을 열람하시겠습니까?</h3>
+            <h3 id="answer-view-dialog-title">
+              {dialogsCopy.text.viewTitle}
+            </h3>
             <p className="answer-confirm-modal__lede">
-              답변을 열람하면 {answer.pointCost.toLocaleString()}P가 차감됩니다.
+              {dialogsCopy.text.pointPrefix} {answer.pointCost.toLocaleString()}
+              {dialogsCopy.text.pointSuffix}
               <br />
-              이미 열람한 답변은 추가 차감되지 않습니다.
+              {dialogsCopy.text.noDuplicateCharge}
             </p>
             <dl className="answer-confirm-modal__meta">
               <div>
-                <dt>차감 예정 포인트</dt>
-                <dd>{answer.pointCost.toLocaleString()}P</dd>
+                <dt>{dialogsCopy.text.costLabel}</dt>
+                <dd>
+                  {answer.pointCost.toLocaleString()}
+                  {summaryCopy.text.pointUnit}
+                </dd>
               </div>
               <div>
-                <dt>현재 보유 포인트</dt>
-                <dd>{walletBalance.toLocaleString()}P</dd>
+                <dt>{dialogsCopy.text.balanceLabel}</dt>
+                <dd>
+                  {walletBalance.toLocaleString()}
+                  {summaryCopy.text.pointUnit}
+                </dd>
               </div>
             </dl>
             {!canPayAnswerView && (
               <p className="answer-confirm-modal__error">
-                보유 포인트가 부족하여 답변을 열람할 수 없습니다.
+                {dialogsCopy.text.insufficient}
               </p>
             )}
             <div className="answer-confirm-modal__actions">
@@ -668,7 +811,7 @@ export function RequestDetailPage({ requestId }: Props) {
                 onClick={() => setViewConfirmOpen(false)}
                 disabled={viewLoading}
               >
-                취소
+                {dialogsCopy.text.cancelLabel}
               </button>
               <button
                 type="button"
@@ -676,7 +819,9 @@ export function RequestDetailPage({ requestId }: Props) {
                 onClick={() => void handleViewAnswer()}
                 disabled={viewLoading || !canPayAnswerView}
               >
-                {viewLoading ? "열람 처리 중..." : "답변 열람하기"}
+                {viewLoading
+                  ? dialogsCopy.text.processingLabel
+                  : dialogsCopy.text.viewLabel}
               </button>
             </div>
           </div>

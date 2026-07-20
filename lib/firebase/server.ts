@@ -1,6 +1,6 @@
 import type { DecodedIdToken } from "firebase-admin/auth";
 import type { Firestore, Transaction } from "firebase-admin/firestore";
-import { ADMIN_EMAIL, adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import {
   ANSWER_POINT_MAX,
@@ -23,10 +23,7 @@ export async function verifyBearerToken(req: Request) {
 }
 
 export function isAdminToken(decoded: DecodedIdToken) {
-  return (
-    decoded.admin === true ||
-    decoded.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-  );
+  return decoded.admin === true;
 }
 
 export async function requireAdmin(req: Request) {

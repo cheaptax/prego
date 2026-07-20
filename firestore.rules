@@ -7,25 +7,76 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.token.admin == true;
+      return signedIn()
+        && 'admin' in request.auth.token
+        && request.auth.token.admin == true;
+    }
+
+    // Public CMS documents contain rendered content only. All CMS writes are
+    // performed by trusted server code through the Admin SDK.
+    match /cmsPublishedPages/{pageKey} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /cmsPublishedGlobals/{documentKey} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /cmsDraftPages/{pageKey} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /cmsDraftGlobals/{documentKey} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /cmsPageRevisions/{pageKey} {
+      allow read, write: if false;
+
+      match /revisions/{revisionId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /cmsGlobalRevisions/{documentKey} {
+      allow read, write: if false;
+
+      match /revisions/{revisionId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /cmsAuditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /cmsAssets/{assetId} {
+      // Public pages receive resolved asset URLs from trusted server rendering.
+      // Keep uploader IDs and draft lifecycle metadata admin-only.
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /users/{userId} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
-      allow create, update: if isAdmin() || (signedIn() && request.auth.uid == userId);
-      allow delete: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /organizations/{organizationId} {
       allow read: if signedIn();
-      allow create, update: if signedIn();
-      allow delete: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /pointLedger/{ledgerId} {
       allow read: if isAdmin();
-      allow create: if signedIn();
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /consultRequests/{requestId} {

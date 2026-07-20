@@ -1,4 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { CmsGlobalsProvider } from "@/components/cms/CmsGlobalsProvider";
+import { SupportWidget } from "@/components/SupportWidget";
+import { loadPublicCmsGlobals } from "@/lib/cms/public-content";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,32 +25,31 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const globals = await loadPublicCmsGlobals();
   return (
     <html lang="ko">
+      <head>
+        <link
+          rel="preload"
+          href="/fonts/PretendardVariable.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+      </head>
       <body>
         <a className="skip" href="#main">
           본문 바로가기
         </a>
-        {children}
-        <a className="chat-fab" href="/support" aria-label="고객지원">
-          <svg width="34" height="34" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-            <path
-              d="M11 3C6.58 3 3 6.07 3 9.86c0 2.12 1.13 4.02 2.9 5.28l-.6 2.62c-.09.39.32.71.67.52l2.78-1.5c.72.17 1.48.26 2.25.26 4.42 0 8-3.07 8-6.86S15.42 3 11 3Z"
-              fill="currentColor"
-            />
-            <path
-              d="M7.8 10.1H14.2M7.8 7.9H12.6"
-              stroke="#3182F6"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-            />
-          </svg>
-        </a>
+        <CmsGlobalsProvider globals={globals}>
+          {children}
+          <SupportWidget />
+        </CmsGlobalsProvider>
       </body>
     </html>
   );

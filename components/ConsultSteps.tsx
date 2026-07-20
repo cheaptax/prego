@@ -1,34 +1,4 @@
-const STEPS: {
-  no: string;
-  title: string;
-  desc: string;
-  icon: "edit" | "eye" | "link" | "check";
-}[] = [
-  {
-    no: "1",
-    title: "문의 등록",
-    desc: "궁금한 업무 분야와 내용을 작성하고 공개 범위를 선택합니다",
-    icon: "edit",
-  },
-  {
-    no: "2",
-    title: "답변 확인",
-    desc: "마이페이지에서 등록된 답변을 확인합니다",
-    icon: "eye",
-  },
-  {
-    no: "3",
-    title: "추가 문의",
-    desc: "더 궁금한 내용이 있으면 이어서 질문합니다",
-    icon: "link",
-  },
-  {
-    no: "4",
-    title: "전문가 연결",
-    desc: "추가상담·견적진행이 필요하면 연결 절차를 안내받습니다",
-    icon: "check",
-  },
-];
+import type { CmsSection } from "@/lib/cms/schemas";
 
 function StepIcon({ name }: { name: "edit" | "eye" | "link" | "check" }) {
   const common = {
@@ -72,23 +42,35 @@ function StepIcon({ name }: { name: "edit" | "eye" | "link" | "check" }) {
   }
 }
 
-export function ConsultSteps() {
+const STEP_ICONS: Record<string, "edit" | "eye" | "link" | "check"> = {
+  register: "edit",
+  review: "eye",
+  followup: "link",
+  connection: "check",
+};
+
+export function ConsultSteps({ section }: { section: CmsSection }) {
+  const steps = section.items.filter((item) => item.visible && !item.deleted);
   return (
-    <section className="consult-steps" aria-label="상담 진행 절차">
+    <section
+      className="consult-steps"
+      aria-label={section.text.ariaLabel}
+    >
       <div className="consult-steps__inner">
-        <span className="consult-steps__kicker">Process</span>
+        <span className="consult-steps__kicker">{section.eyebrow}</span>
         <ol className="consult-steps__list">
-          {STEPS.map((s, idx) => (
-            <li key={s.no} className="consult-steps__item">
+          {steps.map((step, idx) => (
+            <li key={step.id} className="consult-steps__item">
               <span className="consult-steps__no" aria-hidden="true">
-                <StepIcon name={s.icon} />
+                <StepIcon name={STEP_ICONS[step.id] ?? "check"} />
               </span>
               <div className="consult-steps__body">
                 <span className="consult-steps__index">
-                  STEP {String(idx + 1).padStart(2, "0")}
+                  {section.text.stepPrefix}{" "}
+                  {String(idx + 1).padStart(2, "0")}
                 </span>
-                <h4>{s.title}</h4>
-                <p>{s.desc}</p>
+                <h4>{step.title}</h4>
+                {step.description ? <p>{step.description}</p> : null}
               </div>
             </li>
           ))}

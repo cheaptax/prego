@@ -1,56 +1,89 @@
+"use client";
+
 import Link from "next/link";
+import { useCmsGlobals } from "@/components/cms/CmsGlobalsProvider";
+import type { CmsGlobalContent } from "@/lib/cms/schemas";
 import { BrandMark } from "./BrandMark";
 
-export function Footer() {
+export function Footer({
+  content,
+}: {
+  content?: CmsGlobalContent;
+} = {}) {
+  const globals = useCmsGlobals();
+  const footer = content ?? globals.footer;
   return (
     <footer className="foot">
       <div className="foot__inner">
         <div className="foot__brand">
           <BrandMark size={36} />
           <div>
-            <p className="foot__name">농협지원센터 · 주식회사 프리고</p>
+            <p className="foot__name">{footer.text.brandName}</p>
             <p className="foot__tag">
-              농협 전문 상담 · 전문가 연결 플랫폼
+              {footer.text.brandTagline}
             </p>
           </div>
         </div>
 
         <div className="foot__cols">
           <div>
-            <h5>운영 주체</h5>
+            <h5>{footer.text.operatorHeading}</h5>
             <p>
-              주식회사 프리고
+              {footer.text.operatorName}
               <br />
-              <small>서비스명: 농협지원센터</small>
+              <small>{footer.text.serviceLabel}</small>
             </p>
           </div>
           <div>
-            <h5>정책</h5>
+            <h5>{footer.text.policyHeading}</h5>
             <p>
-              <Link href="/signup">이용약관</Link> ·{" "}
-              <Link href="/signup">개인정보처리방침</Link>
+              {footer.links.terms ? (
+                <Link href={footer.links.terms.href}>{footer.links.terms.label}</Link>
+              ) : null}
+              {" · "}
+              {footer.links.privacy ? (
+                <Link href={footer.links.privacy.href}>
+                  {footer.links.privacy.label}
+                </Link>
+              ) : null}
               <br />
-              <small>개인정보 보호책임자 김지혜</small>
+              <small>{footer.text.privacyOfficer}</small>
             </p>
           </div>
           <div>
-            <h5>문의</h5>
+            <h5>{footer.text.contactHeading}</h5>
             <p>
-              <Link href="/consult">고객문의</Link> ·{" "}
-              <Link href="/inquiries">문의게시판</Link>
+              {footer.links.consult ? (
+                <Link href={footer.links.consult.href}>
+                  {footer.links.consult.label}
+                </Link>
+              ) : null}
+              {" · "}
+              {footer.links.inquiries ? (
+                <Link href={footer.links.inquiries.href}>
+                  {footer.links.inquiries.label}
+                </Link>
+              ) : null}
               <br />
-              <Link href="/#about">소개</Link> · <Link href="/signup">회원가입</Link> ·{" "}
-              <Link href="/mypage">마이페이지</Link>
+              {footer.links.about ? (
+                <Link href={footer.links.about.href}>{footer.links.about.label}</Link>
+              ) : null}
+              {" · "}
+              {footer.links.signup ? (
+                <Link href={footer.links.signup.href}>{footer.links.signup.label}</Link>
+              ) : null}
+              {" · "}
+              {footer.links.mypage ? (
+                <Link href={footer.links.mypage.href}>{footer.links.mypage.label}</Link>
+              ) : null}
             </p>
           </div>
         </div>
       </div>
 
       <div className="foot__bar">
-        <p>© 2026 Prego Inc. · 농협지원센터.</p>
-        <p>
-          농협 전문 상담 · 전문가 연결 플랫폼
-        </p>
+        <p>{footer.text.copyright}</p>
+        <p>{footer.text.brandTagline}</p>
       </div>
     </footer>
   );

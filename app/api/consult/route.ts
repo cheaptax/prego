@@ -3,7 +3,6 @@ import { withoutUndefined } from "@/lib/firebase/clean";
 import { adminAuth, adminDb, adminStorage } from "@/lib/firebase/admin";
 import { addAuditLog } from "@/lib/firebase/server";
 import {
-  getInquiryCategoryLabel,
   INQUIRY_CATEGORY_AUTO_LABEL,
   INQUIRY_SUPPORT_FIELD_OPTIONS,
 } from "@/lib/inquiry-categories";

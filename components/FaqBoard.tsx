@@ -1,44 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { DEFAULT_PUBLIC_FAQS, type PublicFaq } from "@/lib/default-faqs";
+import { useMemo, useState } from "react";
+import type { CmsPageContent } from "@/lib/cms/schemas";
+import { getCmsSection } from "@/lib/cms/runtime";
 
-type FaqBoardResponse = {
-  ok?: boolean;
-  error?: string;
-  faqs?: PublicFaq[];
-};
-
-export function FaqBoard() {
-  const [faqs, setFaqs] = useState<PublicFaq[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+export function FaqBoard({ content }: { content: CmsPageContent }) {
+  const filtersCopy = getCmsSection(content, "public.faq", "filters");
+  const listCopy = getCmsSection(content, "public.faq", "list");
+  const faqs = useMemo(
+    () =>
+      listCopy.items
+        .filter((item) => item.visible && !item.deleted)
+        .map((item) => ({
+          id: item.id,
+          category: item.label ?? "",
+          question: item.title,
+          answer: item.description ?? "",
+        })),
+    [listCopy.items],
+  );
   const [category, setCategory] = useState("");
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/faqs", { cache: "no-store" });
-        const data = (await res.json()) as FaqBoardResponse;
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error ?? "faq_load_failed");
-        }
-        if (!cancelled) setFaqs(data.faqs?.length ? data.faqs : DEFAULT_PUBLIC_FAQS);
-      } catch {
-        if (!cancelled) {
-          setFaqs(DEFAULT_PUBLIC_FAQS);
-          setError("FAQ 목록을 불러오지 못해 기본 안내를 표시합니다.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const categories = useMemo(
     () =>
@@ -63,17 +45,24 @@ export function FaqBoard() {
   }, [category, faqs, query]);
 
   return (
-    <section className="faq-board" aria-label="FAQ 게시판">
+    <section
+      className="faq-board"
+      aria-label={filtersCopy.text.boardAriaLabel}
+    >
       <div className="inquiry-board__toolbar faq-board__toolbar">
         <div>
-          <strong>FAQ {filteredFaqs.length.toLocaleString("ko-KR")}건</strong>
-          <span>유형을 선택하거나 키워드를 검색해 필요한 안내를 빠르게 확인하세요.</span>
+          <strong>
+            {filtersCopy.text.countPrefix}{" "}
+            {filteredFaqs.length.toLocaleString("ko-KR")}
+            {filtersCopy.text.countSuffix}
+          </strong>
+          <span>{filtersCopy.text.summary}</span>
         </div>
         <div className="faq-board__controls">
           <label>
-            <span>유형 선택</span>
+            <span>{filtersCopy.text.categoryLabel}</span>
             <select value={category} onChange={(event) => setCategory(event.target.value)}>
-              <option value="">전체 유형</option>
+              <option value="">{filtersCopy.text.allCategoriesLabel}</option>
               {categories.map((item) => (
                 <option key={item} value={item}>
                   {item}
@@ -82,27 +71,22 @@ export function FaqBoard() {
             </select>
           </label>
           <label>
-            <span>FAQ 검색</span>
+            <span>{filtersCopy.text.searchLabel}</span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="질문, 답변, 유형 검색"
+              placeholder={filtersCopy.text.searchPlaceholder}
             />
           </label>
         </div>
       </div>
 
-      {loading ? (
-        <div className="inquiry-board__state">FAQ 목록을 불러오는 중입니다.</div>
+      {filteredFaqs.length === 0 ? (
+        <div className="inquiry-board__state">{content.messages.empty}</div>
       ) : (
-        <>
-          {error && <div className="inquiry-board__state inquiry-board__state--error">{error}</div>}
-          {filteredFaqs.length === 0 ? (
-            <div className="inquiry-board__state">조건에 맞는 FAQ가 없습니다.</div>
-          ) : (
-            <div className="faq-board__list">
-              {filteredFaqs.map((faq, index) => (
-                <details className="faq-board__row" key={faq.id} open={index === 0}>
+        <div className="faq-board__list" aria-label={listCopy.title}>
+          {filteredFaqs.map((faq, index) => (
+            <details className="faq-board__row" key={faq.id} open={index === 0}>
                   <summary>
                     <span className="inquiry-chip inquiry-chip--org">{faq.category}</span>
                     <strong>{faq.question}</strong>
@@ -124,11 +108,9 @@ export function FaqBoard() {
                       <p key={`${faq.id}-${paragraphIndex}`}>{paragraph}</p>
                     ))}
                   </div>
-                </details>
-              ))}
-            </div>
-          )}
-        </>
+            </details>
+          ))}
+        </div>
       )}
     </section>
   );

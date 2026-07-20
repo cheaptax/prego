@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ADMIN_EMAIL, adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import type { UserRecord } from "@/lib/firebase/schema";
 import {
@@ -21,10 +21,7 @@ type Payload = {
 };
 
 function isProtectedOperator(user: UserRecord, currentUid: string) {
-  return (
-    user.uid === currentUid ||
-    user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
-  );
+  return user.uid === currentUid;
 }
 
 export async function PATCH(

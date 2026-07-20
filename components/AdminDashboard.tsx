@@ -1,13 +1,18 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { describeAuditLog } from "@/lib/audit-log-display";
 import {
-  getMemberStatusLabel,
   getMemberStatusTone,
   isActiveMember,
   isInactiveMember,
@@ -29,16 +34,12 @@ import {
   isValidSupportFieldLabel,
 } from "@/lib/inquiry-categories";
 import {
-  formatRatingScore,
-  getRatingSatisfactionLabel,
   getRatingSatisfactionTone,
 } from "@/lib/rating-display";
 import {
   compareAdminInquiryRows,
-  getRequestStatusLabel,
   getRequestStatusTone,
   matchesRequestStatusFilter,
-  REQUEST_STATUS_FILTER_OPTIONS,
   resolveRequestStatus,
   type ResolvedRequestStatus,
 } from "@/lib/request-status";
@@ -55,45 +56,38 @@ import type {
   UserRecord,
 } from "@/lib/firebase/schema";
 import { AdminAuditQuotesPanel } from "@/components/AdminAuditQuotesPanel";
-
-const ADMIN_EMAIL = "admin@gmail.com";
+import {
+  ADMIN_FAQ_CATEGORIES,
+  ADMIN_FAQ_DISPLAY_FILTERS,
+  ADMIN_FAQ_PUBLIC_FILTERS,
+  ADMIN_REQUEST_STATUS_FILTERS,
+  ADMIN_VISIBILITY_FILTERS,
+  createAdminOperationsCopy,
+  type AdminOperationTabId,
+  type AdminOperationsCopy,
+} from "@/lib/cms/admin-operations-content";
+import { ADMIN_OPERATIONS_PREVIEW_DATA } from "@/lib/cms/admin-operations-preview";
+import type { CmsPageContent } from "@/lib/cms/schemas";
 
 type State = "loading" | "ready" | "denied" | "error";
 
-type TabKey =
-  | "overview"
-  | "members"
-  | "inquiries"
-  | "auditQuotes"
-  | "points"
-  | "audit";
+type TabKey = AdminOperationTabId;
 type MemberSubtab = "members" | "operators";
 type OperatorEditorState = {
   mode: "create" | "edit";
   operator: UserRecord | null;
 };
 
-const TABS: { key: TabKey; label: string; description: string }[] = [
-  { key: "overview", label: "Overview", description: "운영 지표 한눈에 보기" },
-  { key: "members", label: "Members", description: "회원 및 운영자 계정 관리" },
-  { key: "inquiries", label: "Inquiries", description: "문의 접수와 답변 처리" },
-  {
-    key: "auditQuotes",
-    label: "Audit quotes",
-    description: "FY27 회계감사 견적 접수 운영",
-  },
-  { key: "points", label: "Points", description: "농협 지갑과 포인트 정산" },
-  { key: "audit", label: "Audit log", description: "주요 변경 이력" },
-];
+const AdminOperationsCopyContext =
+  createContext<AdminOperationsCopy | null>(null);
 
-const VISIBILITY_LABELS: Record<string, string> = {
-  PUBLIC: "전체 공개",
-  public: "전체 공개",
-  ORG_ONLY: "농협 공개",
-  nonghyup: "농협 공개",
-  PRIVATE: "비공개",
-  private: "비공개",
-};
+function useAdminOperationsCopy() {
+  const value = useContext(AdminOperationsCopyContext);
+  if (!value) {
+    throw new Error("Admin operations copy is unavailable.");
+  }
+  return value;
+}
 
 const LEGACY_NON_ASSIGNEE_TAGS = new Set([
   "자동 배정",
@@ -108,15 +102,55 @@ const LEGACY_NON_ASSIGNEE_TAGS = new Set([
   "감사",
 ]);
 
-const LEDGER_LABELS: Record<string, string> = {
-  first_org_signup: "농협 최초 가입 보너스",
-  user_signup: "회원 가입 적립",
-  answer_view: "답변 열람 사용",
-  question_answer_usage: "답변 열람 사용",
-  manual_adjustment: "수동 조정",
-  admin_adjustment_credit: "운영자 적립",
-  admin_adjustment_debit: "운영자 차감",
+const LEDGER_ITEM_IDS: Record<string, string> = {
+  first_org_signup: "ledger.firstOrgSignup",
+  user_signup: "ledger.userSignup",
+  answer_view: "ledger.answerView",
+  question_answer_usage: "ledger.questionAnswerUsage",
+  manual_adjustment: "ledger.manualAdjustment",
+  admin_adjustment_credit: "ledger.adminCredit",
+  admin_adjustment_debit: "ledger.adminDebit",
 };
+
+function ledgerLabel(copy: AdminOperationsCopy, eventKey: string) {
+  const itemId = LEDGER_ITEM_IDS[eventKey];
+  return itemId ? copy.section("points").item(itemId) : eventKey;
+}
+
+function memberStatusLabel(
+  copy: AdminOperationsCopy,
+  status?: string,
+  short = false,
+) {
+  const members = copy.section("members");
+  if (status === "active") return members.text("statusActive");
+  if (status === "rejected") return members.text("statusInactive");
+  return members.text(short ? "statusPendingShort" : "statusPending");
+}
+
+function requestStatusLabel(
+  copy: AdminOperationsCopy,
+  status: ResolvedRequestStatus,
+) {
+  const itemId: Record<ResolvedRequestStatus, string> = {
+    SUBMITTED: "requestStatus.submitted",
+    ANSWERED: "requestStatus.answered",
+    ANSWER_PUBLISHED: "requestStatus.published",
+    FOLLOWUP: "requestStatus.followup",
+    COMPLETED: "requestStatus.completed",
+  };
+  return copy.section("inquiries").item(itemId[status]);
+}
+
+function ratingSatisfactionLabel(copy: AdminOperationsCopy, score?: number) {
+  const inquiries = copy.section("inquiries");
+  if (typeof score !== "number" || Number.isNaN(score)) {
+    return inquiries.text("ratingComplete");
+  }
+  if (score >= 4) return inquiries.text("satisfactionGood");
+  if (score >= 3) return inquiries.text("satisfactionAverage");
+  return inquiries.text("satisfactionLow");
+}
 
 type PointHistoryRow = {
   id: string;
@@ -195,15 +229,6 @@ function buildOrganizationPointHistory(
   return typeof limit === "number" ? combined.slice(0, limit) : combined;
 }
 
-const FAQ_CATEGORY_OPTIONS = [
-  "일반",
-  "회원가입",
-  "문의 진행",
-  "포인트",
-  "정산",
-  "기타",
-];
-
 function formatDate(value?: string) {
   if (!value) return "-";
   const date = new Date(value);
@@ -214,7 +239,11 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
-function formatRelative(value: string | undefined, reference: number) {
+function formatRelative(
+  value: string | undefined,
+  reference: number,
+  copy: AdminOperationsCopy,
+) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -223,17 +252,22 @@ function formatRelative(value: string | undefined, reference: number) {
   }
   const diff = reference - date.getTime();
   const minutes = Math.round(diff / 60000);
-  if (minutes < 1) return "방금 전";
-  if (minutes < 60) return `${minutes}분 전`;
+  const navigation = copy.section("navigation");
+  if (minutes < 1) return navigation.text("justNow");
+  if (minutes < 60) return `${minutes}${navigation.text("minuteAgoSuffix")}`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
+  if (hours < 24) return `${hours}${navigation.text("hourAgoSuffix")}`;
   const days = Math.round(hours / 24);
-  if (days < 7) return `${days}일 전`;
+  if (days < 7) return `${days}${navigation.text("dayAgoSuffix")}`;
   return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(date);
 }
 
-function formatPoints(value: number) {
-  return `${value.toLocaleString()}P`;
+function formatPoints(value: number, copy: AdminOperationsCopy) {
+  return `${value.toLocaleString()}${copy.section("points").text("pointUnit")}`;
+}
+
+function formatRatingScore(score: number, copy: AdminOperationsCopy) {
+  return `${score.toFixed(1)} ${copy.section("inquiries").text("ratingScaleSuffix")}`;
 }
 
 type InquiryActionKind = "write" | "edit" | "complete";
@@ -382,32 +416,73 @@ function Sparkline({ data }: { data: number[] }) {
 }
 
 function StatusPill({ value }: { value: ResolvedRequestStatus }) {
+  const copy = useAdminOperationsCopy();
   return (
     <span className={`admin-pill admin-pill--${getRequestStatusTone(value)}`}>
       <span className="admin-pill__dot" aria-hidden="true" />
-      {getRequestStatusLabel(value)}
+      {requestStatusLabel(copy, value)}
     </span>
   );
 }
 
 function VisibilityPill({ value }: { value?: string }) {
-  const label = VISIBILITY_LABELS[value ?? ""] ?? value ?? "-";
+  const copy = useAdminOperationsCopy().section("inquiries");
+  const itemId =
+    value === "PUBLIC" || value === "public"
+      ? "visibility.public"
+      : value === "ORG_ONLY" || value === "nonghyup"
+        ? "visibility.organization"
+        : value === "PRIVATE" || value === "private"
+          ? "visibility.private"
+          : "";
+  const label = itemId ? copy.item(itemId) : value ?? "-";
   return <span className="admin-chip">{label}</span>;
 }
 
-export function AdminDashboard() {
+export function AdminDashboard({
+  content,
+  previewMode = false,
+}: {
+  content: CmsPageContent;
+  previewMode?: boolean;
+}) {
   const router = useRouter();
-  const [state, setState] = useState<State>("loading");
+  const copy = useMemo(() => createAdminOperationsCopy(content), [content]);
+  const TABS = copy.tabs;
+  const inquiryCopy = copy.section("inquiries");
+  const faqCategoryOptions = ADMIN_FAQ_CATEGORIES.map((option) => ({
+    value: option.value,
+    label: inquiryCopy.item(`faqCategory.${option.id}`),
+  }));
+  const [state, setState] = useState<State>(previewMode ? "ready" : "loading");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [requests, setRequests] = useState<ConsultRequestRecord[]>([]);
-  const [answers, setAnswers] = useState<AnswerRecord[]>([]);
-  const [answerViews, setAnswerViews] = useState<AnswerViewRecord[]>([]);
-  const [ratings, setRatings] = useState<AnswerRatingRecord[]>([]);
-  const [organizations, setOrganizations] = useState<OrganizationRecord[]>([]);
-  const [ledger, setLedger] = useState<PointLedgerRecord[]>([]);
-  const [pointTransactions, setPointTransactions] = useState<PointTransactionRecord[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.users : [],
+  );
+  const [requests, setRequests] = useState<ConsultRequestRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.requests : [],
+  );
+  const [answers, setAnswers] = useState<AnswerRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.answers : [],
+  );
+  const [answerViews, setAnswerViews] = useState<AnswerViewRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.answerViews : [],
+  );
+  const [ratings, setRatings] = useState<AnswerRatingRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.ratings : [],
+  );
+  const [organizations, setOrganizations] = useState<OrganizationRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.organizations : [],
+  );
+  const [ledger, setLedger] = useState<PointLedgerRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.ledger : [],
+  );
+  const [pointTransactions, setPointTransactions] = useState<
+    PointTransactionRecord[]
+  >(previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.pointTransactions : []);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.auditLogs : [],
+  );
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
@@ -427,7 +502,9 @@ export function AdminDashboard() {
   const [inquirySubtab, setInquirySubtab] = useState<"requests" | "faq">(
     "requests"
   );
-  const [faqs, setFaqs] = useState<FaqRecord[]>([]);
+  const [faqs, setFaqs] = useState<FaqRecord[]>(
+    previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.faqs : [],
+  );
   const [faqLoading, setFaqLoading] = useState(false);
   const [faqSearch, setFaqSearch] = useState("");
   const [faqCategoryFilter, setFaqCategoryFilter] = useState("");
@@ -437,6 +514,7 @@ export function AdminDashboard() {
     mode: "create" | "edit";
     faq: FaqRecord | null;
   } | null>(null);
+  const [faqDeleteTarget, setFaqDeleteTarget] = useState<FaqRecord | null>(null);
   const [faqSaving, setFaqSaving] = useState(false);
   const [selectedPointOrgId, setSelectedPointOrgId] = useState("");
   const [pointOrgSearch, setPointOrgSearch] = useState("");
@@ -463,12 +541,20 @@ export function AdminDashboard() {
   } | null>(null);
   const [memberActionReason, setMemberActionReason] = useState("");
   const [memberActionLoading, setMemberActionLoading] = useState(false);
+  const [operatorConfirmation, setOperatorConfirmation] = useState<{
+    kind: "permission" | "password" | "delete";
+    operator: UserRecord;
+    nextStatus?: UserRecord["status"];
+  } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(
+    previewMode ? new Date("2026-07-20T09:30:00.000Z") : null,
+  );
 
   const fetchDashboard = useCallback(async () => {
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
-    if (!user) throw new Error("로그인이 필요합니다.");
+    if (!user) throw new Error(copy.message("authRequired"));
     const idToken = await user.getIdToken();
     const res = await fetch("/api/admin/overview", {
       headers: { authorization: `Bearer ${idToken}` },
@@ -488,7 +574,7 @@ export function AdminDashboard() {
     };
 
     if (!res.ok || !data.ok) {
-      throw new Error(data.error ?? "관리자 데이터를 불러오지 못했습니다.");
+      throw new Error(copy.message("genericError"));
     }
 
     setUsers(data.users ?? []);
@@ -501,11 +587,12 @@ export function AdminDashboard() {
     setPointTransactions(data.pointTransactions ?? []);
     setAuditLogs(data.auditLogs ?? []);
     setLastUpdated(new Date());
-  }, []);
+  }, [copy, previewMode]);
 
   const fetchFaqs = useCallback(async () => {
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
-    if (!user) throw new Error("로그인이 필요합니다.");
+    if (!user) throw new Error(copy.message("authRequired"));
     const idToken = await user.getIdToken();
     const res = await fetch("/api/admin/faqs", {
       headers: { authorization: `Bearer ${idToken}` },
@@ -516,10 +603,10 @@ export function AdminDashboard() {
       error?: string;
     };
     if (!res.ok || !data.ok) {
-      throw new Error(data.error ?? "FAQ를 불러오지 못했습니다.");
+      throw new Error(copy.message("faqLoadFailed"));
     }
     setFaqs(data.faqs ?? []);
-  }, []);
+  }, [copy, previewMode]);
 
   useEffect(() => {
     if (state !== "ready") return;
@@ -531,12 +618,11 @@ export function AdminDashboard() {
         setFaqLoading(true);
         return fetchFaqs();
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
         setActionMessage({
           tone: "error",
-          text:
-            err instanceof Error ? err.message : "FAQ를 불러오지 못했습니다.",
+          text: copy.message("faqLoadFailed"),
         });
       })
       .finally(() => {
@@ -545,7 +631,7 @@ export function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [state, tab, inquirySubtab, fetchFaqs]);
+  }, [state, tab, inquirySubtab, fetchFaqs, copy]);
 
   const faqCategories = useMemo(() => {
     const categories = new Set(
@@ -589,8 +675,12 @@ export function AdminDashboard() {
       displayStatus: "published" | "draft";
     }) => {
       const user = getFirebaseAuth().currentUser;
+      if (previewMode) return;
       if (!user) {
-        setActionMessage({ tone: "error", text: "로그인이 필요합니다." });
+        setActionMessage({
+          tone: "error",
+          text: copy.message("authRequired"),
+        });
         return;
       }
       setFaqSaving(true);
@@ -620,7 +710,7 @@ export function AdminDashboard() {
           error?: string;
         };
         if (!res.ok || !data.ok || !data.faq) {
-          throw new Error(data.error ?? "FAQ 저장에 실패했습니다.");
+          throw new Error(copy.message("faqSaveFailed"));
         }
         const saved = data.faq;
         setFaqs((current) => {
@@ -637,30 +727,35 @@ export function AdminDashboard() {
         });
         setActionMessage({
           tone: "success",
-          text: isCreate ? "FAQ를 등록했습니다." : "FAQ를 수정했습니다.",
+          text: isCreate
+            ? copy.message("faqSaved")
+            : copy.message("faqUpdated"),
         });
         setFaqEditor(null);
-      } catch (err) {
+      } catch {
         setActionMessage({
           tone: "error",
-          text:
-            err instanceof Error ? err.message : "FAQ 저장에 실패했습니다.",
+          text: copy.message("faqSaveFailed"),
         });
       } finally {
         setFaqSaving(false);
       }
     },
-    []
+    [
+      copy,
+      previewMode,
+      setActionMessage,
+      setFaqEditor,
+      setFaqs,
+      setFaqSaving,
+    ]
   );
 
   const deleteFaq = useCallback(async (faq: FaqRecord) => {
-    const confirmed =
-      typeof window !== "undefined" &&
-      window.confirm(`정말 "${faq.question}" 항목을 삭제하시겠습니까?`);
-    if (!confirmed) return;
+    if (previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user) {
-      setActionMessage({ tone: "error", text: "로그인이 필요합니다." });
+      setActionMessage({ tone: "error", text: copy.message("authRequired") });
       return;
     }
     try {
@@ -674,35 +769,42 @@ export function AdminDashboard() {
         error?: string;
       };
       if (!res.ok || !data.ok) {
-        throw new Error(data.error ?? "FAQ 삭제에 실패했습니다.");
+        throw new Error(copy.message("faqDeleteFailed"));
       }
       setFaqs((current) => current.filter((item) => item.id !== faq.id));
-      setActionMessage({ tone: "success", text: "FAQ를 삭제했습니다." });
-    } catch (err) {
+      setActionMessage({ tone: "success", text: copy.message("faqDeleted") });
+      setFaqDeleteTarget(null);
+    } catch {
       setActionMessage({
         tone: "error",
-        text:
-          err instanceof Error ? err.message : "FAQ 삭제에 실패했습니다.",
+        text: copy.message("faqDeleteFailed"),
       });
     }
-  }, []);
+  }, [
+    copy,
+    previewMode,
+    setActionMessage,
+    setFaqDeleteTarget,
+    setFaqs,
+  ]);
 
   const refreshDashboard = useCallback(async () => {
     setRefreshing(true);
     try {
       await fetchDashboard();
-      setActionMessage({ tone: "info", text: "데이터를 새로 불러왔습니다." });
-    } catch (err) {
+      setActionMessage({ tone: "info", text: copy.message("refreshed") });
+    } catch {
       setActionMessage({
         tone: "error",
-        text: err instanceof Error ? err.message : "새로고침에 실패했습니다.",
+        text: copy.message("refreshFailed"),
       });
     } finally {
       setRefreshing(false);
     }
-  }, [fetchDashboard]);
+  }, [fetchDashboard, copy, setActionMessage, setRefreshing]);
 
   useEffect(() => {
+    if (previewMode) return;
     let unsubscribe: (() => void) | undefined;
 
     const boot = async () => {
@@ -718,9 +820,7 @@ export function AdminDashboard() {
           try {
             setCurrentUser(user);
             const tokenResult = await user.getIdTokenResult(true);
-            const isAdmin =
-              user.email?.toLowerCase() === ADMIN_EMAIL ||
-              tokenResult.claims.admin === true;
+            const isAdmin = tokenResult.claims.admin === true;
 
             if (!isAdmin) {
               setState("denied");
@@ -729,27 +829,21 @@ export function AdminDashboard() {
 
             await fetchDashboard();
             setState("ready");
-          } catch (err) {
+          } catch {
             setState("error");
-            setError(
-              err instanceof FirebaseError
-                ? `${err.code}: ${err.message}`
-                : err instanceof Error
-                  ? err.message
-                  : "관리자 데이터를 불러오지 못했습니다."
-            );
+            setError(copy.message("genericError"));
           }
         });
-      } catch (err) {
+      } catch {
         setState("error");
-        setError(err instanceof Error ? err.message : "Firebase 설정을 확인해 주세요.");
+        setError(copy.message("genericError"));
       }
     };
 
     void boot();
 
     return () => unsubscribe?.();
-  }, [router, fetchDashboard]);
+  }, [router, fetchDashboard, previewMode, copy]);
 
   // -- Derived data ---------------------------------------------------------
   const memberUsers = useMemo(
@@ -759,11 +853,7 @@ export function AdminDashboard() {
   const operatorUsers = useMemo(
     () =>
       users
-        .filter(
-          (user) =>
-            user.role === "admin" ||
-            user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase(),
-        )
+        .filter((user) => user.role === "admin")
         .sort((a, b) => (b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? "")),
     [users],
   );
@@ -794,13 +884,19 @@ export function AdminDashboard() {
     const query = operatorSearch.trim().toLowerCase();
     if (!query) return operatorUsers;
     return operatorUsers.filter((user) =>
-      [user.name, user.email, user.position, user.duty, getMemberStatusLabel(user.status)]
+      [
+        user.name,
+        user.email,
+        user.position,
+        user.duty,
+        memberStatusLabel(copy, user.status),
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(query),
     );
-  }, [operatorSearch, operatorUsers]);
+  }, [operatorSearch, operatorUsers, copy]);
   const selectedOperator = useMemo(() => {
     const selected = operatorUsers.find((user) => user.uid === selectedOperatorUid);
     return selected ?? filteredOperators[0] ?? null;
@@ -816,9 +912,7 @@ export function AdminDashboard() {
     [auditLogs, selectedOperator],
   );
   const selectedOperatorIsProtected = Boolean(
-    selectedOperator &&
-      (selectedOperator.uid === currentUser?.uid ||
-        selectedOperator.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()),
+    selectedOperator && selectedOperator.uid === currentUser?.uid,
   );
   const selectedMemberOrganization = useMemo(
     () =>
@@ -897,7 +991,6 @@ export function AdminDashboard() {
       requestById,
       answerById,
       orgById,
-      adminEmail: ADMIN_EMAIL,
     }),
     [answerById, orgById, requestById, userByUid],
   );
@@ -1034,14 +1127,18 @@ export function AdminDashboard() {
   const orgInquiryCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const request of requests) {
-      const key = request.cooperativeName ?? request.cooperativeDisplay ?? request.manualCooperativeName ?? "미지정";
+      const key =
+        request.cooperativeName ??
+        request.cooperativeDisplay ??
+        request.manualCooperativeName ??
+        copy.section("members").text("unspecified");
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return Array.from(counts.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 6);
-  }, [requests]);
+  }, [requests, copy]);
 
   const organizationsByUpdatedAt = useMemo(
     () =>
@@ -1160,13 +1257,14 @@ export function AdminDashboard() {
   // -- Mutations -------------------------------------------------------------
   const submitAnswer = async (event: React.FormEvent<HTMLFormElement>, requestId: string) => {
     event.preventDefault();
+    if (previewMode) return;
     setActionMessage(null);
     const formData = new FormData(event.currentTarget);
     const assignee = String(formData.get("adminTags") ?? "").trim();
     if (!assignee) {
       setActionMessage({
         tone: "error",
-        text: "담당자를 입력해야 답변을 등록할 수 있습니다.",
+        text: copy.message("assigneeRequired"),
       });
       return;
     }
@@ -1174,7 +1272,7 @@ export function AdminDashboard() {
     if (!isValidAnswerPointCost(pointCost)) {
       setActionMessage({
         tone: "error",
-        text: `답변 포인트는 ${formatAnswerPointRangeLabel()}P 범위로 입력해 주세요.`,
+        text: `${inquiryCopy.text("pointRangeErrorPrefix")} ${formatAnswerPointRangeLabel()}${copy.section("points").text("pointUnit")} ${inquiryCopy.text("pointRangeErrorSuffix")}`,
       });
       return;
     }
@@ -1198,28 +1296,32 @@ export function AdminDashboard() {
     if (!res.ok || !data.ok) {
       const message =
         data.error === "invalid_point_cost"
-          ? `답변 포인트는 최소 ${formatPointInput(ANSWER_POINT_MIN)}P 이상, 최대 ${formatPointInput(ANSWER_POINT_MAX)}P 이하로 입력해 주세요.`
-          : data.error ?? "답변 등록에 실패했습니다.";
+          ? `${inquiryCopy.text("pointRangeErrorPrefix")} ${formatPointInput(ANSWER_POINT_MIN)}${copy.section("points").text("pointUnit")} ${inquiryCopy.text("pointMinimumJoin")}, ${formatPointInput(ANSWER_POINT_MAX)}${copy.section("points").text("pointUnit")} ${inquiryCopy.text("pointMaximumJoin")} ${inquiryCopy.text("pointRangeErrorSuffix")}`
+          : copy.message("answerSaveFailed");
       setActionMessage({ tone: "error", text: message });
       return;
     }
-    setActionMessage({ tone: "success", text: "답변이 저장되었습니다." });
+    setActionMessage({ tone: "success", text: copy.message("answerSaved") });
     setActiveRequestId(null);
     await refreshDashboard();
   };
 
   const requestPointAdjustment = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (previewMode) return;
     setActionMessage(null);
     if (!selectedPointOrganization) return;
     const points = parseSignedPointInput(pointAdjustmentAmount);
     const reason = pointAdjustmentReason.trim();
     if (!points || !reason) {
-      setActionMessage({ tone: "error", text: "조정 포인트와 사유를 입력해 주세요." });
+      setActionMessage({
+        tone: "error",
+        text: copy.message("pointFieldsRequired"),
+      });
       return;
     }
     if ((selectedPointOrganization.walletBalance ?? 0) + points < 0) {
-      setActionMessage({ tone: "error", text: "조정 후 잔액이 음수가 될 수 없습니다." });
+      setActionMessage({ tone: "error", text: copy.message("negativeBalance") });
       return;
     }
     setPointAdjustmentDraft({
@@ -1232,7 +1334,7 @@ export function AdminDashboard() {
   };
 
   const submitPointAdjustment = async () => {
-    if (!pointAdjustmentDraft) return;
+    if (!pointAdjustmentDraft || previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user) return;
     setPointAdjustmentLoading(true);
@@ -1253,47 +1355,53 @@ export function AdminDashboard() {
       });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) {
-        setActionMessage({ tone: "error", text: data.error ?? "포인트 조정에 실패했습니다." });
+        setActionMessage({
+          tone: "error",
+          text: copy.message("pointAdjustmentFailed"),
+        });
         return;
       }
-      setActionMessage({ tone: "success", text: "포인트가 조정되었습니다." });
+      setActionMessage({ tone: "success", text: copy.message("pointAdjusted") });
       setPointAdjustmentAmount("");
       setPointAdjustmentReason("");
       setPointAdjustmentDraft(null);
       await refreshDashboard();
-    } catch (err) {
+    } catch {
       setActionMessage({
         tone: "error",
-        text: err instanceof Error ? err.message : "포인트 조정에 실패했습니다.",
+        text: copy.message("pointAdjustmentFailed"),
       });
     } finally {
       setPointAdjustmentLoading(false);
     }
   };
 
-  const requestMemberAction = useCallback(
-    (uid: string, type: "approve" | "reject" | "deactivate" | "reactivate") => {
-      const target = users.find((entry) => entry.uid === uid);
-      if (!target) return;
-      setMemberActionReason("");
-      setMemberAction({
-        uid,
-        type,
-        name: target.name?.trim() || target.email || "회원",
-        email: target.email,
-      });
-    },
-    [users],
-  );
+  const requestMemberAction = (
+    uid: string,
+    type: "approve" | "reject" | "deactivate" | "reactivate",
+  ) => {
+    const target = users.find((entry) => entry.uid === uid);
+    if (!target) return;
+    setMemberActionReason("");
+    setMemberAction({
+      uid,
+      type,
+      name:
+        target.name?.trim() ||
+        target.email ||
+        copy.section("members").text("memberFallback"),
+      email: target.email,
+    });
+  };
 
-  const closeMemberAction = useCallback(() => {
+  const closeMemberAction = () => {
     if (memberActionLoading) return;
     setMemberAction(null);
     setMemberActionReason("");
-  }, [memberActionLoading]);
+  };
 
   const submitMemberAction = useCallback(async () => {
-    if (!memberAction) return;
+    if (!memberAction || previewMode) return;
     const user = getFirebaseAuth().currentUser;
     if (!user) return;
     setActionMessage(null);
@@ -1317,21 +1425,24 @@ export function AdminDashboard() {
         if (!res.ok || !data?.ok) {
           setActionMessage({
             tone: "error",
-            text: data?.error ?? "회원 상태 변경에 실패했습니다.",
+            text: copy.message("memberStatusFailed"),
           });
           return;
         }
         if (data.alreadyActive) {
-          setActionMessage({ tone: "info", text: "이미 활성화된 회원입니다." });
+          setActionMessage({
+            tone: "info",
+            text: copy.message("memberAlreadyActive"),
+          });
         } else if (data.transition === "reactivate") {
           setActionMessage({
             tone: "success",
-            text: "회원이 활성 상태로 재활성화되었습니다.",
+            text: copy.message("memberReactivated"),
           });
         } else {
           setActionMessage({
             tone: "success",
-            text: `회원 승인이 완료되었습니다. ${formatPoints(data.grantedPoints ?? 0)} 지급`,
+            text: `${copy.message("memberApproved")} ${formatPoints(data.grantedPoints ?? 0, copy)}`,
           });
         }
       } else {
@@ -1354,21 +1465,24 @@ export function AdminDashboard() {
         if (!res.ok || !data?.ok) {
           setActionMessage({
             tone: "error",
-            text: data?.error ?? "회원 상태 변경에 실패했습니다.",
+            text: copy.message("memberStatusFailed"),
           });
           return;
         }
         if (data.alreadyRejected) {
-          setActionMessage({ tone: "info", text: "이미 비활성 상태인 회원입니다." });
+          setActionMessage({
+            tone: "info",
+            text: copy.message("memberAlreadyInactive"),
+          });
         } else if (data.transition === "deactivate") {
           setActionMessage({
             tone: "success",
-            text: "회원을 비활성 상태로 전환했습니다.",
+            text: copy.message("memberDeactivated"),
           });
         } else {
           setActionMessage({
             tone: "success",
-            text: "가입을 거절했습니다. 회원 상태가 비활성으로 전환되었습니다.",
+            text: copy.message("memberRejected"),
           });
         }
       }
@@ -1378,7 +1492,17 @@ export function AdminDashboard() {
     } finally {
       setMemberActionLoading(false);
     }
-  }, [memberAction, memberActionReason, refreshDashboard]);
+  }, [
+    memberAction,
+    memberActionReason,
+    refreshDashboard,
+    previewMode,
+    copy,
+    setActionMessage,
+    setMemberAction,
+    setMemberActionLoading,
+    setMemberActionReason,
+  ]);
 
   const submitOperatorEditor = useCallback(
     async (payload: {
@@ -1389,7 +1513,7 @@ export function AdminDashboard() {
       duty: string;
       status: UserRecord["status"];
     }) => {
-      if (!operatorEditor) return;
+      if (!operatorEditor || previewMode) return;
       const user = getFirebaseAuth().currentUser;
       if (!user) return;
       setActionMessage(null);
@@ -1414,34 +1538,41 @@ export function AdminDashboard() {
           | { ok?: boolean; error?: string; operator?: UserRecord }
           | null;
         if (!res.ok || !data?.ok) {
-          throw new Error(data?.error ?? "운영자 계정 저장에 실패했습니다.");
+          throw new Error(copy.message("operatorSaveFailed"));
         }
         setOperatorEditor(null);
         setActionMessage({
           tone: "success",
-          text: isCreate ? "운영자 계정을 추가했습니다." : "운영자 정보를 수정했습니다.",
+          text: isCreate
+            ? copy.message("operatorSaved")
+            : copy.message("operatorUpdated"),
         });
         await refreshDashboard();
         if (data.operator?.uid) setSelectedOperatorUid(data.operator.uid);
-      } catch (err) {
+      } catch {
         setActionMessage({
           tone: "error",
-          text: err instanceof Error ? err.message : "운영자 계정 저장에 실패했습니다.",
+          text: copy.message("operatorSaveFailed"),
         });
       } finally {
         setOperatorActionLoading(false);
       }
     },
-    [operatorEditor, refreshDashboard],
+    [
+      operatorEditor,
+      refreshDashboard,
+      previewMode,
+      copy,
+      setActionMessage,
+      setOperatorActionLoading,
+      setOperatorEditor,
+      setSelectedOperatorUid,
+    ],
   );
 
   const changeOperatorPermission = useCallback(
     async (operator: UserRecord, nextStatus: UserRecord["status"]) => {
-      const label = nextStatus === "active" ? "권한을 부여" : "권한을 회수";
-      const confirmed =
-        typeof window !== "undefined" &&
-        window.confirm(`${operator.name || operator.email} 운영자의 ${label}하시겠습니까?`);
-      if (!confirmed) return;
+      if (previewMode) return;
       const user = getFirebaseAuth().currentUser;
       if (!user) return;
       setOperatorActionLoading(true);
@@ -1459,34 +1590,45 @@ export function AdminDashboard() {
           | { ok?: boolean; error?: string }
           | null;
         if (!res.ok || !data?.ok) {
-          throw new Error(data?.error ?? "운영자 권한 변경에 실패했습니다.");
+          throw new Error(copy.message("operatorPermissionFailed"));
         }
         setActionMessage({
           tone: "success",
-          text: nextStatus === "active" ? "운영자 권한을 부여했습니다." : "운영자 권한을 회수했습니다.",
+          text:
+            nextStatus === "active"
+              ? copy.message("operatorPermissionGranted")
+              : copy.message("operatorPermissionRevoked"),
         });
+        setOperatorConfirmation(null);
         await refreshDashboard();
-      } catch (err) {
+      } catch {
         setActionMessage({
           tone: "error",
-          text: err instanceof Error ? err.message : "운영자 권한 변경에 실패했습니다.",
+          text: copy.message("operatorPermissionFailed"),
         });
       } finally {
         setOperatorActionLoading(false);
       }
     },
-    [refreshDashboard],
+    [
+      refreshDashboard,
+      previewMode,
+      copy,
+      setActionMessage,
+      setOperatorActionLoading,
+      setOperatorConfirmation,
+    ],
   );
 
   const resetOperatorPassword = useCallback(
-    async (operator: UserRecord) => {
-      const password =
-        typeof window !== "undefined"
-          ? window.prompt("새 임시 비밀번호를 입력하세요. 8자 이상이어야 합니다.")
-          : null;
+    async (operator: UserRecord, password: string) => {
+      if (previewMode) return;
       if (!password) return;
       if (password.length < 8) {
-        setActionMessage({ tone: "error", text: "비밀번호는 8자 이상이어야 합니다." });
+        setActionMessage({
+          tone: "error",
+          text: copy.message("passwordTooShort"),
+        });
         return;
       }
       const user = getFirebaseAuth().currentUser;
@@ -1506,28 +1648,36 @@ export function AdminDashboard() {
           | { ok?: boolean; error?: string }
           | null;
         if (!res.ok || !data?.ok) {
-          throw new Error(data?.error ?? "비밀번호 재설정에 실패했습니다.");
+          throw new Error(copy.message("passwordResetFailed"));
         }
-        setActionMessage({ tone: "success", text: "운영자 비밀번호를 재설정했습니다." });
+        setActionMessage({
+          tone: "success",
+          text: copy.message("passwordReset"),
+        });
+        setOperatorConfirmation(null);
         await refreshDashboard();
-      } catch (err) {
+      } catch {
         setActionMessage({
           tone: "error",
-          text: err instanceof Error ? err.message : "비밀번호 재설정에 실패했습니다.",
+          text: copy.message("passwordResetFailed"),
         });
       } finally {
         setOperatorActionLoading(false);
       }
     },
-    [refreshDashboard],
+    [
+      refreshDashboard,
+      previewMode,
+      copy,
+      setActionMessage,
+      setOperatorActionLoading,
+      setOperatorConfirmation,
+    ],
   );
 
   const deleteOperator = useCallback(
     async (operator: UserRecord) => {
-      const confirmed =
-        typeof window !== "undefined" &&
-        window.confirm(`${operator.name || operator.email} 운영자 계정을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`);
-      if (!confirmed) return;
+      if (previewMode) return;
       const user = getFirebaseAuth().currentUser;
       if (!user) return;
       setOperatorActionLoading(true);
@@ -1541,21 +1691,33 @@ export function AdminDashboard() {
           | { ok?: boolean; error?: string }
           | null;
         if (!res.ok || !data?.ok) {
-          throw new Error(data?.error ?? "운영자 계정 삭제에 실패했습니다.");
+          throw new Error(copy.message("operatorDeleteFailed"));
         }
         setSelectedOperatorUid(null);
-        setActionMessage({ tone: "success", text: "운영자 계정을 삭제했습니다." });
+        setActionMessage({
+          tone: "success",
+          text: copy.message("operatorDeleted"),
+        });
+        setOperatorConfirmation(null);
         await refreshDashboard();
-      } catch (err) {
+      } catch {
         setActionMessage({
           tone: "error",
-          text: err instanceof Error ? err.message : "운영자 계정 삭제에 실패했습니다.",
+          text: copy.message("operatorDeleteFailed"),
         });
       } finally {
         setOperatorActionLoading(false);
       }
     },
-    [refreshDashboard],
+    [
+      refreshDashboard,
+      previewMode,
+      copy,
+      setActionMessage,
+      setOperatorActionLoading,
+      setOperatorConfirmation,
+      setSelectedOperatorUid,
+    ],
   );
 
   // -- Loading / Denied / Error ---------------------------------------------
@@ -1564,8 +1726,8 @@ export function AdminDashboard() {
       <div className="admin-state">
         <div className="admin-state__card">
           <div className="admin-state__spinner" aria-hidden="true" />
-          <h2>관리자 콘솔을 준비하고 있습니다</h2>
-          <p>Firebase 인증 상태와 데이터 권한을 확인 중입니다.</p>
+          <h2>{copy.message("loading")}</h2>
+          <p>{copy.message("loadingDescription")}</p>
         </div>
       </div>
     );
@@ -1575,14 +1737,14 @@ export function AdminDashboard() {
     return (
       <div className="admin-state">
         <div className="admin-state__card">
-          <h2>접근 권한이 없습니다</h2>
-          <p>관리자 권한이 부여된 계정으로만 접근할 수 있습니다.</p>
+          <h2>{copy.message("denied")}</h2>
+          <p>{copy.message("deniedDescription")}</p>
           <button
             className="admin-btn admin-btn--primary"
             type="button"
             onClick={() => signOut(getFirebaseAuth()).then(() => router.push("/login"))}
           >
-            관리자 계정으로 다시 로그인
+            {copy.message("loginAgain")}
           </button>
         </div>
       </div>
@@ -1593,10 +1755,10 @@ export function AdminDashboard() {
     return (
       <div className="admin-state">
         <div className="admin-state__card admin-state__card--error">
-          <h2>데이터를 불러오지 못했습니다</h2>
+          <h2>{copy.message("genericError")}</h2>
           <p>{error}</p>
           <button className="admin-btn" type="button" onClick={() => void refreshDashboard()}>
-            다시 시도
+            {copy.message("retry")}
           </button>
         </div>
       </div>
@@ -1605,13 +1767,17 @@ export function AdminDashboard() {
 
   // -- Render ---------------------------------------------------------------
   return (
+    <AdminOperationsCopyContext.Provider value={copy}>
     <div className="admin-shell">
-      <aside className="admin-sidebar" aria-label="관리자 콘솔 내비게이션">
+      <aside
+        className="admin-sidebar"
+        aria-label={copy.section("navigation").text("navigationAriaLabel")}
+      >
         <div className="admin-brand">
           <div className="admin-brand__mark" aria-hidden="true">N</div>
           <div className="admin-brand__meta">
-            <strong>농협지원센터</strong>
-            <span>Admin Console</span>
+            <strong>{copy.section("navigation").text("brandName")}</strong>
+            <span>{copy.section("navigation").text("brandSubtitle")}</span>
           </div>
         </div>
 
@@ -1636,15 +1802,22 @@ export function AdminDashboard() {
             </div>
             <div className="admin-user__meta">
               <strong>{currentUser?.email ?? "admin"}</strong>
-              <span>운영자 · 슈퍼관리자</span>
+              <span>{copy.section("navigation").text("operatorRole")}</span>
             </div>
           </div>
           <button
             className="admin-btn admin-btn--ghost admin-btn--block"
             type="button"
+            onClick={() => router.push("/admin")}
+          >
+            {copy.section("navigation").text("backToContent")}
+          </button>
+          <button
+            className="admin-btn admin-btn--ghost admin-btn--block"
+            type="button"
             onClick={() => signOut(getFirebaseAuth()).then(() => router.push("/login"))}
           >
-            로그아웃
+            {copy.section("navigation").text("logout")}
           </button>
         </div>
       </aside>
@@ -1652,13 +1825,19 @@ export function AdminDashboard() {
       <section className="admin-main">
         <header className="admin-topbar">
           <div>
-            <p className="admin-topbar__crumb">Console / {TABS.find((item) => item.key === tab)?.label}</p>
+            <p className="admin-topbar__crumb">
+              {copy.section("navigation").text("breadcrumbPrefix")} /{" "}
+              {TABS.find((item) => item.key === tab)?.label}
+            </p>
             <h1 className="admin-topbar__title">{TABS.find((item) => item.key === tab)?.label}</h1>
             <p className="admin-topbar__hint">{TABS.find((item) => item.key === tab)?.description}</p>
           </div>
           <div className="admin-topbar__actions">
             <span className="admin-topbar__updated">
-              마지막 동기화 {lastUpdated ? formatRelative(lastUpdated.toISOString(), referenceTime) : "-"}
+              {copy.section("navigation").text("lastSynced")}{" "}
+              {lastUpdated
+                ? formatRelative(lastUpdated.toISOString(), referenceTime, copy)
+                : "-"}
             </span>
             <button
               type="button"
@@ -1666,7 +1845,9 @@ export function AdminDashboard() {
               onClick={() => void refreshDashboard()}
               disabled={refreshing}
             >
-              {refreshing ? "새로고침 중..." : "새로고침"}
+              {refreshing
+                ? copy.section("navigation").text("refreshing")
+                : copy.section("navigation").text("refresh")}
             </button>
           </div>
         </header>
@@ -1677,7 +1858,7 @@ export function AdminDashboard() {
             <button
               type="button"
               className="admin-toast__close"
-              aria-label="닫기"
+              aria-label={copy.section("navigation").text("closeAriaLabel")}
               onClick={() => setActionMessage(null)}
             >
               ×
@@ -1689,35 +1870,35 @@ export function AdminDashboard() {
           <div className="admin-grid">
             <div className="admin-kpi-grid">
               <KpiCard
-                label="가입 회원"
+                label={copy.section("overview").text("memberKpi")}
                 value={memberUsers.length.toLocaleString()}
-                suffix="명"
+                suffix={copy.section("overview").text("peopleUnit")}
                 delta={memberDelta}
                 series={signupsSeries.map((point) => point.value)}
                 tone="blue"
               />
               <KpiCard
-                label="문의 접수"
+                label={copy.section("overview").text("requestKpi")}
                 value={requests.length.toLocaleString()}
-                suffix="건"
+                suffix={copy.section("overview").text("countUnit")}
                 delta={requestDelta}
                 series={inquiriesSeries.map((point) => point.value)}
                 tone="amber"
               />
               <KpiCard
-                label="등록 답변"
+                label={copy.section("overview").text("answerKpi")}
                 value={answers.length.toLocaleString()}
-                suffix="건"
+                suffix={copy.section("overview").text("countUnit")}
                 delta={answerDelta}
                 series={answersSeries.map((point) => point.value)}
                 tone="green"
               />
               <KpiCard
-                label="고객 평가"
+                label={copy.section("overview").text("ratingKpi")}
                 value={ratings.length ? ratingScoreAvg.toFixed(2) : "-"}
                 suffix={ratings.length ? "/5.0" : ""}
                 delta={ratingDelta}
-                helper={`도움됨 ${(helpfulRate * 100).toFixed(0)}% · ${ratings.length}건`}
+                helper={`${copy.section("overview").text("helpfulPrefix")} ${(helpfulRate * 100).toFixed(0)}% · ${ratings.length}${copy.section("overview").text("countUnit")}`}
                 tone="violet"
               />
             </div>
@@ -1725,20 +1906,23 @@ export function AdminDashboard() {
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>운영 추이</h2>
-                  <p>최근 14일간 회원가입 · 문의 · 답변 흐름</p>
+                  <h2>{copy.section("overview").text("trendTitle")}</h2>
+                  <p>{copy.section("overview").text("trendDescription")}</p>
                 </div>
                 <span className="admin-card__legend">
-                  <i className="dot dot--blue" /> 가입
-                  <i className="dot dot--amber" /> 문의
-                  <i className="dot dot--green" /> 답변
+                  <i className="dot dot--blue" />{" "}
+                  {copy.section("overview").text("signupLegend")}
+                  <i className="dot dot--amber" />{" "}
+                  {copy.section("overview").text("inquiryLegend")}
+                  <i className="dot dot--green" />{" "}
+                  {copy.section("overview").text("answerLegend")}
                 </span>
               </header>
               <TrendChart
                 series={[
-                  { name: "가입", color: "#3b82f6", values: signupsSeries.map((point) => point.value) },
-                  { name: "문의", color: "#f59e0b", values: inquiriesSeries.map((point) => point.value) },
-                  { name: "답변", color: "#10b981", values: answersSeries.map((point) => point.value) },
+                  { name: copy.section("overview").text("signupLegend"), color: "#3b82f6", values: signupsSeries.map((point) => point.value) },
+                  { name: copy.section("overview").text("inquiryLegend"), color: "#f59e0b", values: inquiriesSeries.map((point) => point.value) },
+                  { name: copy.section("overview").text("answerLegend"), color: "#10b981", values: answersSeries.map((point) => point.value) },
                 ]}
                 labels={inquiriesSeries.map((point) => point.label)}
               />
@@ -1747,30 +1931,33 @@ export function AdminDashboard() {
             <div className="admin-card">
               <header className="admin-card__head">
                 <div>
-                  <h2>주요 지표</h2>
-                  <p>응답률과 포인트 사용을 한눈에</p>
+                  <h2>{copy.section("overview").text("metricsTitle")}</h2>
+                  <p>{copy.section("overview").text("metricsDescription")}</p>
                 </div>
               </header>
               <ul className="admin-stat-list">
                 <li>
-                  <span>답변률</span>
+                  <span>{copy.section("overview").text("answerRate")}</span>
                   <strong>{(answerRate * 100).toFixed(1)}%</strong>
-                  <em>{answeredCount}/{requests.length} 건</em>
+                  <em>
+                    {answeredCount}/{requests.length}{" "}
+                    {copy.section("overview").text("countUnit")}
+                  </em>
                 </li>
                 <li>
-                  <span>활성 농협</span>
+                  <span>{copy.section("overview").text("activeOrganizations")}</span>
                   <strong>{organizations.length.toLocaleString()}</strong>
-                  <em>지갑 보유 조직</em>
+                  <em>{copy.section("overview").text("walletOrganizations")}</em>
                 </li>
                 <li>
-                  <span>전체 지갑 잔액</span>
-                  <strong>{formatPoints(totalWalletBalance)}</strong>
-                  <em>{organizations.length}개 조직 합계</em>
+                  <span>{copy.section("overview").text("totalWalletBalance")}</span>
+                  <strong>{formatPoints(totalWalletBalance, copy)}</strong>
+                  <em>{organizations.length}{copy.section("overview").text("organizationTotalSuffix")}</em>
                 </li>
                 <li>
-                  <span>최근 30일 사용</span>
-                  <strong>{formatPoints(pointsSpent30d)}</strong>
-                  <em>답변 열람 · 운영자 차감</em>
+                  <span>{copy.section("overview").text("recentSpend")}</span>
+                  <strong>{formatPoints(pointsSpent30d, copy)}</strong>
+                  <em>{copy.section("overview").text("recentSpendHelp")}</em>
                 </li>
               </ul>
             </div>
@@ -1778,11 +1965,11 @@ export function AdminDashboard() {
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>최근 활동</h2>
-                  <p>운영자 작업 · 시스템 변경 이력</p>
+                  <h2>{copy.section("overview").text("recentActivityTitle")}</h2>
+                  <p>{copy.section("overview").text("recentActivityDescription")}</p>
                 </div>
                 <button type="button" className="admin-link" onClick={() => setTab("audit")}>
-                  전체 보기 →
+                  {copy.section("overview").text("viewAll")}
                 </button>
               </header>
               <ul className="admin-activity admin-activity--detailed">
@@ -1796,7 +1983,7 @@ export function AdminDashboard() {
                       <div className="admin-activity__headline">
                         <strong>{item.actionLabel}</strong>
                         <span className="admin-activity__target">
-                          <span className="admin-activity__label">대상</span>
+                          <span className="admin-activity__label">{copy.section("overview").text("targetLabel")}</span>
                           <span>{item.targetLabel}</span>
                           {item.targetSub && (
                             <span className="admin-cell-sub">{item.targetSub}</span>
@@ -1807,17 +1994,17 @@ export function AdminDashboard() {
                         <span className="admin-chip admin-chip--muted">
                           {item.targetTypeLabel}
                         </span>
-                        <span>작업자 {item.actorName}</span>
+                        <span>{copy.section("overview").text("actorLabel")} {item.actorName}</span>
                         <time title={formatDate(item.time)}>
-                          <span className="admin-activity__label">발생 시각</span>
-                          {formatRelative(item.time, referenceTime)}
+                          <span className="admin-activity__label">{copy.section("overview").text("occurredAtLabel")}</span>
+                          {formatRelative(item.time, referenceTime, copy)}
                         </time>
                       </div>
                     </div>
                   </li>
                 ))}
                 {recentActivity.length === 0 && (
-                  <li className="admin-empty">기록된 활동이 없습니다.</li>
+                  <li className="admin-empty">{copy.section("overview").text("noActivity")}</li>
                 )}
               </ul>
             </div>
@@ -1825,8 +2012,8 @@ export function AdminDashboard() {
             <div className="admin-card">
               <header className="admin-card__head">
                 <div>
-                  <h2>문의 상위 농협</h2>
-                  <p>접수 건수 기준 Top 6</p>
+                  <h2>{copy.section("overview").text("topOrganizationsTitle")}</h2>
+                  <p>{copy.section("overview").text("topOrganizationsDescription")}</p>
                 </div>
               </header>
               <ul className="admin-rank">
@@ -1834,10 +2021,13 @@ export function AdminDashboard() {
                   <li key={row.name}>
                     <span className="admin-rank__index">{index + 1}</span>
                     <span className="admin-rank__name">{row.name}</span>
-                    <span className="admin-rank__value">{row.count}건</span>
+                    <span className="admin-rank__value">
+                      {row.count}
+                      {copy.section("overview").text("countUnit")}
+                    </span>
                   </li>
                 ))}
-                {orgInquiryCounts.length === 0 && <li className="admin-empty">데이터 없음</li>}
+                {orgInquiryCounts.length === 0 && <li className="admin-empty">{copy.section("overview").text("noData")}</li>}
               </ul>
             </div>
           </div>
@@ -1845,7 +2035,7 @@ export function AdminDashboard() {
 
         {tab === "members" && (
           <>
-            <div className="admin-subtabs" role="tablist" aria-label="회원 및 운영자 관리 보기">
+            <div className="admin-subtabs" role="tablist" aria-label={copy.section("members").text("subtabsAriaLabel")}>
               <button
                 type="button"
                 role="tab"
@@ -1853,8 +2043,8 @@ export function AdminDashboard() {
                 className={`admin-subtab${memberSubtab === "members" ? " is-active" : ""}`}
                 onClick={() => setMemberSubtab("members")}
               >
-                <span>회원 관리</span>
-                <em>가입 승인, 회원 상태, 소속 농협과 포인트 정보를 관리합니다.</em>
+                <span>{copy.section("members").item("members")}</span>
+                <em>{copy.section("members").text("memberTabDescription")}</em>
               </button>
               <button
                 type="button"
@@ -1863,8 +2053,8 @@ export function AdminDashboard() {
                 className={`admin-subtab${memberSubtab === "operators" ? " is-active" : ""}`}
                 onClick={() => setMemberSubtab("operators")}
               >
-                <span>운영자 관리</span>
-                <em>운영자 계정, 권한, 비밀번호와 삭제 이력을 관리합니다.</em>
+                <span>{copy.section("members").item("operators")}</span>
+                <em>{copy.section("members").text("operatorTabDescription")}</em>
               </button>
             </div>
 
@@ -1873,13 +2063,13 @@ export function AdminDashboard() {
                 <div className="admin-card admin-card--span-2">
                   <header className="admin-card__head">
                     <div>
-                      <h2>회원 목록</h2>
-                      <p>전체 {memberUsers.length.toLocaleString()}명 · 최근 가입 순</p>
+                      <h2>{copy.section("members").text("memberListTitle")}</h2>
+                      <p>{copy.section("inquiries").text("totalPrefix")} {memberUsers.length.toLocaleString()}{copy.section("members").text("memberListSuffix")}</p>
                     </div>
                     <input
                       type="search"
                       className="admin-search"
-                      placeholder="이름, 이메일, 농협, 직책 검색"
+                      placeholder={copy.section("members").text("memberSearchPlaceholder")}
                       value={memberSearch}
                       onChange={(event) => setMemberSearch(event.target.value)}
                     />
@@ -1888,12 +2078,12 @@ export function AdminDashboard() {
                     <table className="admin-table">
                       <thead>
                         <tr>
-                          <th>회원</th>
-                          <th>소속 농협</th>
-                          <th>직책 · 담당</th>
-                          <th>상태</th>
-                          <th>마케팅</th>
-                          <th>가입일</th>
+                          <th>{copy.section("members").text("memberColumn")}</th>
+                          <th>{copy.section("members").text("organizationColumn")}</th>
+                          <th>{copy.section("members").text("roleColumn")}</th>
+                          <th>{copy.section("members").text("statusColumn")}</th>
+                          <th>{copy.section("members").text("marketingColumn")}</th>
+                          <th>{copy.section("members").text("joinedColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1913,23 +2103,23 @@ export function AdminDashboard() {
                                   setSelectedMemberUid(user.uid);
                                 }
                               }}
-                              aria-label={`${user.name || user.email} 회원 상세 보기`}
+                              aria-label={`${user.name || user.email} ${copy.section("members").text("memberDetailAriaSuffix")}`}
                             >
                               <td>
                                 <div className="admin-cell-user">
                                   <span className="admin-avatar" aria-hidden="true">{initial}</span>
                                   <div>
-                                    <strong>{user.name || "이름 미입력"}</strong>
+                                    <strong>{user.name || copy.section("members").text("unnamed")}</strong>
                                     <span>{user.email}</span>
                                   </div>
                                 </div>
                               </td>
                               <td>
-                                <strong>{user.cooperativeName ?? user.manualCooperativeName ?? "미지정"}</strong>
+                                <strong>{user.cooperativeName ?? user.manualCooperativeName ?? copy.section("members").text("unspecified")}</strong>
                                 <span className="admin-cell-sub">
                                   {user.cooperativeId
-                                    ? `농협 코드 ${user.cooperativeId}`
-                                    : "농협 코드 미지정"}
+                                    ? `${copy.section("members").text("organizationCode")} ${user.cooperativeId}`
+                                    : copy.section("members").text("organizationCodeMissing")}
                                 </span>
                               </td>
                               <td>
@@ -1941,14 +2131,21 @@ export function AdminDashboard() {
                                   className={`admin-pill admin-pill--${getMemberStatusTone(user.status)}`}
                                 >
                                   <span className="admin-pill__dot" aria-hidden="true" />
-                                  {getMemberStatusLabel(user.status, "short")}
+                                  {memberStatusLabel(copy, user.status, true)}
                                 </span>
                               </td>
                               <td>
                                 <span className="admin-cell-sub">
-                                  {[user.consents?.email && "이메일", user.consents?.sms && "SMS", user.consents?.kakao && "카카오"]
+                                  {[
+                                    user.consents?.email &&
+                                      copy.section("members").text("emailChannel"),
+                                    user.consents?.sms &&
+                                      copy.section("members").text("smsChannel"),
+                                    user.consents?.kakao &&
+                                      copy.section("members").text("kakaoChannel"),
+                                  ]
                                     .filter(Boolean)
-                                    .join(" · ") || "수신 거부"}
+                                    .join(" · ") || copy.section("members").text("optedOut")}
                                 </span>
                               </td>
                               <td>{formatDate(user.createdAt)}</td>
@@ -1957,7 +2154,7 @@ export function AdminDashboard() {
                         })}
                         {filteredMembers.length === 0 && (
                           <tr>
-                            <td colSpan={6} className="admin-empty">조건에 맞는 회원이 없습니다.</td>
+                            <td colSpan={6} className="admin-empty">{copy.section("members").text("memberEmpty")}</td>
                           </tr>
                         )}
                       </tbody>
@@ -1981,14 +2178,14 @@ export function AdminDashboard() {
                 <div className="admin-card admin-card--span-2">
                   <header className="admin-card__head">
                     <div>
-                      <h2>운영자 목록</h2>
-                      <p>전체 {operatorUsers.length.toLocaleString()}명 · 권한 상태 관리</p>
+                      <h2>{copy.section("members").text("operatorListTitle")}</h2>
+                      <p>{copy.section("inquiries").text("totalPrefix")} {operatorUsers.length.toLocaleString()}{copy.section("members").text("operatorListSuffix")}</p>
                     </div>
                     <div className="admin-card__tools">
                       <input
                         type="search"
                         className="admin-search"
-                        placeholder="이름, 이메일, 역할 검색"
+                        placeholder={copy.section("members").text("operatorSearchPlaceholder")}
                         value={operatorSearch}
                         onChange={(event) => setOperatorSearch(event.target.value)}
                       />
@@ -1997,7 +2194,7 @@ export function AdminDashboard() {
                         className="admin-btn admin-btn--primary"
                         onClick={() => setOperatorEditor({ mode: "create", operator: null })}
                       >
-                        운영자 추가
+                        {copy.section("members").text("addOperator")}
                       </button>
                     </div>
                   </header>
@@ -2005,10 +2202,10 @@ export function AdminDashboard() {
                     <table className="admin-table">
                       <thead>
                         <tr>
-                          <th>운영자</th>
-                          <th>역할</th>
-                          <th>권한 상태</th>
-                          <th>최근 수정</th>
+                          <th>{copy.section("members").text("operatorColumn")}</th>
+                          <th>{copy.section("members").text("roleColumn")}</th>
+                          <th>{copy.section("members").text("permissionColumn")}</th>
+                          <th>{copy.section("members").text("updatedColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2028,27 +2225,29 @@ export function AdminDashboard() {
                                   setSelectedOperatorUid(operator.uid);
                                 }
                               }}
-                              aria-label={`${operator.name || operator.email} 운영자 상세 보기`}
+                              aria-label={`${operator.name || operator.email} ${copy.section("members").text("operatorDetailAriaSuffix")}`}
                             >
                               <td>
                                 <div className="admin-cell-user">
                                   <span className="admin-avatar" aria-hidden="true">{initial}</span>
                                   <div>
-                                    <strong>{operator.name || "이름 미입력"}</strong>
+                                    <strong>{operator.name || copy.section("members").text("unnamed")}</strong>
                                     <span>{operator.email}</span>
                                   </div>
                                 </div>
                               </td>
                               <td>
-                                <strong>{operator.position || "운영자"}</strong>
-                                <span className="admin-cell-sub">{operator.duty || "관리자"}</span>
+                                <strong>{operator.position || copy.section("members").text("operatorRoleFallback")}</strong>
+                                <span className="admin-cell-sub">{operator.duty || copy.section("members").text("administratorFallback")}</span>
                               </td>
                               <td>
                                 <span
                                   className={`admin-pill admin-pill--${getMemberStatusTone(operator.status)}`}
                                 >
                                   <span className="admin-pill__dot" aria-hidden="true" />
-                                  {operator.status === "active" ? "권한 부여" : "권한 회수"}
+                                  {operator.status === "active"
+                                    ? copy.section("members").text("permissionGranted")
+                                    : copy.section("members").text("permissionRevoked")}
                                 </span>
                               </td>
                               <td>{formatDate(operator.updatedAt ?? operator.createdAt)}</td>
@@ -2057,7 +2256,7 @@ export function AdminDashboard() {
                         })}
                         {filteredOperators.length === 0 && (
                           <tr>
-                            <td colSpan={4} className="admin-empty">조건에 맞는 운영자가 없습니다.</td>
+                            <td colSpan={4} className="admin-empty">{copy.section("members").text("operatorEmpty")}</td>
                           </tr>
                         )}
                       </tbody>
@@ -2072,10 +2271,18 @@ export function AdminDashboard() {
                   loading={operatorActionLoading}
                   onEdit={(operator) => setOperatorEditor({ mode: "edit", operator })}
                   onChangePermission={(operator, status) =>
-                    void changeOperatorPermission(operator, status)
+                    setOperatorConfirmation({
+                      kind: "permission",
+                      operator,
+                      nextStatus: status,
+                    })
                   }
-                  onResetPassword={(operator) => void resetOperatorPassword(operator)}
-                  onDelete={(operator) => void deleteOperator(operator)}
+                  onResetPassword={(operator) =>
+                    setOperatorConfirmation({ kind: "password", operator })
+                  }
+                  onDelete={(operator) =>
+                    setOperatorConfirmation({ kind: "delete", operator })
+                  }
                 />
               </div>
             )}
@@ -2083,7 +2290,7 @@ export function AdminDashboard() {
         )}
 
         {tab === "inquiries" && (
-          <div className="admin-subtabs" role="tablist" aria-label="문의 영역 보기">
+          <div className="admin-subtabs" role="tablist" aria-label={inquiryCopy.text("subtabsAriaLabel")}>
             <button
               type="button"
               role="tab"
@@ -2091,8 +2298,8 @@ export function AdminDashboard() {
               className={`admin-subtab${inquirySubtab === "requests" ? " is-active" : ""}`}
               onClick={() => setInquirySubtab("requests")}
             >
-              <span>문의 관리</span>
-              <em>접수된 상담을 확인하고 답변을 등록합니다.</em>
+              <span>{inquiryCopy.item("requests")}</span>
+              <em>{inquiryCopy.text("requestTabDescription")}</em>
             </button>
             <button
               type="button"
@@ -2101,8 +2308,8 @@ export function AdminDashboard() {
               className={`admin-subtab${inquirySubtab === "faq" ? " is-active" : ""}`}
               onClick={() => setInquirySubtab("faq")}
             >
-              <span>FAQ 관리</span>
-              <em>홈페이지에 노출되는 자주 묻는 질문을 관리합니다.</em>
+              <span>{inquiryCopy.item("faq")}</span>
+              <em>{inquiryCopy.text("faqTabDescription")}</em>
             </button>
           </div>
         )}
@@ -2112,35 +2319,40 @@ export function AdminDashboard() {
             <div className="admin-card admin-card--full admin-inquiries-card">
               <header className="admin-card__head admin-card__head--column">
                 <div>
-                  <h2>상담 · 견적 요청</h2>
+                  <h2>{inquiryCopy.text("requestListTitle")}</h2>
                   <p>
-                    전체 {requests.length.toLocaleString()}건 · 필터 적용 결과{" "}
-                    {filteredRequests.length.toLocaleString()}건
+                    {inquiryCopy.text("totalPrefix")}{" "}
+                    {requests.length.toLocaleString()}
+                    {inquiryCopy.text("countUnit")} ·{" "}
+                    {inquiryCopy.text("filteredPrefix")}{" "}
+                    {filteredRequests.length.toLocaleString()}
+                    {inquiryCopy.text("countUnit")}
                     {requestSearch.trim() && (
                       <>
                         {" "}
-                        · 검색 &quot;{requestSearch.trim()}&quot;
+                        · {inquiryCopy.text("searchPrefix")} &quot;
+                        {requestSearch.trim()}&quot;
                       </>
                     )}
                     <span className="admin-inquiry-sort-hint">
-                      · 정렬: 답변 대기 우선, 접수일 오래된 순
+                      · {inquiryCopy.text("sortHint")}
                     </span>
                   </p>
                 </div>
                 <div className="admin-inquiry-filters">
                   <div className="admin-inquiry-search">
                     <label className="admin-inquiry-search__label" htmlFor="admin-inquiry-search">
-                      통합 검색
+                      {inquiryCopy.text("unifiedSearch")}
                     </label>
                     <div className="admin-inquiry-search__field">
                       <input
                         id="admin-inquiry-search"
                         className="admin-input"
                         type="search"
-                        placeholder="접수번호 / 문의 제목 / 작성자 / 담당자 검색"
+                        placeholder={inquiryCopy.text("requestSearchPlaceholder")}
                         value={requestSearch}
                         onChange={(event) => setRequestSearch(event.target.value)}
-                        aria-label="접수번호, 문의 제목, 작성자, 담당자 통합 검색"
+                        aria-label={inquiryCopy.text("requestSearchAriaLabel")}
                         autoComplete="off"
                       />
                       {requestSearch.trim() && (
@@ -2148,9 +2360,9 @@ export function AdminDashboard() {
                           type="button"
                           className="admin-inquiry-search__clear"
                           onClick={() => setRequestSearch("")}
-                          aria-label="검색어 지우기"
+                          aria-label={inquiryCopy.text("clearSearchAriaLabel")}
                         >
-                          지우기
+                          {inquiryCopy.text("clearSearch")}
                         </button>
                       )}
                     </div>
@@ -2161,7 +2373,7 @@ export function AdminDashboard() {
                     value={requestCoopFilter}
                     onChange={(event) => setRequestCoopFilter(event.target.value)}
                   >
-                    <option value="">전체 농협</option>
+                    <option value="">{inquiryCopy.text("allOrganizations")}</option>
                     {organizations.map((organization) => (
                       <option
                         key={organization.cooperativeId}
@@ -2176,9 +2388,9 @@ export function AdminDashboard() {
                     value={requestStatusFilter}
                     onChange={(event) => setRequestStatusFilter(event.target.value)}
                   >
-                    {REQUEST_STATUS_FILTER_OPTIONS.map((option) => (
-                      <option key={option.value || "all"} value={option.value}>
-                        {option.label}
+                    {ADMIN_REQUEST_STATUS_FILTERS.map((option) => (
+                      <option key={option.id} value={option.value}>
+                        {inquiryCopy.item(`requestStatus.${option.id}`)}
                       </option>
                     ))}
                   </select>
@@ -2187,10 +2399,11 @@ export function AdminDashboard() {
                     value={requestVisibilityFilter}
                     onChange={(event) => setRequestVisibilityFilter(event.target.value)}
                   >
-                    <option value="">전체 공개범위</option>
-                    <option value="PUBLIC">전체 공개</option>
-                    <option value="ORG_ONLY">농협 공개</option>
-                    <option value="PRIVATE">비공개</option>
+                    {ADMIN_VISIBILITY_FILTERS.map((option) => (
+                      <option key={option.id} value={option.value}>
+                        {inquiryCopy.item(`visibility.${option.id}`)}
+                      </option>
+                    ))}
                   </select>
                   </div>
                 </div>
@@ -2199,16 +2412,16 @@ export function AdminDashboard() {
                 <table className="admin-table admin-table--inquiries">
                   <thead>
                     <tr>
-                      <th>접수번호 · 제목</th>
-                      <th>작성자 · 농협</th>
-                      <th>공개범위</th>
-                      <th>상태</th>
-                      <th>담당자</th>
-                      <th>사용 포인트</th>
-                      <th>고객 평가</th>
-                      <th>접수일</th>
-                      <th>답변일</th>
-                      <th aria-label="작업" />
+                      <th>{inquiryCopy.text("referenceTitleColumn")}</th>
+                      <th>{inquiryCopy.text("authorOrganizationColumn")}</th>
+                      <th>{inquiryCopy.text("visibilityColumn")}</th>
+                      <th>{inquiryCopy.text("statusColumn")}</th>
+                      <th>{inquiryCopy.text("assigneeColumn")}</th>
+                      <th>{inquiryCopy.text("usedPointsColumn")}</th>
+                      <th>{inquiryCopy.text("ratingColumn")}</th>
+                      <th>{inquiryCopy.text("receivedAtColumn")}</th>
+                      <th>{inquiryCopy.text("answeredAtColumn")}</th>
+                      <th aria-label={inquiryCopy.text("actionColumnAriaLabel")} />
                     </tr>
                   </thead>
                   <tbody>
@@ -2226,11 +2439,16 @@ export function AdminDashboard() {
                               <strong>{request.subject}</strong>
                               {(request.attachments?.length ?? 0) > 0 && (
                                 <span className="admin-cell-sub">
-                                  첨부 {request.attachments?.length ?? 0}장
+                                  {inquiryCopy.text("attachmentPrefix")}{" "}
+                                  {request.attachments?.length ?? 0}
+                                  {inquiryCopy.text("attachmentUnit")}
                                 </span>
                               )}
                               {request.isFollowUp && (
-                                <span className="admin-cell-sub">↳ 추가 질문 · 원 문의 {request.parentRequestId}</span>
+                                <span className="admin-cell-sub">
+                                  ↳ {inquiryCopy.text("followupPrefix")}{" "}
+                                  {request.parentRequestId}
+                                </span>
                               )}
                             </div>
                           </td>
@@ -2251,12 +2469,14 @@ export function AdminDashboard() {
                                 <strong>{managers[0]}</strong>
                                 {managers.length > 1 && (
                                   <span className="admin-cell-sub">
-                                    외 {managers.length - 1}명
+                                    {inquiryCopy.text("additionalAssigneePrefix")}{" "}
+                                    {managers.length - 1}
+                                    {inquiryCopy.text("peopleUnit")}
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <span className="admin-pill admin-pill--slate">미배정</span>
+                              <span className="admin-pill admin-pill--slate">{inquiryCopy.text("unassigned")}</span>
                             )}
                           </td>
                           <td className="admin-inquiry-response">
@@ -2266,7 +2486,7 @@ export function AdminDashboard() {
                               </span>
                             ) : (
                               <span className="admin-inquiry-response__points">
-                                {(answer.pointCost ?? 0).toLocaleString()}P
+                                {formatPoints(answer.pointCost ?? 0, copy)}
                               </span>
                             )}
                           </td>
@@ -2286,7 +2506,9 @@ export function AdminDashboard() {
                                     getAnswerRespondedAt(answer, request) ?? undefined,
                                   )}
                                 </strong>
-                                <span className="admin-cell-sub">최종 답변</span>
+                                <span className="admin-cell-sub">
+                                  {inquiryCopy.text("finalAnswer")}
+                                </span>
                               </div>
                             ) : (
                               <span className="admin-cell-sub">-</span>
@@ -2301,9 +2523,9 @@ export function AdminDashboard() {
                                     type="button"
                                     className="admin-btn admin-btn--answer-complete admin-btn--sm"
                                     onClick={() => setActiveRequestId(request.id)}
-                                    aria-label={`${request.subject} 문의와 답변 상세 보기`}
+                                    aria-label={`${request.subject} ${inquiryCopy.text("detailAriaSuffix")}`}
                                   >
-                                    답변 완료
+                                    {inquiryCopy.text("answerComplete")}
                                   </button>
                                 );
                               }
@@ -2314,7 +2536,7 @@ export function AdminDashboard() {
                                     className="admin-btn admin-btn--answer-edit admin-btn--sm"
                                     onClick={() => setActiveRequestId(request.id)}
                                   >
-                                    답변 수정
+                                    {inquiryCopy.text("editAnswer")}
                                   </button>
                                 );
                               }
@@ -2324,7 +2546,7 @@ export function AdminDashboard() {
                                   className="admin-btn admin-btn--answer-write admin-btn--sm"
                                   onClick={() => setActiveRequestId(request.id)}
                                 >
-                                  답변 작성
+                                  {inquiryCopy.text("writeAnswer")}
                                 </button>
                               );
                             })()}
@@ -2334,7 +2556,7 @@ export function AdminDashboard() {
                     })}
                     {filteredRequests.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="admin-empty">조건에 맞는 문의가 없습니다.</td>
+                        <td colSpan={10} className="admin-empty">{inquiryCopy.text("inquiryEmpty")}</td>
                       </tr>
                     )}
                   </tbody>
@@ -2349,29 +2571,33 @@ export function AdminDashboard() {
             <div className="admin-card admin-card--full admin-faq-card">
               <header className="admin-card__head admin-card__head--column">
                 <div>
-                  <h2>FAQ 관리</h2>
+                  <h2>{inquiryCopy.text("faqTitle")}</h2>
                   <p>
-                    홈페이지 자주 묻는 질문 영역에 노출되는 콘텐츠를 관리합니다.
-                    전체 {faqs.length.toLocaleString()}건 · 필터 적용 결과{" "}
-                    {filteredFaqs.length.toLocaleString()}건
+                    {inquiryCopy.text("faqDescription")}
+                    {inquiryCopy.text("totalPrefix")}{" "}
+                    {faqs.length.toLocaleString()}
+                    {inquiryCopy.text("countUnit")} ·{" "}
+                    {inquiryCopy.text("filteredPrefix")}{" "}
+                    {filteredFaqs.length.toLocaleString()}
+                    {inquiryCopy.text("countUnit")}
                   </p>
                 </div>
                 <div className="admin-filter-row">
                   <input
                     className="admin-input admin-input--wide"
                     type="search"
-                    placeholder="제목, 카테고리, 본문 검색"
+                    placeholder={inquiryCopy.text("faqSearchPlaceholder")}
                     value={faqSearch}
                     onChange={(event) => setFaqSearch(event.target.value)}
-                    aria-label="FAQ 검색"
+                    aria-label={inquiryCopy.text("faqSearchAriaLabel")}
                   />
                   <select
                     className="admin-input"
                     value={faqCategoryFilter}
                     onChange={(event) => setFaqCategoryFilter(event.target.value)}
-                    aria-label="FAQ 카테고리"
+                    aria-label={inquiryCopy.text("faqCategoryAriaLabel")}
                   >
-                    <option value="">전체 카테고리</option>
+                    <option value="">{inquiryCopy.text("allCategories")}</option>
                     {faqCategories.map((category) => (
                       <option key={category} value={category}>
                         {category}
@@ -2382,21 +2608,25 @@ export function AdminDashboard() {
                     className="admin-input"
                     value={faqPublicFilter}
                     onChange={(event) => setFaqPublicFilter(event.target.value)}
-                    aria-label="FAQ 공개 여부"
+                    aria-label={inquiryCopy.text("faqPublicAriaLabel")}
                   >
-                    <option value="">전체 공개 여부</option>
-                    <option value="public">공개</option>
-                    <option value="private">비공개</option>
+                    {ADMIN_FAQ_PUBLIC_FILTERS.map((option) => (
+                      <option key={option.id} value={option.value}>
+                        {inquiryCopy.item(`faqPublic.${option.id}`)}
+                      </option>
+                    ))}
                   </select>
                   <select
                     className="admin-input"
                     value={faqDisplayFilter}
                     onChange={(event) => setFaqDisplayFilter(event.target.value)}
-                    aria-label="FAQ 노출 상태"
+                    aria-label={inquiryCopy.text("faqDisplayAriaLabel")}
                   >
-                    <option value="">전체 노출 상태</option>
-                    <option value="published">노출 중</option>
-                    <option value="draft">임시 저장</option>
+                    {ADMIN_FAQ_DISPLAY_FILTERS.map((option) => (
+                      <option key={option.id} value={option.value}>
+                        {inquiryCopy.item(`faqDisplay.${option.id}`)}
+                      </option>
+                    ))}
                   </select>
                   <button
                     type="button"
@@ -2405,7 +2635,7 @@ export function AdminDashboard() {
                       setFaqEditor({ mode: "create", faq: null })
                     }
                   >
-                    + FAQ 추가
+                    {inquiryCopy.text("addFaq")}
                   </button>
                 </div>
               </header>
@@ -2413,20 +2643,20 @@ export function AdminDashboard() {
                 <table className="admin-table admin-table--faq">
                   <thead>
                     <tr>
-                      <th>제목</th>
-                      <th>카테고리</th>
-                      <th>공개 여부</th>
-                      <th>노출 상태</th>
-                      <th>최종 수정일</th>
-                      <th>담당자</th>
-                      <th aria-label="작업" />
+                      <th>{inquiryCopy.text("faqQuestionColumn")}</th>
+                      <th>{inquiryCopy.text("faqCategoryColumn")}</th>
+                      <th>{inquiryCopy.text("faqPublicColumn")}</th>
+                      <th>{inquiryCopy.text("faqDisplayColumn")}</th>
+                      <th>{inquiryCopy.text("faqUpdatedColumn")}</th>
+                      <th>{inquiryCopy.text("faqManagerColumn")}</th>
+                      <th aria-label={inquiryCopy.text("actionColumnAriaLabel")} />
                     </tr>
                   </thead>
                   <tbody>
                     {faqLoading && faqs.length === 0 && (
                       <tr>
                         <td colSpan={7} className="admin-empty">
-                          FAQ를 불러오는 중입니다...
+                          {inquiryCopy.text("faqLoading")}
                         </td>
                       </tr>
                     )}
@@ -2434,8 +2664,8 @@ export function AdminDashboard() {
                       <tr>
                         <td colSpan={7} className="admin-empty">
                           {faqs.length === 0
-                            ? "등록된 FAQ가 없습니다. 우측 상단의 “+ FAQ 추가” 버튼으로 작성해 주세요."
-                            : "검색 조건에 맞는 FAQ가 없습니다."}
+                            ? inquiryCopy.text("faqEmpty")
+                            : inquiryCopy.text("faqFilteredEmpty")}
                         </td>
                       </tr>
                     )}
@@ -2460,7 +2690,9 @@ export function AdminDashboard() {
                           <span
                             className={`admin-pill admin-pill--${faq.isPublic ? "green" : "slate"}`}
                           >
-                            {faq.isPublic ? "공개" : "비공개"}
+                            {faq.isPublic
+                              ? inquiryCopy.item("faqPublic.public")
+                              : inquiryCopy.item("faqPublic.private")}
                           </span>
                         </td>
                         <td>
@@ -2468,8 +2700,8 @@ export function AdminDashboard() {
                             className={`admin-pill admin-pill--${faq.displayStatus === "published" ? "blue" : "amber"}`}
                           >
                             {faq.displayStatus === "published"
-                              ? "노출 중"
-                              : "임시 저장"}
+                              ? inquiryCopy.item("faqDisplay.published")
+                              : inquiryCopy.item("faqDisplay.draft")}
                           </span>
                         </td>
                         <td>{formatDate(faq.updatedAt)}</td>
@@ -2488,14 +2720,14 @@ export function AdminDashboard() {
                               setFaqEditor({ mode: "edit", faq })
                             }
                           >
-                            수정
+                            {inquiryCopy.text("edit")}
                           </button>
                           <button
                             type="button"
                             className="admin-btn admin-btn--danger admin-btn--sm"
-                            onClick={() => void deleteFaq(faq)}
+                            onClick={() => setFaqDeleteTarget(faq)}
                           >
-                            삭제
+                            {inquiryCopy.text("delete")}
                           </button>
                         </td>
                       </tr>
@@ -2508,7 +2740,11 @@ export function AdminDashboard() {
         )}
 
         {tab === "auditQuotes" && (
-          <AdminAuditQuotesPanel onMessage={setActionMessage} />
+          <AdminAuditQuotesPanel
+            onMessage={setActionMessage}
+            content={content}
+            previewMode={previewMode}
+          />
         )}
 
         {tab === "points" && (
@@ -2516,11 +2752,16 @@ export function AdminDashboard() {
             <div className="admin-card admin-points-list">
               <header className="admin-card__head">
                 <div>
-                  <h2>농협 지갑 목록</h2>
+                  <h2>{copy.section("points").text("walletListTitle")}</h2>
                   <p>
-                    전체 {organizations.length.toLocaleString()}개 · 검색{" "}
-                    {filteredPointOrganizations.length.toLocaleString()}개 · 합계{" "}
-                    {formatPoints(totalWalletBalance)}
+                    {inquiryCopy.text("totalPrefix")}{" "}
+                    {organizations.length.toLocaleString()}
+                    {copy.section("points").text("organizationUnit")} ·{" "}
+                    {copy.section("points").text("searchPrefix")}{" "}
+                    {filteredPointOrganizations.length.toLocaleString()}
+                    {copy.section("points").text("organizationUnit")} ·{" "}
+                    {copy.section("points").text("totalBalancePrefix")}{" "}
+                    {formatPoints(totalWalletBalance, copy)}
                   </p>
                 </div>
                 <button
@@ -2531,25 +2772,25 @@ export function AdminDashboard() {
                     setAllPointTransactionsOpen(true);
                   }}
                 >
-                  전체 거래 내역 보기
+                  {copy.section("points").text("allTransactions")}
                 </button>
               </header>
               <input
                 className="admin-input"
                 type="search"
-                placeholder="농협명 또는 조직 ID 검색"
+                placeholder={copy.section("points").text("walletSearchPlaceholder")}
                 value={pointOrgSearch}
                 onChange={(event) => setPointOrgSearch(event.target.value)}
-                aria-label="농협 지갑 검색"
+                aria-label={copy.section("points").text("walletSearchAriaLabel")}
               />
               <div className="admin-table-wrap">
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>농협</th>
-                      <th>회원 수</th>
-                      <th>잔액</th>
-                      <th>최근 업데이트</th>
+                      <th>{copy.section("points").text("organizationColumn")}</th>
+                      <th>{copy.section("points").text("memberCountColumn")}</th>
+                      <th>{copy.section("points").text("balanceColumn")}</th>
+                      <th>{copy.section("points").text("updatedColumn")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2571,16 +2812,20 @@ export function AdminDashboard() {
                             setPointAdjustSearch(organization.cooperativeName);
                           }
                         }}
-                        aria-label={`${organization.cooperativeName} 포인트 상세 보기`}
+                        aria-label={`${organization.cooperativeName} ${copy.section("points").text("pointDetailAriaSuffix")}`}
                       >
                         <td>
                           <strong>{organization.cooperativeName}</strong>
                           <span className="admin-cell-sub">
-                            농협 코드 {organization.cooperativeId || organization.nh_org_id || "-"}
+                            {copy.section("points").text("organizationCode")}{" "}
+                            {organization.cooperativeId || organization.nh_org_id || "-"}
                           </span>
                         </td>
-                        <td>{organization.users?.length ?? 0}명</td>
-                        <td><strong>{formatPoints(organization.walletBalance ?? 0)}</strong></td>
+                        <td>
+                          {organization.users?.length ?? 0}
+                          {copy.section("points").text("peopleUnit")}
+                        </td>
+                        <td><strong>{formatPoints(organization.walletBalance ?? 0, copy)}</strong></td>
                         <td>{formatDate(organization.updatedAt)}</td>
                       </tr>
                     ))}
@@ -2588,8 +2833,8 @@ export function AdminDashboard() {
                       <tr>
                         <td colSpan={4} className="admin-empty">
                           {organizations.length === 0
-                            ? "등록된 농협 지갑이 없습니다."
-                            : "검색 조건에 맞는 농협이 없습니다."}
+                            ? copy.section("points").text("walletEmpty")
+                            : copy.section("points").text("walletFilteredEmpty")}
                         </td>
                       </tr>
                     )}
@@ -2601,11 +2846,11 @@ export function AdminDashboard() {
             <div className="admin-card admin-point-detail">
               <header className="admin-card__head">
                 <div>
-                  <h2>선택 농협 상세</h2>
+                  <h2>{copy.section("points").text("selectedDetailTitle")}</h2>
                   <p>
                     {selectedPointOrganization
-                      ? `${selectedPointOrganization.cooperativeName} · 잔액 확인 · 조정 · 거래 내역`
-                      : "왼쪽 목록에서 농협을 선택하세요."}
+                      ? `${selectedPointOrganization.cooperativeName} · ${copy.section("points").text("selectedDetailSuffix")}`
+                      : copy.section("points").text("selectOrganization")}
                   </p>
                 </div>
               </header>
@@ -2613,27 +2858,30 @@ export function AdminDashboard() {
                 <>
                   <dl className="admin-point-summary">
                     <div>
-                      <dt>현재 잔액</dt>
-                      <dd>{formatPoints(selectedPointOrganization.walletBalance ?? 0)}</dd>
+                      <dt>{copy.section("points").text("currentBalance")}</dt>
+                      <dd>{formatPoints(selectedPointOrganization.walletBalance ?? 0, copy)}</dd>
                     </div>
                     <div>
-                      <dt>소속 회원</dt>
-                      <dd>{selectedPointOrganization.users?.length ?? 0}명</dd>
+                      <dt>{copy.section("points").text("organizationMembers")}</dt>
+                      <dd>
+                        {selectedPointOrganization.users?.length ?? 0}
+                        {copy.section("points").text("peopleUnit")}
+                      </dd>
                     </div>
                     <div>
-                      <dt>최근 업데이트</dt>
+                      <dt>{copy.section("points").text("updatedColumn")}</dt>
                       <dd>{formatDate(selectedPointOrganization.updatedAt)}</dd>
                     </div>
                   </dl>
 
                   <section className="admin-point-section">
-                    <h3>포인트 수동 조정</h3>
+                    <h3>{copy.section("points").text("manualAdjustmentTitle")}</h3>
                     <p className="admin-point-adjust-lede">
-                      적립은 양수, 차감은 음수로 입력해 주세요.
+                      {copy.section("points").text("adjustmentHelp")}
                     </p>
                     <form className="admin-form admin-form--adjust" onSubmit={requestPointAdjustment}>
                       <label className="admin-form__full admin-coop-search">
-                        <span>대상 농협</span>
+                        <span>{copy.section("points").text("targetOrganization")}</span>
                         <input
                           className="admin-input"
                           type="search"
@@ -2646,7 +2894,7 @@ export function AdminDashboard() {
                           onBlur={() => {
                             window.setTimeout(() => setPointAdjustSearchFocused(false), 150);
                           }}
-                          placeholder="농협명 또는 조직 ID 검색"
+                          placeholder={copy.section("points").text("walletSearchPlaceholder")}
                           autoComplete="off"
                           required
                         />
@@ -2654,7 +2902,7 @@ export function AdminDashboard() {
                           <div
                             className="admin-coop-search-results"
                             role="listbox"
-                            aria-label="농협 검색 결과"
+                            aria-label={copy.section("points").text("searchResultsAriaLabel")}
                           >
                             {pointAdjustSuggestions.map((organization) => (
                               <button
@@ -2678,7 +2926,7 @@ export function AdminDashboard() {
                               >
                                 <strong>{organization.cooperativeName}</strong>
                                 <span>
-                                  농협 코드{" "}
+                                  {copy.section("points").text("organizationCode")}{" "}
                                   {organization.cooperativeId || organization.nh_org_id || "-"}
                                 </span>
                               </button>
@@ -2688,19 +2936,19 @@ export function AdminDashboard() {
                       </label>
 
                       <div className="admin-point-balance-card">
-                        <span className="admin-point-balance-card__label">현재 지갑 잔액</span>
+                        <span className="admin-point-balance-card__label">{copy.section("points").text("currentWalletBalance")}</span>
                         <strong>
-                          {formatPoints(selectedPointOrganization.walletBalance ?? 0)}
+                          {formatPoints(selectedPointOrganization.walletBalance ?? 0, copy)}
                         </strong>
                       </div>
 
                       <label>
-                        <span>조정 포인트</span>
+                        <span>{copy.section("points").text("adjustmentPoints")}</span>
                         <input
                           className="admin-input admin-input--point"
                           type="text"
                           inputMode="numeric"
-                          placeholder="예: 10,000 또는 -10,000"
+                          placeholder={copy.section("points").text("adjustmentPlaceholder")}
                           value={pointAdjustmentAmount}
                           onChange={(event) =>
                             setPointAdjustmentAmount(formatSignedPointInput(event.target.value))
@@ -2713,14 +2961,14 @@ export function AdminDashboard() {
                           required
                         />
                         <small className="admin-form__hint">
-                          천 단위 콤마가 자동으로 표시됩니다.
+                          {copy.section("points").text("commaHelp")}
                         </small>
                       </label>
                       <label>
-                        <span>사유</span>
+                        <span>{copy.section("points").text("reason")}</span>
                         <input
                           className="admin-input"
-                          placeholder="조정 사유를 입력하세요"
+                          placeholder={copy.section("points").text("reasonPlaceholder")}
                           value={pointAdjustmentReason}
                           onChange={(event) => setPointAdjustmentReason(event.target.value)}
                           required
@@ -2728,27 +2976,28 @@ export function AdminDashboard() {
                       </label>
                       <dl className="admin-point-preview admin-point-preview--after">
                         <div>
-                          <dt>조정 후 예상 잔액</dt>
+                          <dt>{copy.section("points").text("expectedBalance")}</dt>
                           <dd
                             className={
                               pointAdjustmentBalanceAfter < 0 ? "is-danger" : undefined
                             }
                           >
-                            {formatPoints(pointAdjustmentBalanceAfter)}
+                            {formatPoints(pointAdjustmentBalanceAfter, copy)}
                           </dd>
                         </div>
                       </dl>
                       <button className="admin-btn admin-btn--primary admin-btn--block" type="submit">
-                        조정 내용 확인
+                        {copy.section("points").text("reviewAdjustment")}
                       </button>
                     </form>
                   </section>
 
                   <section className="admin-point-section">
                     <div className="admin-point-section__head">
-                      <h3>최근 거래 내역</h3>
+                      <h3>{copy.section("points").text("recentTransactions")}</h3>
                       <span className="admin-cell-sub">
-                        {selectedPointHistory.length.toLocaleString()}건
+                        {selectedPointHistory.length.toLocaleString()}
+                        {copy.section("points").text("countUnit")}
                       </span>
                     </div>
                     <PointHistoryTable
@@ -2766,13 +3015,13 @@ export function AdminDashboard() {
                           setAllPointTransactionsOpen(true);
                         }}
                       >
-                        이 농협 거래 더 보기
+                        {copy.section("points").text("moreTransactions")}
                       </button>
                     )}
                   </section>
                 </>
               ) : (
-                <div className="admin-empty">등록된 농협 지갑이 없습니다.</div>
+                <div className="admin-empty">{copy.section("points").text("walletEmpty")}</div>
               )}
             </div>
           </div>
@@ -2783,18 +3032,18 @@ export function AdminDashboard() {
             <div className="admin-card admin-card--span-2">
               <header className="admin-card__head">
                 <div>
-                  <h2>감사 로그</h2>
-                  <p>최근 {auditLogs.length}건의 운영자 활동</p>
+                  <h2>{copy.section("auditLog").text("title")}</h2>
+                  <p>{copy.section("auditLog").text("recentPrefix")} {auditLogs.length}{copy.section("auditLog").text("recentSuffix")}</p>
                 </div>
               </header>
               <div className="admin-table-wrap">
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>활동명</th>
-                      <th>대상</th>
-                      <th>작업자</th>
-                      <th>발생 시각</th>
+                      <th>{copy.section("auditLog").text("activityColumn")}</th>
+                      <th>{copy.section("auditLog").text("targetColumn")}</th>
+                      <th>{copy.section("auditLog").text("actorColumn")}</th>
+                      <th>{copy.section("auditLog").text("occurredAtColumn")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2823,7 +3072,7 @@ export function AdminDashboard() {
                           </td>
                           <td>
                             <div className="admin-cell-stack">
-                              <strong>{formatRelative(log.createdAt, referenceTime)}</strong>
+                              <strong>{formatRelative(log.createdAt, referenceTime, copy)}</strong>
                               <span className="admin-cell-sub">{formatDate(log.createdAt)}</span>
                             </div>
                           </td>
@@ -2832,7 +3081,7 @@ export function AdminDashboard() {
                     })}
                     {auditLogs.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="admin-empty">기록된 로그가 없습니다.</td>
+                        <td colSpan={4} className="admin-empty">{copy.section("auditLog").text("empty")}</td>
                       </tr>
                     )}
                   </tbody>
@@ -2918,6 +3167,7 @@ export function AdminDashboard() {
           mode={faqEditor.mode}
           faq={faqEditor.faq}
           loading={faqSaving}
+          categories={faqCategoryOptions}
           onClose={() => setFaqEditor(null)}
           onSubmit={(payload) =>
             submitFaq({
@@ -2928,7 +3178,33 @@ export function AdminDashboard() {
           }
         />
       )}
+      {faqDeleteTarget && (
+        <AdminConfirmationModal
+          title={copy.section("dialogs").text("deleteFaqDialogTitle")}
+          description={`“${faqDeleteTarget.question}”`}
+          warning={copy.section("dialogs").text("irreversibleWarning")}
+          confirmLabel={copy.section("inquiries").text("delete")}
+          loading={faqSaving}
+          onClose={() => setFaqDeleteTarget(null)}
+          onConfirm={() => void deleteFaq(faqDeleteTarget)}
+        />
+      )}
+      {operatorConfirmation && (
+        <OperatorActionConfirmModal
+          confirmation={operatorConfirmation}
+          loading={operatorActionLoading}
+          onClose={() => setOperatorConfirmation(null)}
+          onPermissionConfirm={(operator, status) =>
+            void changeOperatorPermission(operator, status)
+          }
+          onPasswordConfirm={(operator, password) =>
+            void resetOperatorPassword(operator, password)
+          }
+          onDeleteConfirm={(operator) => void deleteOperator(operator)}
+        />
+      )}
     </div>
+    </AdminOperationsCopyContext.Provider>
   );
 }
 
@@ -2949,63 +3225,70 @@ function PointAdjustmentConfirmModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const dialogCopy = copy.section("dialogs");
+  const pointsCopy = copy.section("points");
   const balanceAfter = draft.balanceBefore + draft.points;
 
   return (
-    <div className="admin-modal" role="dialog" aria-modal="true" aria-label="포인트 조정 확인">
+    <div className="admin-modal" role="dialog" aria-modal="true" aria-label={dialogCopy.text("pointConfirmAriaLabel")}>
       <button
         type="button"
         className="admin-modal__backdrop"
-        aria-label="닫기"
+        aria-label={dialogCopy.text("close")}
         onClick={onClose}
         disabled={loading}
       />
       <div className="admin-modal__panel admin-modal__panel--sm">
         <header className="admin-modal__head">
           <div>
-            <p className="admin-modal__eyebrow">포인트 조정 확인</p>
+            <p className="admin-modal__eyebrow">{dialogCopy.text("pointConfirmTitle")}</p>
             <h2>{draft.cooperativeName}</h2>
-            <p className="admin-cell-sub">농협 코드 {draft.cooperativeId}</p>
+            <p className="admin-cell-sub">
+              {pointsCopy.text("organizationCode")} {draft.cooperativeId}
+            </p>
           </div>
         </header>
         <div className="admin-modal__body">
           <p className="admin-modal__lede">
-            아래 내용으로 지갑 잔액을 조정합니다. 실행 후 포인트 원장과 감사 로그에 기록됩니다.
+            {dialogCopy.text("pointConfirmDescription")}
           </p>
           <dl className="admin-point-preview admin-point-preview--modal">
             <div>
-              <dt>현재 잔액</dt>
-              <dd>{formatPoints(draft.balanceBefore)}</dd>
+              <dt>{pointsCopy.text("currentBalance")}</dt>
+              <dd>{formatPoints(draft.balanceBefore, copy)}</dd>
             </div>
             <div>
-              <dt>조정 금액</dt>
+              <dt>{dialogCopy.text("adjustmentAmount")}</dt>
               <dd className={draft.points >= 0 ? "is-credit" : "is-debit"}>
                 {draft.points >= 0 ? "+" : ""}
-                {formatPoints(draft.points)}
+                {formatPoints(draft.points, copy)}
               </dd>
             </div>
             <div>
-              <dt>조정 후 잔액</dt>
+              <dt>{pointsCopy.text("expectedBalance")}</dt>
               <dd className={balanceAfter < 0 ? "is-danger" : undefined}>
-                {formatPoints(balanceAfter)}
+                {formatPoints(balanceAfter, copy)}
               </dd>
             </div>
           </dl>
           {balanceAfter < 0 && (
             <p className="admin-modal__warning">
-              조정 후 잔액이 0 미만입니다. 금액을 다시 확인해 주세요.
+              {pointsCopy.text("negativeBalanceWarning")}
             </p>
           )}
           <section className="admin-modal__quote">
-            <h3>조정 사유</h3>
+            <h3>{pointsCopy.text("adjustmentReasonTitle")}</h3>
             <p>{draft.reason}</p>
           </section>
           <div className="admin-modal__actions">
             <button type="button" className="admin-btn admin-btn--ghost" onClick={onClose} disabled={loading}>
-              취소
+              {dialogCopy.text("cancel")}
             </button>
             <button type="button" className="admin-btn admin-btn--primary" onClick={onConfirm} disabled={loading}>
-              {loading ? "처리 중..." : "포인트 조정 실행"}
+              {loading
+                ? dialogCopy.text("processing")
+                : dialogCopy.text("executeAdjustment")}
             </button>
           </div>
         </div>
@@ -3023,6 +3306,8 @@ function CustomerRatingCell({
   rating: AnswerRatingRecord | null;
   onOpen: () => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const inquiries = copy.section("inquiries");
   if (!hasAnswer) {
     return <span className="admin-cell-sub">-</span>;
   }
@@ -3032,24 +3317,24 @@ function CustomerRatingCell({
         type="button"
         className="admin-satisfaction-btn admin-satisfaction-btn--wait"
         onClick={onOpen}
-        aria-label="고객 평가 대기 · 상세 보기"
+        aria-label={inquiries.text("ratingWaitingAriaLabel")}
       >
-        <strong>평가 대기</strong>
+        <strong>{inquiries.text("ratingWaiting")}</strong>
       </button>
     );
   }
 
   const tone = getRatingSatisfactionTone(rating.score);
-  const satisfaction = getRatingSatisfactionLabel(rating.score);
+  const satisfaction = ratingSatisfactionLabel(copy, rating.score);
 
   return (
     <button
       type="button"
       className={`admin-satisfaction-btn admin-satisfaction-btn--${tone}`}
       onClick={onOpen}
-      aria-label={`고객 평가 상세 보기 · 평가완료 · ${satisfaction} ${formatRatingScore(rating.score)}`}
+      aria-label={`${inquiries.text("ratingCompleteAriaPrefix")} · ${satisfaction} ${formatRatingScore(rating.score, copy)}`}
     >
-      <strong>평가완료</strong>
+      <strong>{inquiries.text("ratingComplete")}</strong>
     </button>
   );
 }
@@ -3067,27 +3352,34 @@ function RatingDetailModal({
   customerName: string;
   onClose: () => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const inquiries = copy.section("inquiries");
+  const dialogs = copy.section("dialogs");
   const latestRating = ratings[0] ?? null;
   const satisfaction = latestRating
-    ? getRatingSatisfactionLabel(latestRating.score)
+    ? ratingSatisfactionLabel(copy, latestRating.score)
     : null;
   const tone = latestRating ? getRatingSatisfactionTone(latestRating.score) : "slate";
   const isCompleted = String(request.status ?? "").toUpperCase() === "COMPLETED";
 
   return (
-    <div className="admin-modal" role="dialog" aria-modal="true" aria-label="고객 평가 상세">
-      <button type="button" className="admin-modal__backdrop" aria-label="닫기" onClick={onClose} />
+    <div className="admin-modal" role="dialog" aria-modal="true" aria-label={inquiries.text("ratingDetailTitle")}>
+      <button type="button" className="admin-modal__backdrop" aria-label={dialogs.text("close")} onClick={onClose} />
       <div className="admin-modal__panel admin-modal__panel--sm">
         <header className="admin-modal__head">
           <div>
-            <p className="admin-modal__eyebrow">고객 평가 상세</p>
-            <h2>{latestRating ? "평가완료" : "평가 대기"}</h2>
+            <p className="admin-modal__eyebrow">{inquiries.text("ratingDetailTitle")}</p>
+            <h2>
+              {latestRating
+                ? inquiries.text("ratingComplete")
+                : inquiries.text("ratingWaiting")}
+            </h2>
             <p className="admin-cell-sub">
               {request.requestNumber} · {request.subject}
             </p>
           </div>
           <button type="button" className="admin-btn admin-btn--ghost admin-btn--sm" onClick={onClose}>
-            닫기
+            {dialogs.text("close")}
           </button>
         </header>
         <div className="admin-modal__body">
@@ -3096,22 +3388,22 @@ function RatingDetailModal({
               className={`admin-rating-hero admin-rating-hero--${tone}`}
             >
               <span className="admin-rating-hero__label">
-                평가완료
+                {inquiries.text("ratingComplete")}
               </span>
               <strong className="admin-rating-hero__score">
-                {formatRatingScore(latestRating.score)}
+                {formatRatingScore(latestRating.score, copy)}
               </strong>
               <p className="admin-rating-hero__meta">
                 {customerName} · {formatDate(latestRating.updatedAt ?? latestRating.createdAt)}
               </p>
             </div>
           ) : (
-            <p className="admin-rating-empty">아직 고객 평가가 등록되지 않았습니다.</p>
+            <p className="admin-rating-empty">{inquiries.text("ratingEmpty")}</p>
           )}
 
           <dl className="admin-rating-detail">
             <div>
-              <dt>만족도</dt>
+              <dt>{inquiries.text("satisfactionLabel")}</dt>
               <dd>
                 {latestRating ? (
                   <span className={`admin-pill admin-pill--${tone}`}>
@@ -3123,35 +3415,42 @@ function RatingDetailModal({
               </dd>
             </div>
             <div>
-              <dt>상담 종료</dt>
-              <dd>{isCompleted ? "완료 (평가 후 종료)" : "진행 중"}</dd>
+              <dt>{inquiries.text("consultationStatusLabel")}</dt>
+              <dd>
+                {isCompleted
+                  ? inquiries.text("consultationCompleted")
+                  : inquiries.text("consultationInProgress")}
+              </dd>
             </div>
             <div>
-              <dt>도움 여부</dt>
+              <dt>{inquiries.text("helpfulLabel")}</dt>
               <dd>
                 {latestRating
                   ? latestRating.helpful === false
-                    ? "도움 안 됨"
+                    ? inquiries.text("helpfulNo")
                     : latestRating.helpful === true
-                      ? "도움 됨"
-                      : "미응답"
+                      ? inquiries.text("helpfulYes")
+                      : inquiries.text("noResponse")
                   : "-"}
               </dd>
             </div>
             <div>
-              <dt>사용 포인트</dt>
-              <dd>{answer ? formatPoints(answer.pointCost ?? 0) : "-"}</dd>
+              <dt>{inquiries.text("usedPointsColumn")}</dt>
+              <dd>{answer ? formatPoints(answer.pointCost ?? 0, copy) : "-"}</dd>
             </div>
           </dl>
 
           <section className="admin-modal__quote admin-modal__quote--emphasis">
-            <h3>추가 의견</h3>
-            <p>{latestRating?.comment?.trim() || "등록된 추가 의견이 없습니다."}</p>
+            <h3>{inquiries.text("additionalCommentTitle")}</h3>
+            <p>
+              {latestRating?.comment?.trim() ||
+                inquiries.text("noAdditionalComment")}
+            </p>
           </section>
 
           <section className="admin-modal__quote">
-            <h3>답변 요약</h3>
-            <p>{answer?.body?.trim() || "등록된 답변이 없습니다."}</p>
+            <h3>{inquiries.text("answerSummaryTitle")}</h3>
+            <p>{answer?.body?.trim() || inquiries.text("noAnswer")}</p>
           </section>
         </div>
       </div>
@@ -3161,53 +3460,34 @@ function RatingDetailModal({
 
 type MemberActionType = "approve" | "reject" | "deactivate" | "reactivate";
 
-const MEMBER_ACTION_COPY: Record<
+const MEMBER_ACTION_CONFIG: Record<
   MemberActionType,
   {
-    title: string;
-    intro: string;
-    confirmLabel: string;
+    copyKey: "approve" | "reject" | "deactivate" | "reactivate";
     confirmTone: "primary" | "danger";
     askReason: boolean;
-    reasonLabel?: string;
-    reasonPlaceholder?: string;
-    reasonRequired?: boolean;
     warn?: boolean;
   }
 > = {
   approve: {
-    title: "가입 승인",
-    intro: "이 회원의 가입을 승인하면 로그인 및 문의 작성이 가능해지고 가입 혜택 포인트가 지급됩니다.",
-    confirmLabel: "가입 승인",
+    copyKey: "approve",
     confirmTone: "primary",
     askReason: false,
   },
   reject: {
-    title: "가입 거절",
-    intro: "이 회원의 가입을 거절하면 회원 상태가 비활성으로 전환됩니다. 변경 즉시 서비스 이용이 제한됩니다.",
-    confirmLabel: "가입 거절",
+    copyKey: "reject",
     confirmTone: "danger",
     askReason: true,
-    reasonLabel: "거절 사유 (선택)",
-    reasonPlaceholder: "예) 소속 농협 정보 확인 불가",
     warn: true,
   },
   deactivate: {
-    title: "회원 비활성화",
-    intro:
-      "이 회원을 비활성으로 전환하면 즉시 로그인·문의 작성·마이페이지 이용이 제한됩니다. 실수로 처리하지 않도록 내용을 확인한 뒤 진행해 주세요.",
-    confirmLabel: "비활성으로 전환",
+    copyKey: "deactivate",
     confirmTone: "danger",
     askReason: true,
-    reasonLabel: "비활성 사유 (선택)",
-    reasonPlaceholder: "예) 퇴사 처리, 오등록 계정 정리",
     warn: true,
   },
   reactivate: {
-    title: "회원 재활성화",
-    intro:
-      "비활성 상태를 해제하고 활성 회원으로 되돌립니다. 재활성화 후 다시 로그인하여 서비스를 이용할 수 있습니다.",
-    confirmLabel: "재활성화",
+    copyKey: "reactivate",
     confirmTone: "primary",
     askReason: false,
     warn: false,
@@ -3229,31 +3509,37 @@ function MemberActionModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const copy = MEMBER_ACTION_COPY[action.type];
+  const cmsCopy = useAdminOperationsCopy();
+  const members = cmsCopy.section("members");
+  const dialogs = cmsCopy.section("dialogs");
+  const config = MEMBER_ACTION_CONFIG[action.type];
+  const title = members.text(`${config.copyKey}Title`);
+  const intro = members.text(`${config.copyKey}Intro`);
+  const confirmLabel = members.text(`${config.copyKey}Confirm`);
   return (
     <div
       className="admin-modal"
       role="dialog"
       aria-modal="true"
-      aria-label={copy.title}
+      aria-label={title}
     >
       <button
         type="button"
         className="admin-modal__backdrop"
-        aria-label="닫기"
+        aria-label={dialogs.text("close")}
         onClick={onClose}
         disabled={loading}
       />
       <div className="admin-modal__panel admin-modal__panel--sm">
         <header className="admin-modal__head">
           <div>
-            <p className="admin-modal__eyebrow">회원 상태 변경</p>
-            <h2>{copy.title}</h2>
+            <p className="admin-modal__eyebrow">{members.text("memberActionEyebrow")}</p>
+            <h2>{title}</h2>
           </div>
         </header>
         <div className="admin-modal__body">
           <section className="admin-modal__quote">
-            <h3>대상 회원</h3>
+            <h3>{members.text("targetMemberTitle")}</h3>
             <p>
               <strong>{action.name}</strong>
               {action.email && (
@@ -3261,21 +3547,26 @@ function MemberActionModal({
               )}
             </p>
           </section>
-          <p className="admin-modal__lede">{copy.intro}</p>
-          {copy.warn && (
+          <p className="admin-modal__lede">{intro}</p>
+          {config.warn && (
             <p className="admin-modal__warning" role="alert">
-              계정 접근이 즉시 제한됩니다. 변경 내역은 감사 로그에 기록됩니다.
+              {members.text("accountRestrictionWarning")}
             </p>
           )}
-          {copy.askReason && (
+          {config.askReason && (
             <label className="admin-modal__field">
-              <span>{copy.reasonLabel ?? "사유"}</span>
+              <span>
+                {members.text(`${config.copyKey}ReasonLabel`) ||
+                  members.text("reasonLabel")}
+              </span>
               <textarea
                 className="admin-input admin-input--area"
                 rows={3}
                 value={reason}
                 onChange={(event) => onChangeReason(event.target.value)}
-                placeholder={copy.reasonPlaceholder}
+                placeholder={members.text(
+                  `${config.copyKey}ReasonPlaceholder`,
+                )}
                 disabled={loading}
               />
             </label>
@@ -3287,15 +3578,15 @@ function MemberActionModal({
               onClick={onClose}
               disabled={loading}
             >
-              취소
+              {dialogs.text("cancel")}
             </button>
             <button
               type="button"
-              className={`admin-btn admin-btn--${copy.confirmTone}`}
+              className={`admin-btn admin-btn--${config.confirmTone}`}
               onClick={onConfirm}
               disabled={loading}
             >
-              {loading ? "처리 중..." : copy.confirmLabel}
+              {loading ? dialogs.text("processing") : confirmLabel}
             </button>
           </div>
         </div>
@@ -3321,6 +3612,7 @@ function KpiCard({
   helper?: string;
   tone: "blue" | "amber" | "green" | "violet";
 }) {
+  const overviewCopy = useAdminOperationsCopy().section("overview");
   const trend = delta
     ? delta.previous === 0
       ? delta.recent > 0
@@ -3347,7 +3639,8 @@ function KpiCard({
       {helper && <p className="admin-kpi__helper">{helper}</p>}
       {!helper && delta && (
         <p className="admin-kpi__helper">
-          최근 7일 {delta.recent.toLocaleString()} · 이전 {delta.previous.toLocaleString()}
+          {overviewCopy.text("recentPeriod")} {delta.recent.toLocaleString()} ·{" "}
+          {overviewCopy.text("previousPeriod")} {delta.previous.toLocaleString()}
         </p>
       )}
       {series && (
@@ -3360,6 +3653,7 @@ function KpiCard({
 }
 
 function MemberBusinessCardPreview({ user }: { user: UserRecord }) {
+  const members = useAdminOperationsCopy().section("members");
   const [viewUrl, setViewUrl] = useState<string | null>(null);
   const [contentType, setContentType] = useState("");
   const [state, setState] = useState<"idle" | "loading" | "ready" | "missing" | "error">(
@@ -3416,15 +3710,27 @@ function MemberBusinessCardPreview({ user }: { user: UserRecord }) {
   }, [hasAttachment, user.uid, user.businessCardPath, user.businessCardUrl]);
 
   if (!hasAttachment) {
-    return <span className="admin-business-card__empty">첨부 없음</span>;
+    return (
+      <span className="admin-business-card__empty">
+        {members.text("noBusinessCard")}
+      </span>
+    );
   }
 
   if (state === "loading" || state === "idle") {
-    return <span className="admin-business-card__loading">명함 불러오는 중...</span>;
+    return (
+      <span className="admin-business-card__loading">
+        {members.text("businessCardLoading")}
+      </span>
+    );
   }
 
   if (state === "error" || !viewUrl) {
-    return <span className="admin-business-card__empty">명함을 불러오지 못했습니다.</span>;
+    return (
+      <span className="admin-business-card__empty">
+        {members.text("businessCardError")}
+      </span>
+    );
   }
 
   const isImage = contentType.startsWith("image/");
@@ -3439,15 +3745,18 @@ function MemberBusinessCardPreview({ user }: { user: UserRecord }) {
           rel="noreferrer"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={viewUrl} alt={`${user.name || user.email} 명함`} />
+          <img
+            src={viewUrl}
+            alt={`${user.name || user.email} ${members.text("businessCardAltSuffix")}`}
+          />
         </a>
       ) : (
         <div className="admin-business-card__file">
-          <span>PDF 명함 파일</span>
+          <span>{members.text("pdfBusinessCard")}</span>
         </div>
       )}
       <a className="admin-link" href={viewUrl} target="_blank" rel="noreferrer">
-        {isImage ? "원본 보기" : "PDF 열기"}
+        {isImage ? members.text("viewOriginal") : members.text("openPdf")}
       </a>
     </div>
   );
@@ -3474,16 +3783,17 @@ function OperatorDetailPanel({
   onResetPassword: (operator: UserRecord) => void;
   onDelete: (operator: UserRecord) => void;
 }) {
+  const members = useAdminOperationsCopy().section("members");
   if (!operator) {
     return (
       <aside className="admin-card admin-member-detail">
         <header className="admin-card__head">
           <div>
-            <h2>운영자 상세</h2>
-            <p>왼쪽 목록에서 운영자를 선택하세요.</p>
+            <h2>{members.text("operatorDetailTitle")}</h2>
+            <p>{members.text("selectOperator")}</p>
           </div>
         </header>
-        <div className="admin-empty">선택된 운영자가 없습니다.</div>
+        <div className="admin-empty">{members.text("noOperatorSelected")}</div>
       </aside>
     );
   }
@@ -3497,52 +3807,56 @@ function OperatorDetailPanel({
           {(operator.name || operator.email || "?").slice(0, 1).toUpperCase()}
         </span>
         <div>
-          <h2>{operator.name || "이름 미입력"}</h2>
+          <h2>{operator.name || members.text("unnamed")}</h2>
           <p>{operator.email}</p>
         </div>
         <span
           className={`admin-pill admin-pill--${getMemberStatusTone(operator.status)}`}
         >
           <span className="admin-pill__dot" aria-hidden="true" />
-          {isActive ? "권한 부여" : "권한 회수"}
+          {isActive
+            ? members.text("permissionGranted")
+            : members.text("permissionRevoked")}
         </span>
       </header>
 
       <section className="admin-member-block">
-        <h3>운영자 계정 정보</h3>
+        <h3>{members.text("operatorAccountTitle")}</h3>
         <dl className="admin-detail-list">
           <div>
-            <dt>이름</dt>
+            <dt>{members.text("nameLabel")}</dt>
             <dd>{operator.name || "-"}</dd>
           </div>
           <div>
-            <dt>이메일</dt>
+            <dt>{members.text("emailLabel")}</dt>
             <dd>{operator.email}</dd>
           </div>
           <div>
-            <dt>역할</dt>
-            <dd>{operator.position || "운영자"}</dd>
+            <dt>{members.text("roleColumn")}</dt>
+            <dd>{operator.position || members.text("operatorRoleFallback")}</dd>
           </div>
           <div>
-            <dt>권한 그룹</dt>
-            <dd>{operator.duty || "관리자"}</dd>
+            <dt>{members.text("permissionGroupLabel")}</dt>
+            <dd>{operator.duty || members.text("administratorFallback")}</dd>
           </div>
           <div>
-            <dt>생성일</dt>
+            <dt>{members.text("createdAtLabel")}</dt>
             <dd>{formatDate(operator.createdAt)}</dd>
           </div>
           <div>
-            <dt>수정일</dt>
+            <dt>{members.text("modifiedAtLabel")}</dt>
             <dd>{formatDate(operator.updatedAt)}</dd>
           </div>
         </dl>
       </section>
 
       <section className="admin-member-block">
-        <h3>운영자 계정 작업</h3>
+        <h3>{members.text("operatorActionsTitle")}</h3>
         <p className="admin-cell-sub">
-          계정 정보, 권한, 비밀번호, 삭제 작업은 감사 로그에 기록됩니다.
-          {isProtected ? " 현재 계정 또는 기본 관리자 계정은 권한 회수와 삭제가 제한됩니다." : ""}
+          {members.text("operatorActionsDescription")}
+          {isProtected
+            ? ` ${members.text("protectedOperatorDescription")}`
+            : ""}
         </p>
         <div className="admin-operator-actions">
           <button
@@ -3551,7 +3865,7 @@ function OperatorDetailPanel({
             onClick={() => onEdit(operator)}
             disabled={loading}
           >
-            정보 수정
+            {members.text("editOperator")}
           </button>
           <button
             type="button"
@@ -3559,7 +3873,7 @@ function OperatorDetailPanel({
             onClick={() => onResetPassword(operator)}
             disabled={loading}
           >
-            비밀번호 재설정
+            {members.text("resetPassword")}
           </button>
           <button
             type="button"
@@ -3567,7 +3881,9 @@ function OperatorDetailPanel({
             onClick={() => onChangePermission(operator, isActive ? "rejected" : "active")}
             disabled={loading || (isActive && isProtected)}
           >
-            {isActive ? "권한 회수" : "권한 부여"}
+            {isActive
+              ? members.text("permissionRevoked")
+              : members.text("permissionGranted")}
           </button>
           <button
             type="button"
@@ -3575,13 +3891,13 @@ function OperatorDetailPanel({
             onClick={() => onDelete(operator)}
             disabled={loading || isProtected}
           >
-            계정 삭제
+            {members.text("deleteAccount")}
           </button>
         </div>
       </section>
 
       <section className="admin-member-block">
-        <h3>관련 운영 이력</h3>
+        <h3>{members.text("relatedHistoryTitle")}</h3>
         <ul className="admin-mini-feed">
           {auditLogs.slice(0, 5).map((entry) => {
             const detail = formatAuditLog(entry);
@@ -3593,7 +3909,7 @@ function OperatorDetailPanel({
             );
           })}
           {auditLogs.length === 0 && (
-            <li className="admin-empty">관련 이력이 없습니다.</li>
+            <li className="admin-empty">{members.text("noRelatedHistory")}</li>
           )}
         </ul>
       </section>
@@ -3621,6 +3937,9 @@ function OperatorEditorModal({
     status: UserRecord["status"];
   }) => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const members = copy.section("members");
+  const dialogs = copy.section("dialogs");
   const [name, setName] = useState(operator?.name ?? "");
   const [email, setEmail] = useState(operator?.email ?? "");
   const [position, setPosition] = useState(operator?.position || "운영자");
@@ -3638,15 +3957,15 @@ function OperatorEditorModal({
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
     if (!trimmedName || !trimmedEmail) {
-      setError("이름과 이메일을 입력해 주세요.");
+      setError(members.text("operatorRequiredError"));
       return;
     }
     if (isCreate && trimmedPassword.length < 8) {
-      setError("새 운영자의 임시 비밀번호는 8자 이상이어야 합니다.");
+      setError(members.text("operatorCreatePasswordError"));
       return;
     }
     if (!isCreate && trimmedPassword && trimmedPassword.length < 8) {
-      setError("비밀번호를 변경하려면 8자 이상 입력해 주세요.");
+      setError(members.text("operatorEditPasswordError"));
       return;
     }
     setError("");
@@ -3661,24 +3980,28 @@ function OperatorEditorModal({
   };
 
   return (
-    <div className="admin-modal" role="dialog" aria-modal="true" aria-label="운영자 계정 편집">
+    <div className="admin-modal" role="dialog" aria-modal="true" aria-label={members.text("operatorEditorAriaLabel")}>
       <button
         type="button"
         className="admin-modal__backdrop"
-        aria-label="닫기"
+        aria-label={dialogs.text("close")}
         onClick={onClose}
         disabled={loading}
       />
       <form className="admin-modal__panel admin-modal__panel--sm" onSubmit={submit}>
         <header className="admin-modal__head">
           <div>
-            <p className="admin-modal__eyebrow">운영자 관리</p>
-            <h2>{isCreate ? "운영자 추가" : "운영자 정보 수정"}</h2>
+            <p className="admin-modal__eyebrow">{members.text("operatorEditorEyebrow")}</p>
+            <h2>
+              {isCreate
+                ? members.text("operatorEditorCreateTitle")
+                : members.text("operatorEditorEditTitle")}
+            </h2>
           </div>
           <button
             type="button"
             className="admin-modal__close"
-            aria-label="닫기"
+            aria-label={dialogs.text("close")}
             onClick={onClose}
             disabled={loading}
           >
@@ -3687,7 +4010,7 @@ function OperatorEditorModal({
         </header>
         <div className="admin-modal__body">
           <label className="admin-modal__field">
-            이름
+            {members.text("nameLabel")}
             <input
               className="auth-field__input"
               value={name}
@@ -3696,7 +4019,7 @@ function OperatorEditorModal({
             />
           </label>
           <label className="admin-modal__field">
-            이메일
+            {members.text("emailLabel")}
             <input
               className="auth-field__input"
               type="email"
@@ -3706,7 +4029,7 @@ function OperatorEditorModal({
             />
           </label>
           <label className="admin-modal__field">
-            역할
+            {members.text("roleColumn")}
             <input
               className="auth-field__input"
               value={position}
@@ -3715,7 +4038,7 @@ function OperatorEditorModal({
             />
           </label>
           <label className="admin-modal__field">
-            권한 그룹
+            {members.text("permissionGroupLabel")}
             <input
               className="auth-field__input"
               value={duty}
@@ -3724,35 +4047,41 @@ function OperatorEditorModal({
             />
           </label>
           <label className="admin-modal__field">
-            권한 상태
+            {members.text("permissionStatusLabel")}
             <select
               className="auth-field__input"
               value={status}
               onChange={(event) => setStatus(event.target.value as UserRecord["status"])}
               disabled={loading}
             >
-              <option value="active">권한 부여</option>
-              <option value="rejected">권한 회수</option>
+              <option value="active">{members.text("permissionGranted")}</option>
+              <option value="rejected">{members.text("permissionRevoked")}</option>
             </select>
           </label>
           <label className="admin-modal__field">
-            {isCreate ? "임시 비밀번호" : "새 비밀번호"}
+            {isCreate
+              ? members.text("temporaryPasswordLabel")
+              : members.text("newPasswordLabel")}
             <input
               className="auth-field__input"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder={isCreate ? "8자 이상 입력" : "변경 시에만 입력"}
+              placeholder={
+                isCreate
+                  ? members.text("temporaryPasswordPlaceholder")
+                  : members.text("newPasswordPlaceholder")
+              }
               disabled={loading}
             />
           </label>
           {error && <p className="admin-form__error">{error}</p>}
           <div className="admin-modal__actions">
             <button type="button" className="admin-btn" onClick={onClose} disabled={loading}>
-              취소
+              {dialogs.text("cancel")}
             </button>
             <button type="submit" className="admin-btn admin-btn--primary" disabled={loading}>
-              {loading ? "저장 중..." : "저장"}
+              {loading ? dialogs.text("saving") : dialogs.text("save")}
             </button>
           </div>
         </div>
@@ -3781,25 +4110,27 @@ function MemberDetailPanel({
     type: "approve" | "reject" | "deactivate" | "reactivate",
   ) => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const members = copy.section("members");
   if (!user) {
     return (
       <aside className="admin-card admin-member-detail">
         <header className="admin-card__head">
           <div>
-            <h2>회원 상세</h2>
-            <p>왼쪽 목록에서 회원을 선택하세요.</p>
+            <h2>{members.text("memberDetailTitle")}</h2>
+            <p>{members.text("selectMember")}</p>
           </div>
         </header>
-        <div className="admin-empty">선택된 회원이 없습니다.</div>
+        <div className="admin-empty">{members.text("noMemberSelected")}</div>
       </aside>
     );
   }
 
   const marketingChannels = [
-    user.consents?.marketing && "마케팅",
-    user.consents?.email && "이메일",
-    user.consents?.sms && "SMS",
-    user.consents?.kakao && "카카오톡",
+    user.consents?.marketing && members.text("marketingChannel"),
+    user.consents?.email && members.text("emailChannel"),
+    user.consents?.sms && members.text("smsChannel"),
+    user.consents?.kakao && members.text("kakaoChannel"),
   ].filter(Boolean);
   const totalSignupPoints = transactions
     .filter((entry) => entry.type === "first_org_signup" || entry.type === "user_signup")
@@ -3812,29 +4143,27 @@ function MemberDetailPanel({
           {(user.name || user.email || "?").slice(0, 1).toUpperCase()}
         </span>
         <div>
-          <h2>{user.name || "이름 미입력"}</h2>
+          <h2>{user.name || members.text("unnamed")}</h2>
           <p>{user.email}</p>
         </div>
         <span
           className={`admin-pill admin-pill--${getMemberStatusTone(user.status)}`}
         >
           <span className="admin-pill__dot" aria-hidden="true" />
-          {getMemberStatusLabel(user.status)}
+          {memberStatusLabel(copy, user.status)}
         </span>
       </header>
 
       {isPendingMember(user.status) && (
         <section className="admin-member-block">
-          <h3>가입 처리</h3>
+          <h3>{members.text("approvalTitle")}</h3>
           <p className="admin-cell-sub">
-            소속 농협과 가입 정보를 확인한 뒤 승인하면 로그인 및 문의 작성이
-            가능해지고 가입 혜택 포인트가 지급됩니다. 정보가 부적절한 경우
-            가입을 거절하면 회원이 비활성 상태로 전환됩니다.
+            {members.text("approvalDescription")}
           </p>
           <div className="admin-approval-file">
             <div className="admin-approval-file__head">
-              <strong>가입 승인 명함</strong>
-              <span>회원가입 시 업로드한 직원 인증 파일입니다.</span>
+              <strong>{members.text("approvalCardTitle")}</strong>
+              <span>{members.text("approvalCardDescription")}</span>
             </div>
             <MemberBusinessCardPreview user={user} />
           </div>
@@ -3844,14 +4173,14 @@ function MemberDetailPanel({
               className="admin-btn admin-btn--primary admin-btn--block"
               onClick={() => onAction(user.uid, "approve")}
             >
-              가입 승인하기
+              {members.text("approveMember")}
             </button>
             <button
               type="button"
               className="admin-btn admin-btn--danger admin-btn--block"
               onClick={() => onAction(user.uid, "reject")}
             >
-              가입 거절
+              {members.text("rejectMember")}
             </button>
           </div>
         </section>
@@ -3859,28 +4188,27 @@ function MemberDetailPanel({
 
       {isActiveMember(user.status) && (
         <section className="admin-member-block admin-member-block--danger">
-          <h3>회원 상태 관리</h3>
+          <h3>{members.text("memberStatusTitle")}</h3>
           <p className="admin-cell-sub">
-            퇴사·문제 계정·오등록 등 즉시 접근을 차단해야 하는 경우 회원을
-            비활성으로 전환할 수 있습니다. 처리 전 확인 모달이 표시됩니다.
+            {members.text("memberStatusDescription")}
           </p>
           <button
             type="button"
             className="admin-btn admin-btn--danger admin-btn--block"
             onClick={() => onAction(user.uid, "deactivate")}
           >
-            회원 비활성화
+            {members.text("deactivateMember")}
           </button>
         </section>
       )}
 
       {isInactiveMember(user.status) && (
         <section className="admin-member-block admin-member-block--muted">
-          <h3>비활성 회원</h3>
+          <h3>{members.text("inactiveMemberTitle")}</h3>
           <p className="admin-cell-sub">
-            관리자가 비활성으로 전환한 회원입니다.
+            {members.text("inactiveMemberDescription")}
             {user.rejectionReason
-              ? ` 사유: ${user.rejectionReason}`
+              ? ` ${members.text("reasonPrefix")}: ${user.rejectionReason}`
               : ""}
             {user.rejectedAt
               ? ` (${formatDate(user.rejectedAt)})`
@@ -3891,45 +4219,45 @@ function MemberDetailPanel({
             className="admin-btn admin-btn--primary admin-btn--block"
             onClick={() => onAction(user.uid, "reactivate")}
           >
-            회원 재활성화
+            {members.text("reactivateMember")}
           </button>
         </section>
       )}
 
       <section className="admin-member-block">
-        <h3>회원 기본 정보</h3>
+        <h3>{members.text("basicInfoTitle")}</h3>
         <dl className="admin-detail-list">
           <div>
-            <dt>이름</dt>
+            <dt>{members.text("nameLabel")}</dt>
             <dd>{user.name || "-"}</dd>
           </div>
           <div>
-            <dt>이메일</dt>
+            <dt>{members.text("emailLabel")}</dt>
             <dd>{user.email}</dd>
           </div>
           <div>
-            <dt>휴대폰</dt>
+            <dt>{members.text("phoneLabel")}</dt>
             <dd>{user.phone || "-"}</dd>
           </div>
           <div>
-            <dt>직책</dt>
+            <dt>{members.text("positionLabel")}</dt>
             <dd>{user.position || "-"}</dd>
           </div>
           <div>
-            <dt>담당업무</dt>
+            <dt>{members.text("dutyLabel")}</dt>
             <dd>{user.duty || "-"}</dd>
           </div>
           <div>
-            <dt>가입일</dt>
+            <dt>{members.text("joinedAtLabel")}</dt>
             <dd>{formatDate(user.createdAt)}</dd>
           </div>
           <div>
-            <dt>수정일</dt>
+            <dt>{members.text("modifiedAtLabel")}</dt>
             <dd>{formatDate(user.updatedAt)}</dd>
           </div>
           {!isPendingMember(user.status) && (
             <div>
-              <dt>명함</dt>
+              <dt>{members.text("businessCardLabel")}</dt>
               <dd>
                 <MemberBusinessCardPreview user={user} />
               </dd>
@@ -3939,10 +4267,10 @@ function MemberDetailPanel({
       </section>
 
       <section className="admin-member-block">
-        <h3>소속 농협 정보</h3>
+        <h3>{members.text("organizationInfoTitle")}</h3>
         <dl className="admin-detail-list">
           <div>
-            <dt>농협명</dt>
+            <dt>{members.text("organizationNameLabel")}</dt>
             <dd>
               {user.cooperativeName ??
                 user.manualCooperativeName ??
@@ -3950,94 +4278,100 @@ function MemberDetailPanel({
             </dd>
           </div>
           <div>
-            <dt>농협 코드</dt>
+            <dt>{members.text("organizationCodeLabel")}</dt>
             <dd>{user.cooperativeId || "-"}</dd>
           </div>
           <div>
-            <dt>조직 코드</dt>
+            <dt>{members.text("organizationIdLabel")}</dt>
             <dd>{user.nh_org_id || user.cooperativeId || "-"}</dd>
           </div>
           <div>
-            <dt>조직 회원 수</dt>
-            <dd>{organization?.users?.length ?? 0}명</dd>
+            <dt>{members.text("organizationMemberCountLabel")}</dt>
+            <dd>
+              {organization?.users?.length ?? 0}
+              {copy.section("points").text("peopleUnit")}
+            </dd>
           </div>
           <div>
-            <dt>조직 등록일</dt>
+            <dt>{members.text("organizationCreatedAtLabel")}</dt>
             <dd>{organization ? formatDate(organization.createdAt) : "-"}</dd>
           </div>
         </dl>
       </section>
 
       <section className="admin-member-block">
-        <h3>포인트/지갑 정보</h3>
+        <h3>{members.text("walletInfoTitle")}</h3>
         <dl className="admin-detail-list">
           <div>
-            <dt>지갑 잔액</dt>
+            <dt>{members.text("walletBalanceLabel")}</dt>
             <dd>
               {organization
-                ? formatPoints(organization.walletBalance ?? 0)
+                ? formatPoints(organization.walletBalance ?? 0, copy)
                 : "-"}
             </dd>
           </div>
           <div>
-            <dt>가입 지급 포인트</dt>
-            <dd>{formatPoints(totalSignupPoints)}</dd>
+            <dt>{members.text("signupPointsLabel")}</dt>
+            <dd>{formatPoints(totalSignupPoints, copy)}</dd>
           </div>
           <div>
-            <dt>최근 거래</dt>
+            <dt>{members.text("recentTransactionLabel")}</dt>
             <dd>
               {transactions[0]
-                ? `${LEDGER_LABELS[transactions[0].type] ?? transactions[0].type} · ${formatDate(transactions[0].createdAt)}`
+                ? `${ledgerLabel(copy, transactions[0].type)} · ${formatDate(transactions[0].createdAt)}`
                 : ledger[0]
-                  ? `${LEDGER_LABELS[ledger[0].event] ?? ledger[0].event} · ${formatDate(ledger[0].createdAt)}`
-                  : "내역 없음"}
+                  ? `${ledgerLabel(copy, ledger[0].event)} · ${formatDate(ledger[0].createdAt)}`
+                  : members.text("noTransaction")}
             </dd>
           </div>
         </dl>
-        <h4 className="admin-member-block__subhead">최근 포인트 내역</h4>
+        <h4 className="admin-member-block__subhead">
+          {members.text("recentPointsTitle")}
+        </h4>
         <ul className="admin-mini-feed">
           {transactions.slice(0, 5).map((entry) => (
             <li key={entry.id}>
-              <strong>{LEDGER_LABELS[entry.type] ?? entry.type}</strong>
+              <strong>{ledgerLabel(copy, entry.type)}</strong>
               <span>
                 {entry.amount >= 0 ? "+" : ""}
-                {formatPoints(entry.amount)} · {formatDate(entry.createdAt)}
+                {formatPoints(entry.amount, copy)} · {formatDate(entry.createdAt)}
               </span>
             </li>
           ))}
           {transactions.length === 0 &&
             ledger.slice(0, 5).map((entry) => (
               <li key={entry.id}>
-                <strong>{LEDGER_LABELS[entry.event] ?? entry.event}</strong>
+                <strong>{ledgerLabel(copy, entry.event)}</strong>
                 <span>
                   {entry.points >= 0 ? "+" : ""}
-                  {formatPoints(entry.points)} · {formatDate(entry.createdAt)}
+                  {formatPoints(entry.points, copy)} · {formatDate(entry.createdAt)}
                 </span>
               </li>
             ))}
           {transactions.length === 0 && ledger.length === 0 && (
-            <li className="admin-empty">포인트 내역이 없습니다.</li>
+            <li className="admin-empty">{members.text("noPoints")}</li>
           )}
         </ul>
       </section>
 
       <section className="admin-member-block">
-        <h3>동의 및 마케팅 수신 상태</h3>
+        <h3>{members.text("consentInfoTitle")}</h3>
         <div className="admin-consent-grid">
-          <span className={user.consents?.terms ? "is-on" : ""}>이용약관</span>
-          <span className={user.consents?.privacy ? "is-on" : ""}>개인정보</span>
-          <span className={user.consents?.marketing ? "is-on" : ""}>마케팅</span>
-          <span className={user.consents?.email ? "is-on" : ""}>이메일</span>
-          <span className={user.consents?.sms ? "is-on" : ""}>SMS</span>
-          <span className={user.consents?.kakao ? "is-on" : ""}>카카오톡</span>
+          <span className={user.consents?.terms ? "is-on" : ""}>{members.text("termsConsent")}</span>
+          <span className={user.consents?.privacy ? "is-on" : ""}>{members.text("privacyConsent")}</span>
+          <span className={user.consents?.marketing ? "is-on" : ""}>{members.text("marketingChannel")}</span>
+          <span className={user.consents?.email ? "is-on" : ""}>{members.text("emailChannel")}</span>
+          <span className={user.consents?.sms ? "is-on" : ""}>{members.text("smsChannel")}</span>
+          <span className={user.consents?.kakao ? "is-on" : ""}>{members.text("kakaoChannel")}</span>
         </div>
         <p className="admin-cell-sub">
-          수신 채널: {marketingChannels.join(" · ") || "수신 거부"}
+          {members.text("receivedChannelsLabel")}:{" "}
+          {marketingChannels.join(" · ") || members.text("optedOut")}
         </p>
       </section>
 
       <section className="admin-member-block">
-        <h3>관련 운영 이력</h3>
+        <h3>{members.text("relatedHistoryTitle")}</h3>
         <ul className="admin-mini-feed">
           {auditLogs.slice(0, 3).map((entry) => {
             const detail = formatAuditLog(entry);
@@ -4138,6 +4472,8 @@ function PointHistoryTable({
   organizations?: OrganizationRecord[];
   className?: string;
 }) {
+  const copy = useAdminOperationsCopy();
+  const pointsCopy = copy.section("points");
   const colSpan = showTarget ? 6 : 5;
 
   return (
@@ -4145,12 +4481,12 @@ function PointHistoryTable({
       <table className="admin-table">
         <thead>
           <tr>
-            <th>발생 시각</th>
-            {showTarget && <th>대상 농협</th>}
-            <th>이벤트</th>
-            <th>변화</th>
-            <th>잔액</th>
-            <th>사유</th>
+            <th>{pointsCopy.text("transactionTimeColumn")}</th>
+            {showTarget && <th>{pointsCopy.text("targetColumn")}</th>}
+            <th>{pointsCopy.text("eventColumn")}</th>
+            <th>{pointsCopy.text("changeColumn")}</th>
+            <th>{pointsCopy.text("transactionBalanceColumn")}</th>
+            <th>{pointsCopy.text("reasonColumn")}</th>
           </tr>
         </thead>
         <tbody>
@@ -4161,24 +4497,24 @@ function PointHistoryTable({
                 <td>{resolvePointHistoryOrganizationName(organizations, entry)}</td>
               )}
               <td>
-                <strong>{LEDGER_LABELS[entry.eventKey] ?? entry.eventKey}</strong>
+                <strong>{ledgerLabel(copy, entry.eventKey)}</strong>
               </td>
               <td>
                 <span
                   className={`admin-amount ${entry.points >= 0 ? "is-credit" : "is-debit"}`}
                 >
                   {entry.points >= 0 ? "+" : ""}
-                  {formatPoints(entry.points)}
+                  {formatPoints(entry.points, copy)}
                 </span>
               </td>
-              <td>{formatPoints(entry.balanceAfter)}</td>
+              <td>{formatPoints(entry.balanceAfter, copy)}</td>
               <td className="admin-cell-sub">{entry.reason ?? ""}</td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
               <td colSpan={colSpan} className="admin-empty">
-                거래 내역이 없습니다.
+                {pointsCopy.text("transactionEmpty")}
               </td>
             </tr>
           )}
@@ -4199,6 +4535,10 @@ function AllPointTransactionsModal({
   initialFilterOrgId?: string;
   onClose: () => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const pointsCopy = copy.section("points");
+  const dialogCopy = copy.section("dialogs");
+  const inquiryCopy = copy.section("inquiries");
   const [filterOrgId, setFilterOrgId] = useState(initialFilterOrgId);
 
   const filteredRows = useMemo(() => {
@@ -4217,22 +4557,26 @@ function AllPointTransactionsModal({
       className="admin-modal"
       role="dialog"
       aria-modal="true"
-      aria-label="전체 포인트 거래 내역"
+      aria-label={pointsCopy.text("allTransactionsAriaLabel")}
     >
       <button
         type="button"
         className="admin-modal__backdrop"
-        aria-label="닫기"
+        aria-label={dialogCopy.text("close")}
         onClick={onClose}
       />
       <div className="admin-modal__panel admin-modal__panel--wide">
         <header className="admin-modal__head">
           <div>
-            <p className="admin-modal__eyebrow">포인트 거래 로그</p>
-            <h2>전체 거래 내역</h2>
+            <p className="admin-modal__eyebrow">{pointsCopy.text("transactionLogEyebrow")}</p>
+            <h2>{pointsCopy.text("allTransactionsTitle")}</h2>
             <p className="admin-cell-sub">
-              전체 {rows.length.toLocaleString()}건 · 표시{" "}
-              {filteredRows.length.toLocaleString()}건
+              {inquiryCopy.text("totalPrefix")}{" "}
+              {rows.length.toLocaleString()}
+              {pointsCopy.text("countUnit")} ·{" "}
+              {pointsCopy.text("displayedPrefix")}{" "}
+              {filteredRows.length.toLocaleString()}
+              {pointsCopy.text("countUnit")}
             </p>
           </div>
           <button
@@ -4240,7 +4584,7 @@ function AllPointTransactionsModal({
             className="admin-btn admin-btn--ghost admin-btn--sm"
             onClick={onClose}
           >
-            닫기
+            {dialogCopy.text("close")}
           </button>
         </header>
         <div className="admin-modal__body">
@@ -4249,9 +4593,9 @@ function AllPointTransactionsModal({
               className="admin-input"
               value={filterOrgId}
               onChange={(event) => setFilterOrgId(event.target.value)}
-              aria-label="농협별 거래 필터"
+              aria-label={pointsCopy.text("transactionFilterAriaLabel")}
             >
-              <option value="">전체 농협</option>
+              <option value="">{inquiryCopy.text("allOrganizations")}</option>
               {organizations.map((organization) => (
                 <option
                   key={organization.cooperativeId}
@@ -4286,6 +4630,9 @@ function AnswerEditor({
   onClose: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const inquiryCopy = copy.section("inquiries");
+  const dialogCopy = copy.section("dialogs");
   const isEdit = Boolean(answer);
   const customerInquiryType = getCustomerInquiryTypeLabel(request);
   const autoAssigned = isAutoAssignedInquiry(request);
@@ -4300,12 +4647,15 @@ function AnswerEditor({
   );
   const [pointCostError, setPointCostError] = useState("");
   const pointCostValue = parsePointInput(pointCostDisplay);
-  const pointRangeText = `${formatPointInput(ANSWER_POINT_MIN)}P 이상 ${formatPointInput(ANSWER_POINT_MAX)}P 이하`;
+  const pointUnit = copy.section("points").text("pointUnit");
+  const pointRangeText = `${formatPointInput(ANSWER_POINT_MIN)}${pointUnit} ${inquiryCopy.text("pointMinimumJoin")} ${formatPointInput(ANSWER_POINT_MAX)}${pointUnit} ${inquiryCopy.text("pointMaximumJoin")}`;
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     if (!isValidAnswerPointCost(pointCostValue)) {
       event.preventDefault();
-      setPointCostError(`답변 포인트는 ${pointRangeText}로 입력해 주세요.`);
+      setPointCostError(
+        `${inquiryCopy.text("pointRangeErrorPrefix")} ${pointRangeText} ${inquiryCopy.text("pointRangeErrorSuffix")}`,
+      );
       return;
     }
     setPointCostError("");
@@ -4317,25 +4667,46 @@ function AnswerEditor({
       className="admin-modal"
       role="dialog"
       aria-modal="true"
-      aria-label={readOnly ? "문의 및 답변 상세" : isEdit ? "답변 수정" : "답변 작성"}
+      aria-label={
+        readOnly
+          ? inquiryCopy.text("answerDetailAriaLabel")
+          : isEdit
+            ? inquiryCopy.text("editAnswer")
+            : inquiryCopy.text("writeAnswer")
+      }
     >
-      <button type="button" className="admin-modal__backdrop" aria-label="닫기" onClick={onClose} />
+      <button type="button" className="admin-modal__backdrop" aria-label={dialogCopy.text("close")} onClick={onClose} />
       <div className="admin-modal__panel">
         <header className="admin-modal__head">
           <div>
-            <span className="admin-cell-sub">{request.requestNumber} · {VISIBILITY_LABELS[request.visibility] ?? request.visibility}</span>
-            <h2>{readOnly ? "문의 · 답변 상세" : request.subject}</h2>
+            <span className="admin-cell-sub">
+              {request.requestNumber} ·{" "}
+              {request.visibility === "PUBLIC" || request.visibility === "public"
+                ? inquiryCopy.item("visibility.public")
+                : request.visibility === "ORG_ONLY" ||
+                    request.visibility === "nonghyup"
+                  ? inquiryCopy.item("visibility.organization")
+                  : inquiryCopy.item("visibility.private")}
+            </span>
+            <h2>
+              {readOnly
+                ? inquiryCopy.text("answerDetailTitle")
+                : request.subject}
+            </h2>
             <p className="admin-cell-sub">
-              {readOnly ? `${request.subject} · ` : ""}작성자 {request.userName || request.userEmail} · {request.cooperativeName ?? request.cooperativeDisplay ?? "-"}
+              {readOnly ? `${request.subject} · ` : ""}
+              {inquiryCopy.text("authorLabel")}{" "}
+              {request.userName || request.userEmail} ·{" "}
+              {request.cooperativeName ?? request.cooperativeDisplay ?? "-"}
             </p>
           </div>
           <button type="button" className="admin-btn admin-btn--ghost admin-btn--sm" onClick={onClose}>
-            닫기
+            {dialogCopy.text("close")}
           </button>
         </header>
         <div className="admin-modal__body">
           <section className="admin-modal__quote">
-            <h3>고객 문의</h3>
+            <h3>{inquiryCopy.text("customerInquiryTitle")}</h3>
             <p>{request.message}</p>
             {(request.attachments?.length ?? 0) > 0 && (
               <ul className="attachment-grid attachment-grid--compact">
@@ -4356,25 +4727,25 @@ function AnswerEditor({
             <>
               <dl className="admin-rating-detail admin-answer-detail">
                 <div>
-                  <dt>지원 분야</dt>
+                  <dt>{inquiryCopy.text("supportFieldLabel")}</dt>
                   <dd>{request.internalCategory ?? request.internal_category ?? "-"}</dd>
                 </div>
                 <div>
-                  <dt>담당자</dt>
+                  <dt>{inquiryCopy.text("assigneeColumn")}</dt>
                   <dd>{assignedManagers(request).join(", ") || "-"}</dd>
                 </div>
                 <div>
-                  <dt>사용 포인트</dt>
-                  <dd>{answer ? formatPoints(answer.pointCost ?? 0) : "-"}</dd>
+                  <dt>{inquiryCopy.text("usedPointsColumn")}</dt>
+                  <dd>{answer ? formatPoints(answer.pointCost ?? 0, copy) : "-"}</dd>
                 </div>
                 <div>
-                  <dt>답변일</dt>
+                  <dt>{inquiryCopy.text("answeredAtColumn")}</dt>
                   <dd>{formatDate(getAnswerRespondedAt(answer ?? undefined, request) ?? undefined)}</dd>
                 </div>
               </dl>
               <section className="admin-modal__quote admin-modal__quote--emphasis">
-                <h3>답변 내용</h3>
-                <p>{answer?.body?.trim() || "등록된 답변이 없습니다."}</p>
+                <h3>{inquiryCopy.text("answerBodyTitle")}</h3>
+                <p>{answer?.body?.trim() || inquiryCopy.text("noAnswer")}</p>
               </section>
             </>
           )}
@@ -4384,18 +4755,20 @@ function AnswerEditor({
           <div
             className={`admin-answer-type-banner${autoAssigned ? " is-auto" : ""}`}
           >
-            <span className="admin-answer-type-banner__label">고객 문의 유형</span>
+            <span className="admin-answer-type-banner__label">
+              {inquiryCopy.text("inquiryTypeLabel")}
+            </span>
             <strong>{customerInquiryType}</strong>
             <p>
               {autoAssigned
-                ? "자동 배정 문의입니다. 답변 등록 시 실제 지원 분야를 선택해 주세요."
-                : "고객이 선택한 유형입니다. 필요 시 아래에서 지원 분야를 조정할 수 있습니다."}
+                ? inquiryCopy.text("autoInquiryDescription")
+                : inquiryCopy.text("selectedInquiryDescription")}
             </p>
           </div>
 
           <form className="admin-form admin-form--grid" onSubmit={submit}>
             <label className="admin-form__full">
-              <span>지원 분야 배정</span>
+              <span>{inquiryCopy.text("supportAssignmentLabel")}</span>
               <select
                 className="admin-input"
                 name="internalCategory"
@@ -4403,10 +4776,14 @@ function AnswerEditor({
                 required
               >
                 <option value="" disabled>
-                  {autoAssigned ? "지원 분야를 선택해 주세요" : "지원 분야 선택"}
+                  {autoAssigned
+                    ? inquiryCopy.text("selectAutoSupportField")
+                    : inquiryCopy.text("selectSupportField")}
                 </option>
                 {legacyField && (
-                  <option value={legacyField}>{legacyField} (기존 지정)</option>
+                  <option value={legacyField}>
+                    {legacyField} {inquiryCopy.text("legacySupportSuffix")}
+                  </option>
                 )}
                 {INQUIRY_SUPPORT_FIELD_OPTIONS.map((option) => (
                   <option key={option.value} value={option.label}>
@@ -4415,25 +4792,29 @@ function AnswerEditor({
                 ))}
               </select>
               <small className="admin-form__hint">
-                실제 상담·견적 처리 분야를 지정합니다. 담당자 정보와 별도로 관리됩니다.
+                {inquiryCopy.text("supportAssignmentHelp")}
               </small>
             </label>
             <label className="admin-form__full">
-              <span>담당자</span>
+              <span>{inquiryCopy.text("assigneeColumn")}</span>
               <input
                 className="admin-input"
                 name="adminTags"
-                placeholder="답변 담당자명을 입력하세요"
+                placeholder={inquiryCopy.text("assigneePlaceholder")}
                 defaultValue={assignedManagers(request).join(", ")}
                 required
                 aria-required="true"
               />
               <small className="admin-form__hint">
-                이력 추적을 위해 필수입니다. 복수 담당자는 쉼표(,)로 구분해 입력해 주세요.
+                {inquiryCopy.text("assigneeHelp")}
               </small>
             </label>
             <label>
-              <span>답변 포인트 ({formatAnswerPointRangeLabel()}P)</span>
+              <span>
+                {inquiryCopy.text("answerPointsLabel")} (
+                {formatAnswerPointRangeLabel()}
+                {pointUnit})
+              </span>
               <input
                 className={`admin-input admin-input--point${pointCostError ? " is-invalid" : ""}`}
                 type="text"
@@ -4461,28 +4842,30 @@ function AnswerEditor({
                 </small>
               )}
               <small className="admin-form__hint" id="answer-point-hint">
-                {pointRangeText}로 입력해 주세요. 숫자 입력 시 천 단위마다 자동으로 콤마가 표시됩니다.
+                {pointRangeText} {inquiryCopy.text("pointRangeHelpSuffix")}
               </small>
             </label>
             <label className="admin-form__full">
-              <span>답변 내용</span>
+              <span>{inquiryCopy.text("answerBodyTitle")}</span>
               <textarea
                 className="admin-input admin-input--area"
                 name="answerBody"
                 rows={8}
-                placeholder="고객에게 제공할 답변을 입력하세요."
+                placeholder={inquiryCopy.text("answerPlaceholder")}
                 defaultValue={answer?.body ?? ""}
               />
             </label>
             <div className="admin-modal__actions">
               <button type="button" className="admin-btn admin-btn--ghost" onClick={onClose}>
-                취소
+                {dialogCopy.text("cancel")}
               </button>
               <button
                 type="submit"
                 className={`admin-btn admin-btn--${isEdit ? "answer-edit" : "answer-write"}`}
               >
-                {isEdit ? "답변 업데이트" : "답변 등록"}
+                {isEdit
+                  ? inquiryCopy.text("updateAnswer")
+                  : inquiryCopy.text("registerAnswer")}
               </button>
             </div>
           </form>
@@ -4494,16 +4877,213 @@ function AnswerEditor({
   );
 }
 
+function AdminConfirmationModal({
+  title,
+  description,
+  warning,
+  confirmLabel,
+  loading,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  warning?: string;
+  confirmLabel: string;
+  loading: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogCopy = useAdminOperationsCopy().section("dialogs");
+  return (
+    <div className="admin-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <button
+        type="button"
+        className="admin-modal__backdrop"
+        aria-label={dialogCopy.text("close")}
+        onClick={onClose}
+        disabled={loading}
+      />
+      <div className="admin-modal__panel admin-modal__panel--sm">
+        <header className="admin-modal__head">
+          <h2>{title}</h2>
+        </header>
+        <div className="admin-modal__body">
+          <p className="admin-modal__lede">{description}</p>
+          {warning && (
+            <p className="admin-modal__warning" role="alert">
+              {warning}
+            </p>
+          )}
+          <div className="admin-modal__actions">
+            <button
+              type="button"
+              className="admin-btn admin-btn--ghost"
+              onClick={onClose}
+              disabled={loading}
+            >
+              {dialogCopy.text("cancel")}
+            </button>
+            <button
+              type="button"
+              className="admin-btn admin-btn--danger"
+              onClick={onConfirm}
+              disabled={loading}
+            >
+              {loading ? dialogCopy.text("processing") : confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OperatorActionConfirmModal({
+  confirmation,
+  loading,
+  onClose,
+  onPermissionConfirm,
+  onPasswordConfirm,
+  onDeleteConfirm,
+}: {
+  confirmation: {
+    kind: "permission" | "password" | "delete";
+    operator: UserRecord;
+    nextStatus?: UserRecord["status"];
+  };
+  loading: boolean;
+  onClose: () => void;
+  onPermissionConfirm: (
+    operator: UserRecord,
+    status: UserRecord["status"],
+  ) => void;
+  onPasswordConfirm: (operator: UserRecord, password: string) => void;
+  onDeleteConfirm: (operator: UserRecord) => void;
+}) {
+  const copy = useAdminOperationsCopy();
+  const dialogs = copy.section("dialogs");
+  const members = copy.section("members");
+  const [password, setPassword] = useState("");
+  const [validation, setValidation] = useState("");
+  const operatorName =
+    confirmation.operator.name || confirmation.operator.email;
+
+  if (confirmation.kind === "password") {
+    return (
+      <div
+        className="admin-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={dialogs.text("passwordDialogTitle")}
+      >
+        <button
+          type="button"
+          className="admin-modal__backdrop"
+          aria-label={dialogs.text("close")}
+          onClick={onClose}
+          disabled={loading}
+        />
+        <form
+          className="admin-modal__panel admin-modal__panel--sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (password.length < 8) {
+              setValidation(copy.message("passwordTooShort"));
+              return;
+            }
+            onPasswordConfirm(confirmation.operator, password);
+          }}
+        >
+          <header className="admin-modal__head">
+            <div>
+              <p className="admin-modal__eyebrow">{operatorName}</p>
+              <h2>{dialogs.text("passwordDialogTitle")}</h2>
+            </div>
+          </header>
+          <div className="admin-modal__body">
+            <p className="admin-modal__lede">
+              {dialogs.text("passwordDialogDescription")}
+            </p>
+            <label className="admin-modal__field">
+              <span>{dialogs.text("passwordLabel")}</span>
+              <input
+                className="admin-input"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={dialogs.text("passwordPlaceholder")}
+                disabled={loading}
+                autoComplete="new-password"
+              />
+            </label>
+            {validation && (
+              <p className="admin-form__error" role="alert">
+                {validation}
+              </p>
+            )}
+            <div className="admin-modal__actions">
+              <button type="button" className="admin-btn" onClick={onClose}>
+                {dialogs.text("cancel")}
+              </button>
+              <button
+                type="submit"
+                className="admin-btn admin-btn--primary"
+                disabled={loading}
+              >
+                {loading
+                  ? dialogs.text("processing")
+                  : dialogs.text("resetPassword")}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  const isDelete = confirmation.kind === "delete";
+  const nextStatus = confirmation.nextStatus ?? "rejected";
+  const confirmLabel = isDelete
+    ? members.text("deleteAccount")
+    : nextStatus === "active"
+      ? members.text("permissionGranted")
+      : members.text("permissionRevoked");
+  return (
+    <AdminConfirmationModal
+      title={
+        isDelete
+          ? dialogs.text("deleteOperatorDialogTitle")
+          : dialogs.text("permissionDialogTitle")
+      }
+      description={`${operatorName} · ${confirmLabel}`}
+      warning={isDelete ? dialogs.text("irreversibleWarning") : undefined}
+      confirmLabel={confirmLabel}
+      loading={loading}
+      onClose={onClose}
+      onConfirm={() => {
+        if (isDelete) {
+          onDeleteConfirm(confirmation.operator);
+        } else {
+          onPermissionConfirm(confirmation.operator, nextStatus);
+        }
+      }}
+    />
+  );
+}
+
 function FaqEditorModal({
   mode,
   faq,
   loading,
+  categories,
   onClose,
   onSubmit,
 }: {
   mode: "create" | "edit";
   faq: FaqRecord | null;
   loading: boolean;
+  categories: { value: string; label: string }[];
   onClose: () => void;
   onSubmit: (payload: {
     question: string;
@@ -4513,10 +5093,13 @@ function FaqEditorModal({
     displayStatus: "published" | "draft";
   }) => void;
 }) {
+  const copy = useAdminOperationsCopy();
+  const dialogCopy = copy.section("dialogs");
+  const inquiryCopy = copy.section("inquiries");
   const [question, setQuestion] = useState(faq?.question ?? "");
   const [answer, setAnswer] = useState(faq?.answer ?? "");
   const [category, setCategory] = useState(
-    faq?.category ?? FAQ_CATEGORY_OPTIONS[0]
+    faq?.category ?? categories[0]?.value ?? "",
   );
   const [isPublic, setIsPublic] = useState(faq?.isPublic ?? true);
   const [displayStatus, setDisplayStatus] = useState<"published" | "draft">(
@@ -4527,14 +5110,14 @@ function FaqEditorModal({
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!question.trim() || !answer.trim()) {
-      setValidation("제목과 본문을 모두 입력해 주세요.");
+      setValidation(dialogCopy.text("faqValidation"));
       return;
     }
     setValidation("");
     onSubmit({
       question: question.trim(),
       answer: answer.trim(),
-      category: category.trim() || "일반",
+      category: category.trim() || categories[0]?.value || "",
       isPublic,
       displayStatus,
     });
@@ -4547,19 +5130,20 @@ function FaqEditorModal({
         <header className="admin-modal__head">
           <div>
             <span className="admin-modal__eyebrow">
-              {mode === "create" ? "FAQ 등록" : "FAQ 수정"}
+              {mode === "create"
+                ? dialogCopy.text("faqCreate")
+                : dialogCopy.text("faqEdit")}
             </span>
-            <h2 className="admin-modal__title">자주 묻는 질문 콘텐츠 관리</h2>
+            <h2 className="admin-modal__title">{dialogCopy.text("faqEditorTitle")}</h2>
             <p className="admin-modal__lede">
-              홈페이지 FAQ 영역에 노출되는 내용을 작성합니다. 노출 상태를
-              임시 저장으로 두면 고객 화면에는 표시되지 않습니다.
+              {dialogCopy.text("faqEditorDescription")}
             </p>
           </div>
           <button
             type="button"
             className="admin-modal__close"
             onClick={onClose}
-            aria-label="닫기"
+            aria-label={dialogCopy.text("close")}
           >
             ×
           </button>
@@ -4567,31 +5151,31 @@ function FaqEditorModal({
         <div className="admin-modal__body">
           <form className="admin-form admin-form--grid" onSubmit={handleSubmit}>
             <label className="admin-form__full">
-              <span>제목</span>
+              <span>{dialogCopy.text("faqQuestion")}</span>
               <input
                 className="admin-input"
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
                 maxLength={200}
-                placeholder="예) 회원가입할 때 농협은 어떻게 선택하나요?"
+                placeholder={dialogCopy.text("faqQuestionPlaceholder")}
               />
             </label>
             <label>
-              <span>카테고리</span>
+              <span>{dialogCopy.text("faqCategory")}</span>
               <select
                 className="admin-input"
                 value={category}
                 onChange={(event) => setCategory(event.target.value)}
               >
-                {FAQ_CATEGORY_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
+                {categories.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
             </label>
             <label>
-              <span>공개 여부</span>
+              <span>{dialogCopy.text("faqPublic")}</span>
               <select
                 className="admin-input"
                 value={isPublic ? "public" : "private"}
@@ -4599,12 +5183,12 @@ function FaqEditorModal({
                   setIsPublic(event.target.value === "public")
                 }
               >
-                <option value="public">공개</option>
-                <option value="private">비공개</option>
+                <option value="public">{inquiryCopy.item("faqPublic.public")}</option>
+                <option value="private">{inquiryCopy.item("faqPublic.private")}</option>
               </select>
             </label>
             <label>
-              <span>노출 상태</span>
+              <span>{dialogCopy.text("faqDisplay")}</span>
               <select
                 className="admin-input"
                 value={displayStatus}
@@ -4614,19 +5198,19 @@ function FaqEditorModal({
                   )
                 }
               >
-                <option value="published">노출 중</option>
-                <option value="draft">임시 저장</option>
+                <option value="published">{inquiryCopy.item("faqDisplay.published")}</option>
+                <option value="draft">{inquiryCopy.item("faqDisplay.draft")}</option>
               </select>
             </label>
             <label className="admin-form__full">
-              <span>본문</span>
+              <span>{dialogCopy.text("faqBody")}</span>
               <textarea
                 className="admin-input admin-input--area"
                 rows={8}
                 value={answer}
                 onChange={(event) => setAnswer(event.target.value)}
                 maxLength={5000}
-                placeholder="고객에게 보여줄 답변 본문을 입력하세요."
+                placeholder={dialogCopy.text("faqBodyPlaceholder")}
               />
             </label>
             {validation && (
@@ -4639,7 +5223,7 @@ function FaqEditorModal({
                 onClick={onClose}
                 disabled={loading}
               >
-                취소
+                {dialogCopy.text("cancel")}
               </button>
               <button
                 type="submit"
@@ -4647,10 +5231,10 @@ function FaqEditorModal({
                 disabled={loading}
               >
                 {loading
-                  ? "저장 중..."
+                  ? dialogCopy.text("saving")
                   : mode === "create"
-                    ? "FAQ 등록"
-                    : "변경 저장"}
+                    ? dialogCopy.text("faqCreate")
+                    : dialogCopy.text("faqSaveChanges")}
               </button>
             </div>
           </form>

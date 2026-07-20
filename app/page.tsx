@@ -1,27 +1,19 @@
-import { Topbar } from "@/components/Topbar";
-import { Hero } from "@/components/Hero";
-import { Expertise } from "@/components/Expertise";
-import { About } from "@/components/About";
-import { Services } from "@/components/Services";
-import { Process } from "@/components/Process";
-import { CaseStudies } from "@/components/CaseStudies";
-import { FAQ } from "@/components/FAQ";
-import { Footer } from "@/components/Footer";
+import type { Metadata } from "next";
+import { HomePageRenderer } from "@/components/HomePageRenderer";
+import { loadPublishedHome } from "@/lib/cms/public-content";
 
-export default function HomePage() {
-  return (
-    <>
-      <Topbar />
-      <main id="main">
-        <Hero />
-        <About />
-        <Expertise />
-        <Services />
-        <Process />
-        <CaseStudies />
-        <FAQ />
-      </main>
-      <Footer />
-    </>
-  );
+export async function generateMetadata(): Promise<Metadata> {
+  const { content } = await loadPublishedHome();
+  return {
+    title: content.seo.title,
+    description: content.seo.description,
+    robots: content.seo.indexable
+      ? { index: true, follow: true }
+      : { index: false, follow: false },
+  };
+}
+
+export default async function HomePage() {
+  const { content, assetUrls } = await loadPublishedHome();
+  return <HomePageRenderer content={content} assetUrls={assetUrls} />;
 }

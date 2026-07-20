@@ -7,18 +7,48 @@ service firebase.storage {
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.token.admin == true;
+      return signedIn()
+        && 'admin' in request.auth.token
+        && request.auth.token.admin == true;
+    }
+
+    function isAllowedCmsUpload() {
+      return request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches(
+          'image/jpeg|image/png|image/webp|image/gif|application/pdf'
+        );
     }
 
     match /business-cards/{userId}/{fileName} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
-      allow write: if signedIn() && request.auth.uid == userId
+      allow create: if signedIn() && request.auth.uid == userId
+        && resource == null
+        && request.resource.size > 0
         && request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*|application/pdf');
+        && request.resource.contentType.matches(
+          'image/jpeg|image/png|image/webp|image/gif|application/pdf'
+        );
+      allow update, delete: if false;
+    }
+
+    match /cms/published/{assetId}/{fileName} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /cms/drafts/{assetId}/{fileName} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isAllowedCmsUpload();
+      allow update, delete: if false;
+    }
+
+    match /consult-attachments/{allPaths=**} {
+      allow read, write: if isAdmin();
     }
 
     match /{allPaths=**} {
-      allow read, write: if isAdmin();
+      allow read, write: if false;
     }
   }
 }

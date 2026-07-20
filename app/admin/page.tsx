@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
-import { AdminDashboard } from "@/components/AdminDashboard";
+import { CmsAdminConsole } from "@/components/CmsAdminConsole";
+import { cmsPageMetadata } from "@/lib/cms/metadata";
+import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 
-export const metadata: Metadata = {
-  title: "Admin · 농협지원센터",
-  description: "농협지원센터 운영자 대시보드입니다.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const bundle = await loadPublishedCmsPage("admin.console");
+  return cmsPageMetadata(bundle.content, bundle.assetUrls);
+}
 
-export default function AdminPage() {
+export default async function AdminPage() {
+  const { content } = await loadPublishedCmsPage("admin.console");
   return (
-    <main id="main" className="admin-app">
-      <AdminDashboard />
-    </main>
+    <div className="admin-app">
+      <CmsAdminConsole content={content} />
+    </div>
   );
 }

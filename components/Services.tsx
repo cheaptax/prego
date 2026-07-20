@@ -1,84 +1,75 @@
-"use client";
-import { useEffect, useState } from "react";
-import {
-  defaultServiceCatalog,
-  serviceCatalogStorageKey,
-  type ServiceCatalogItem,
-} from "@/lib/platform";
+import { CmsHighlightedText } from "@/components/cms/CmsHighlightedText";
+import type { CmsSection } from "@/lib/cms/schemas";
+import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+import type { ServiceIconName } from "@/lib/platform";
 import { ConsultRequestLink } from "./ConsultRequestLink";
 import { ServiceIcon } from "./ServiceIcon";
 
-function parseServiceCatalog(value: string | null): ServiceCatalogItem[] {
-  if (!value) return defaultServiceCatalog;
-  try {
-    const parsed = JSON.parse(value) as ServiceCatalogItem[];
-    if (!Array.isArray(parsed)) return defaultServiceCatalog;
-    return parsed.filter(
-      (item) =>
-        item &&
-        typeof item.id === "string" &&
-        typeof item.title === "string" &&
-        typeof item.desc === "string" &&
-        typeof item.icon === "string"
-    );
-  } catch {
-    return defaultServiceCatalog;
-  }
-}
+const SERVICE_ICONS = new Set<ServiceIconName>([
+  "tax",
+  "audit",
+  "subsidy",
+  "ledger",
+  "shield",
+  "feasibility",
+  "valuation",
+  "control",
+  "refund",
+  "investigation",
+  "structure",
+]);
 
-export function Services() {
-  const [services, setServices] = useState<ServiceCatalogItem[]>(defaultServiceCatalog);
-
-  useEffect(() => {
-    const syncServices = () => {
-      setServices(parseServiceCatalog(window.localStorage.getItem(serviceCatalogStorageKey)));
-    };
-
-    syncServices();
-    window.addEventListener("storage", syncServices);
-    window.addEventListener("service-catalog-change", syncServices);
-
-    return () => {
-      window.removeEventListener("storage", syncServices);
-      window.removeEventListener("service-catalog-change", syncServices);
-    };
-  }, []);
-
+export function Services({ section }: { section: CmsSection }) {
+  const services = section.items.filter((item) => item.visible && !item.deleted);
+  const bonus = section.groups.find(
+    (group) => group.id === "multiFieldRequest" && group.visible,
+  );
+  const bonusAction = bonus?.actions[0];
   return (
-    <section className="section" id="services">
+    <section {...cmsSectionRootProps(section, "section")} id="services">
       <div className="section__head">
-        <span className="kicker">Services</span>
+        <span className="kicker">{section.eyebrow}</span>
         <h2 className="display">
-          농협에 필요한 모든 전문 업무를 <em>한 곳에서 시작하세요</em>
+          <CmsHighlightedText
+            text={section.title}
+            highlight={section.text.highlight}
+          />
         </h2>
         <p className="section__lede">
-          세무·회계·법률·노무 등 필요한 분야를 골라, 한 번의 요청으로 상담을
-          시작할 수 있습니다.
+          {section.description}
         </p>
       </div>
 
       <ol className="services">
-        {services.map((s) => (
-          <li className="svc" key={s.id}>
+        {services.map((service) => {
+          const icon =
+            service.value && SERVICE_ICONS.has(service.value as ServiceIconName)
+              ? (service.value as ServiceIconName)
+              : "tax";
+          return (
+          <li className="svc" key={service.id}>
             <span className="svc__icon" aria-hidden="true">
-              <ServiceIcon name={s.icon} />
+              <ServiceIcon name={icon} />
             </span>
             <div className="svc__body">
-              <h3>{s.title}</h3>
-              <p>{s.desc}</p>
+              <h3>{service.title}</h3>
+              <p>{service.description}</p>
             </div>
           </li>
-        ))}
+          );
+        })}
       </ol>
 
       <aside className="bonus">
-        <div className="bonus__badge">Policy</div>
+        <div className="bonus__badge">{bonus?.label}</div>
         <div className="bonus__body">
-          <h3>여러 분야가 섞인 문의도 한 번의 요청으로 시작할 수 있습니다</h3>
+          <h3>{bonus?.title}</h3>
         </div>
-        <ConsultRequestLink className="bonus__link">
-          상담·견적 요청 <span aria-hidden="true">→</span>
-        </ConsultRequestLink>
+        {bonusAction ? (
+          <ConsultRequestLink className="bonus__link">
+            {bonusAction.label} <span aria-hidden="true">→</span>
+          </ConsultRequestLink>
+        ) : null}
       </aside>
     </section>
   );

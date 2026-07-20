@@ -1,64 +1,82 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { trackAuditQuoteEvent } from "@/lib/audit-quote/analytics";
+import {
+  AUDIT_QUOTE_REQUEST_ENDPOINT,
+  buildAuditQuoteRequestPayload,
+} from "@/lib/audit-quote/client-payload";
 import {
   IdempotencyKeySession,
   formatPhoneInput,
-  mapAuditQuoteApiError,
   validateAuditQuoteEmail,
   validateAuditQuoteName,
   validateAuditQuotePhone,
 } from "@/lib/audit-quote/client-form";
 import type { PublicAuditQuoteConfig } from "@/lib/audit-quote/public-types";
+import { normalizeAuditQuoteCmsContent } from "@/lib/cms/audit-quote-content";
+import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
+import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
 
 type Props = {
   config: PublicAuditQuoteConfig;
+  content: CmsPageContent;
+  editing?: boolean;
+  previewMode?: boolean;
+  mainId?: string | null;
+  selectedSectionId?: string;
+  onSelectSection?: (sectionId: string) => void;
 };
 
 type FormStatus = "idle" | "submitting" | "success" | "error";
 
-const SUCCESS_MESSAGE =
-  "담당자가 확인 후 입력하신 이메일로 다음 절차를 안내드려요.";
+function visibleItems(section: CmsSection) {
+  return section.items.filter((item) => item.visible && !item.deleted);
+}
 
-const BENEFITS = [
-  {
-    title: "2곳 이상 견적",
-    body: "동일 조건으로 복수 회계법인에 견적을 요청해요.",
-  },
-  {
-    title: "한눈에 비교",
-    body: "보수·수임실적·투입인력·일정을 한 표로 정리해요.",
-  },
-  {
-    title: "선정 검토보고서",
-    body: "견적서를 올리면 내부 보고용 검토자료를 드려요.",
-  },
-];
+function eventSectionClasses(section: CmsSection, baseClassName: string) {
+  const root = cmsSectionRootProps(section, baseClassName);
+  const card = section.style.card;
+  const button = section.style.button;
+  return {
+    ...root,
+    className: [
+      root.className,
+      card ? `aq-card-bg-${card.background}` : "",
+      card ? `aq-card-border-${card.border}` : "",
+      card ? `aq-card-radius-${card.radius}` : "",
+      card ? `aq-card-shadow-${card.shadow}` : "",
+      button ? `aq-button-tone-${button.tone}` : "",
+      button ? `aq-button-size-${button.size}` : "",
+      button ? `aq-button-radius-${button.radius}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
+}
 
-const STEPS = [
-  { title: "신청", body: "이메일과 담당자 정보만 남겨 주세요." },
-  { title: "견적 요청", body: "프리고가 필수정보를 확인하고 2곳 이상에 요청해요." },
-  { title: "비교표 전달", body: "비교 가능한 견적을 이메일로 보내드려요." },
-];
-
-const FAQS = [
-  {
-    q: "신청하면 꼭 계약해야 하나요?",
-    a: "아니요. 비교 후에도 계약 의무는 없고, 최종 선정은 우리 농협이 결정해요.",
-  },
-  {
-    q: "가장 저렴한 곳을 추천해 주나요?",
-    a: "최저가 추천 서비스가 아니에요. 동일 조건의 비교 가능한 견적을 정리해 드려요.",
-  },
-  {
-    q: "입력한 정보는 어디에 쓰이나요?",
-    a: "견적 진행에 필요한 범위에서만 담당 운영자와 견적 대상 회계법인에 전달돼요. 자세한 내용은 개인정보처리방침을 확인해 주세요.",
-  },
-];
-
-export function AuditQuoteEventPage({ config }: Props) {
+export function AuditQuoteEventPage({
+  config,
+  content,
+  editing = false,
+  previewMode = false,
+  mainId = "main",
+  selectedSectionId,
+  onSelectSection,
+}: Props) {
+  const normalizedContent = useMemo(
+    () => normalizeAuditQuoteCmsContent(content),
+    [content],
+  );
+  const messages = normalizedContent.messages;
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -117,6 +135,7 @@ export function AuditQuoteEventPage({ config }: Props) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (previewMode) return;
     if (status === "submitting") return;
 
     setFormError("");
@@ -125,11 +144,23 @@ export function AuditQuoteEventPage({ config }: Props) {
     const nameResult = validateAuditQuoteName(name);
     const phoneResult = validateAuditQuotePhone(phone);
     const nextErrors: typeof fieldErrors = {};
-    if (!emailResult.ok) nextErrors.email = emailResult.error;
-    if (!nameResult.ok) nextErrors.name = nameResult.error;
-    if (!phoneResult.ok) nextErrors.phone = phoneResult.error;
+    if (!emailResult.ok) {
+      nextErrors.email = email.trim()
+        ? messages.emailInvalid
+        : messages.emailRequired;
+    }
+    if (!nameResult.ok) {
+      nextErrors.name = name.trim()
+        ? messages.nameInvalid
+        : messages.nameRequired;
+    }
+    if (!phoneResult.ok) {
+      nextErrors.phone = phone.trim()
+        ? messages.phoneInvalid
+        : messages.phoneRequired;
+    }
     if (!privacyConsent) {
-      nextErrors.consent = "개인정보 수집·이용에 동의해 주세요.";
+      nextErrors.consent = messages.consentRequired;
     }
     setFieldErrors(nextErrors);
 
@@ -155,25 +186,24 @@ export function AuditQuoteEventPage({ config }: Props) {
     });
 
     try {
-      const res = await fetch("/api/audit-quote/requests", {
+      const res = await fetch(AUDIT_QUOTE_REQUEST_ENDPOINT, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           "Idempotency-Key": key,
         },
-        body: JSON.stringify({
-          email: emailResult.email,
-          name: nameResult.name,
-          phone: phoneResult.phone,
-          privacyConsent: true,
-          privacyPolicyVersion: config.privacyPolicyVersion,
-          marketingConsent,
-          source: {
-            campaign: config.campaign,
-            channel: config.channel,
-          },
-          companyWebsite: honeypot,
-        }),
+        body: JSON.stringify(
+          buildAuditQuoteRequestPayload(
+            {
+              email: emailResult.email,
+              name: nameResult.name,
+              phone: phoneResult.phone,
+              marketingConsent,
+              companyWebsite: honeypot,
+            },
+            config,
+          ),
+        ),
       });
 
       const data = (await res.json().catch(() => null)) as {
@@ -190,7 +220,29 @@ export function AuditQuoteEventPage({ config }: Props) {
           page_path: config.pagePath,
           error_code: code,
         });
-        setFormError(mapAuditQuoteApiError(code));
+        setFormError(
+          code === "invalid_email"
+            ? messages.emailInvalid
+            : code === "invalid_name"
+              ? messages.nameInvalid
+              : code === "invalid_phone"
+                ? messages.phoneInvalid
+                : code === "consent_required"
+                  ? messages.consentRequired
+                  : code === "privacy_version_mismatch"
+                    ? messages.privacyVersionMismatch
+                    : code === "event_disabled"
+                      ? messages.eventDisabled
+                      : code === "rate_limited"
+                        ? messages.rateLimited
+                        : [
+                              "origin_not_allowed",
+                              "unsupported_media_type",
+                              "payload_too_large",
+                            ].includes(code)
+                          ? messages.requestRejected
+                          : messages.genericError,
+        );
         setStatus("error");
         window.setTimeout(() => errorRef.current?.focus(), 0);
         return;
@@ -212,279 +264,456 @@ export function AuditQuoteEventPage({ config }: Props) {
         page_path: config.pagePath,
         error_code: "network",
       });
-      setFormError(mapAuditQuoteApiError("network"));
+      setFormError(messages.genericError);
       setStatus("error");
       window.setTimeout(() => errorRef.current?.focus(), 0);
     }
   }
 
-  return (
-    <main id="main" className="aq-page">
-      <p className="sr-only" id={statusId} role="status" aria-live="polite">
-        {status === "submitting"
-          ? "견적 요청을 전송하고 있어요."
-          : status === "success"
-            ? `신청이 완료됐어요. ${SUCCESS_MESSAGE}`
-            : formError}
-      </p>
+  function sectionProps(section: CmsSection, baseClassName: string) {
+    const root = eventSectionClasses(section, baseClassName);
+    return {
+      ...root,
+      className: [
+        root.className,
+        editing ? "cms-home-edit-section" : "",
+        editing && selectedSectionId === section.id ? "is-selected" : "",
+        editing && !section.visible ? "is-hidden" : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      tabIndex: editing ? 0 : undefined,
+      "data-cms-section-id": editing ? section.id : undefined,
+      onClick: editing ? () => onSelectSection?.(section.id) : undefined,
+      onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
+    };
+  }
 
-      <section className="aq-hero">
-        <span className="aq-badge">FY27 회계감사 견적</span>
-        <h1 className="aq-title">
-          회계법인 견적,
-          <br />한 번에 비교하세요
-        </h1>
-        <p className="aq-lede">
-          한 번만 신청하면 동일 조건으로 2곳 이상의
-          <br />
-          비교 가능한 견적을 받아볼 수 있어요.
-        </p>
-      </section>
+  function renderSection(section: CmsSection) {
+    if (!section.visible && !editing) return null;
 
-      <section className="aq-form-wrap" aria-label="견적 신청">
-        {!config.enabled ? (
-          <div className="aq-card aq-closed" role="status">
-            <strong>지금은 접수 기간이 아니에요</strong>
-            <p>{config.closedMessage}</p>
-          </div>
-        ) : status === "success" ? (
-          <div className="aq-card aq-success" role="status">
-            <span className="aq-success__icon" aria-hidden="true">
-              <svg width="28" height="28" viewBox="0 0 28 28">
-                <path
-                  d="M6 14.5 L11.5 20 L22 9"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              </svg>
-            </span>
-            <h2 ref={successRef} tabIndex={-1}>
-              신청이 완료됐어요
-            </h2>
-            <p>{SUCCESS_MESSAGE}</p>
-            {publicReference && (
-              <p className="aq-success__ref">
-                접수번호 <code>{publicReference}</code>
-              </p>
-            )}
-            <button type="button" className="aq-btn-ghost" onClick={resetForNewSubmission}>
-              다른 담당자로 신청하기
-            </button>
-          </div>
-        ) : (
-          <form className="aq-card aq-form" onSubmit={onSubmit} noValidate>
-            <div className="aq-field">
-              <label htmlFor={`${fieldId}-email`}>농협 이메일</label>
-              <input
-                ref={emailRef}
-                id={`${fieldId}-email`}
-                type="email"
-                name="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="example@nonghyup.com"
-                value={email}
-                aria-invalid={Boolean(fieldErrors.email)}
-                aria-describedby={
-                  fieldErrors.email ? `${fieldId}-email-error` : undefined
-                }
-                disabled={status === "submitting"}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  if (fieldErrors.email) {
-                    setFieldErrors((prev) => ({ ...prev, email: undefined }));
-                  }
-                }}
-              />
-              {fieldErrors.email && (
-                <p id={`${fieldId}-email-error`} className="aq-error" role="alert">
-                  {fieldErrors.email}
-                </p>
-              )}
+    if (section.id === "hero") {
+      const highlight = section.text.highlight;
+      return (
+        <section key={section.id} {...sectionProps(section, "aq-hero")}>
+          {section.eyebrow ? (
+            <span className="aq-badge">{section.eyebrow}</span>
+          ) : null}
+          <h1 className="aq-title">
+            {section.title.split(/\n+/).map((line, index) => {
+              const highlightIndex = highlight
+                ? line.indexOf(highlight)
+                : -1;
+              return (
+                <span className="aq-title__line" key={`${line}-${index}`}>
+                  {index > 0 ? <br /> : null}
+                  {highlightIndex >= 0 ? (
+                    <>
+                      {line.slice(0, highlightIndex)}
+                      <em>{highlight}</em>
+                      {line.slice(highlightIndex + highlight.length)}
+                    </>
+                  ) : (
+                    line
+                  )}
+                </span>
+              );
+            })}
+          </h1>
+          {section.description ? (
+            <p className="aq-lede">
+              {section.description.split(/\n+/).map((line, index) => (
+                <span key={`${line}-${index}`}>
+                  {index > 0 ? <br /> : null}
+                  {line}
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </section>
+      );
+    }
+
+    if (section.id === "intakeForm") {
+      const emailDescriptions = [
+        section.text.emailHelp ? `${fieldId}-email-help` : "",
+        fieldErrors.email ? `${fieldId}-email-error` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const nameDescriptions = [
+        section.text.nameHelp ? `${fieldId}-name-help` : "",
+        fieldErrors.name ? `${fieldId}-name-error` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const phoneDescriptions = [
+        section.text.phoneHelp ? `${fieldId}-phone-help` : "",
+        fieldErrors.phone ? `${fieldId}-phone-error` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return (
+        <section
+          key={section.id}
+          {...sectionProps(section, "aq-form-wrap")}
+          aria-label={section.text.formAriaLabel}
+        >
+          {!config.enabled && !previewMode ? (
+            <div className="aq-card aq-closed" role="status">
+              <strong>{messages.closedTitle}</strong>
+              <p>{messages.closedDescription || config.closedMessage}</p>
             </div>
-
-            <div className="aq-field">
-              <label htmlFor={`${fieldId}-name`}>담당자 이름</label>
-              <input
-                ref={nameRef}
-                id={`${fieldId}-name`}
-                type="text"
-                name="name"
-                autoComplete="name"
-                placeholder="홍길동"
-                value={name}
-                aria-invalid={Boolean(fieldErrors.name)}
-                aria-describedby={
-                  fieldErrors.name ? `${fieldId}-name-error` : undefined
-                }
-                disabled={status === "submitting"}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (fieldErrors.name) {
-                    setFieldErrors((prev) => ({ ...prev, name: undefined }));
-                  }
-                }}
-              />
-              {fieldErrors.name && (
-                <p id={`${fieldId}-name-error`} className="aq-error" role="alert">
-                  {fieldErrors.name}
+          ) : status === "success" ? (
+            <div className="aq-card aq-success" role="status">
+              <span className="aq-success__icon" aria-hidden="true">
+                <svg width="28" height="28" viewBox="0 0 28 28">
+                  <path
+                    d="M6 14.5 L11.5 20 L22 9"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                </svg>
+              </span>
+              <h2 ref={successRef} tabIndex={-1}>
+                {messages.successTitle}
+              </h2>
+              <p>{messages.successDescription}</p>
+              {publicReference ? (
+                <p className="aq-success__ref">
+                  {messages.publicReferenceLabel}{" "}
+                  <code>{publicReference}</code>
                 </p>
-              )}
+              ) : null}
+              <button
+                type="button"
+                className="aq-btn-ghost"
+                onClick={resetForNewSubmission}
+              >
+                {messages.resetLabel}
+              </button>
             </div>
-
-            <div className="aq-field">
-              <label htmlFor={`${fieldId}-phone`}>휴대폰 번호</label>
-              <input
-                ref={phoneRef}
-                id={`${fieldId}-phone`}
-                type="tel"
-                name="phone"
-                inputMode="numeric"
-                autoComplete="tel"
-                placeholder="010-0000-0000"
-                value={phone}
-                aria-invalid={Boolean(fieldErrors.phone)}
-                aria-describedby={
-                  fieldErrors.phone ? `${fieldId}-phone-error` : undefined
-                }
-                disabled={status === "submitting"}
-                onChange={(event) => {
-                  setPhone(formatPhoneInput(event.target.value));
-                  if (fieldErrors.phone) {
-                    setFieldErrors((prev) => ({ ...prev, phone: undefined }));
-                  }
-                }}
-              />
-              {fieldErrors.phone && (
-                <p id={`${fieldId}-phone-error`} className="aq-error" role="alert">
-                  {fieldErrors.phone}
+          ) : (
+            <form className="aq-card aq-form" onSubmit={onSubmit} noValidate>
+              {section.text.formTitle ? (
+                <h2 className="aq-form__title">{section.text.formTitle}</h2>
+              ) : null}
+              {section.text.formDescription ? (
+                <p className="aq-form__description">
+                  {section.text.formDescription}
                 </p>
-              )}
-            </div>
-
-            <div className="aq-honeypot" aria-hidden="true">
-              <label htmlFor={`${fieldId}-company-website`}>
-                회사 웹사이트
+              ) : null}
+              <div className="aq-field">
+                <label htmlFor={`${fieldId}-email`}>
+                  {section.text.emailLabel}
+                </label>
                 <input
-                  id={`${fieldId}-company-website`}
-                  tabIndex={-1}
-                  autoComplete="off"
-                  value={honeypot}
-                  onChange={(event) => setHoneypot(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="aq-consent">
-              <label className="aq-consent__row">
-                <input
-                  type="checkbox"
-                  checked={privacyConsent}
+                  ref={emailRef}
+                  id={`${fieldId}-email`}
+                  type="email"
+                  name="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder={section.text.emailPlaceholder}
+                  value={email}
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  aria-describedby={emailDescriptions || undefined}
                   disabled={status === "submitting"}
-                  aria-invalid={Boolean(fieldErrors.consent)}
-                  aria-describedby={
-                    fieldErrors.consent ? `${fieldId}-consent-error` : undefined
-                  }
                   onChange={(event) => {
-                    setPrivacyConsent(event.target.checked);
-                    if (fieldErrors.consent) {
-                      setFieldErrors((prev) => ({ ...prev, consent: undefined }));
+                    setEmail(event.target.value);
+                    if (fieldErrors.email) {
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        email: undefined,
+                      }));
                     }
                   }}
                 />
-                <span>
-                  [필수] 개인정보 수집·이용 동의{" "}
-                  <Link href={config.privacyPolicyHref} target="_blank">
-                    보기
-                  </Link>
-                </span>
-              </label>
-              {fieldErrors.consent && (
-                <p id={`${fieldId}-consent-error`} className="aq-error" role="alert">
-                  {fieldErrors.consent}
-                </p>
-              )}
-              <label className="aq-consent__row">
-                <input
-                  type="checkbox"
-                  checked={marketingConsent}
-                  disabled={status === "submitting"}
-                  onChange={(event) => setMarketingConsent(event.target.checked)}
-                />
-                <span>[선택] 이벤트·혜택 정보 수신 동의</span>
-              </label>
-            </div>
-
-            {formError && (
-              <p ref={errorRef} className="aq-error aq-error--form" role="alert" tabIndex={-1}>
-                {formError}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              className="aq-submit"
-              disabled={status === "submitting"}
-              aria-busy={status === "submitting"}
-            >
-              {status === "submitting" ? "접수 중…" : "견적 요청하기"}
-            </button>
-            <p className="aq-form__note">무료 신청 · 비교 후에도 계약 의무 없음</p>
-          </form>
-        )}
-      </section>
-
-      <section className="aq-section" aria-label="제공 혜택">
-        <h2 className="aq-section__title">이런 걸 도와드려요</h2>
-        <div className="aq-benefits">
-          {BENEFITS.map((item) => (
-            <article key={item.title}>
-              <h3>{item.title}</h3>
-              <p>{item.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="aq-section" aria-label="진행 순서">
-        <h2 className="aq-section__title">이렇게 진행돼요</h2>
-        <ol className="aq-steps">
-          {STEPS.map((step, index) => (
-            <li key={step.title}>
-              <span aria-hidden="true">{index + 1}</span>
-              <div>
-                <strong>{step.title}</strong>
-                <p>{step.body}</p>
+                {section.text.emailHelp ? (
+                  <p id={`${fieldId}-email-help`} className="aq-field__help">
+                    {section.text.emailHelp}
+                  </p>
+                ) : null}
+                {fieldErrors.email ? (
+                  <p
+                    id={`${fieldId}-email-error`}
+                    className="aq-error"
+                    role="alert"
+                  >
+                    {fieldErrors.email}
+                  </p>
+                ) : null}
               </div>
-            </li>
-          ))}
-        </ol>
-      </section>
 
-      <section className="aq-section" aria-label="자주 묻는 질문">
-        <h2 className="aq-section__title">자주 묻는 질문</h2>
-        <div className="aq-faq">
-          {FAQS.map((item) => (
-            <details key={item.q}>
-              <summary>{item.q}</summary>
-              <p>{item.a}</p>
-            </details>
-          ))}
-        </div>
-      </section>
+              <div className="aq-field">
+                <label htmlFor={`${fieldId}-name`}>
+                  {section.text.nameLabel}
+                </label>
+                <input
+                  ref={nameRef}
+                  id={`${fieldId}-name`}
+                  type="text"
+                  name="name"
+                  autoComplete="name"
+                  placeholder={section.text.namePlaceholder}
+                  value={name}
+                  aria-invalid={Boolean(fieldErrors.name)}
+                  aria-describedby={nameDescriptions || undefined}
+                  disabled={status === "submitting"}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    if (fieldErrors.name) {
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        name: undefined,
+                      }));
+                    }
+                  }}
+                />
+                {section.text.nameHelp ? (
+                  <p id={`${fieldId}-name-help`} className="aq-field__help">
+                    {section.text.nameHelp}
+                  </p>
+                ) : null}
+                {fieldErrors.name ? (
+                  <p
+                    id={`${fieldId}-name-error`}
+                    className="aq-error"
+                    role="alert"
+                  >
+                    {fieldErrors.name}
+                  </p>
+                ) : null}
+              </div>
 
-      <section className="aq-footnote" aria-label="운영 안내">
-        <p>
-          본 서비스는 <strong>주식회사 프리고</strong>가 운영하는 견적지원
-          서비스로, 농협중앙회 공식 서비스가 아닙니다. 감사인의 수임 여부와
-          독립성 확인, 감사계획·절차·의견 결정은 각 회계법인이 관련 기준에 따라
-          독립적으로 수행하며, 프리고는 감사의견이나 감사결과에 관여하지
-          않습니다.
-        </p>
-      </section>
+              <div className="aq-field">
+                <label htmlFor={`${fieldId}-phone`}>
+                  {section.text.phoneLabel}
+                </label>
+                <input
+                  ref={phoneRef}
+                  id={`${fieldId}-phone`}
+                  type="tel"
+                  name="phone"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder={section.text.phonePlaceholder}
+                  value={phone}
+                  aria-invalid={Boolean(fieldErrors.phone)}
+                  aria-describedby={phoneDescriptions || undefined}
+                  disabled={status === "submitting"}
+                  onChange={(event) => {
+                    setPhone(formatPhoneInput(event.target.value));
+                    if (fieldErrors.phone) {
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        phone: undefined,
+                      }));
+                    }
+                  }}
+                />
+                {section.text.phoneHelp ? (
+                  <p id={`${fieldId}-phone-help`} className="aq-field__help">
+                    {section.text.phoneHelp}
+                  </p>
+                ) : null}
+                {fieldErrors.phone ? (
+                  <p
+                    id={`${fieldId}-phone-error`}
+                    className="aq-error"
+                    role="alert"
+                  >
+                    {fieldErrors.phone}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="aq-honeypot" aria-hidden="true">
+                <label htmlFor={`${fieldId}-company-website`}>
+                  회사 웹사이트
+                  <input
+                    id={`${fieldId}-company-website`}
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={honeypot}
+                    onChange={(event) => setHoneypot(event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <div className="aq-consent">
+                <label className="aq-consent__row">
+                  <input
+                    type="checkbox"
+                    checked={privacyConsent}
+                    disabled={status === "submitting"}
+                    aria-invalid={Boolean(fieldErrors.consent)}
+                    aria-describedby={
+                      fieldErrors.consent
+                        ? `${fieldId}-consent-error`
+                        : undefined
+                    }
+                    onChange={(event) => {
+                      setPrivacyConsent(event.target.checked);
+                      if (fieldErrors.consent) {
+                        setFieldErrors((prev) => ({
+                          ...prev,
+                          consent: undefined,
+                        }));
+                      }
+                    }}
+                  />
+                  <span>
+                    {section.text.privacyConsentLabel}{" "}
+                    <Link href={config.privacyPolicyHref} target="_blank">
+                      {section.text.privacyConsentLinkLabel}
+                    </Link>
+                  </span>
+                </label>
+                {fieldErrors.consent ? (
+                  <p
+                    id={`${fieldId}-consent-error`}
+                    className="aq-error"
+                    role="alert"
+                  >
+                    {fieldErrors.consent}
+                  </p>
+                ) : null}
+                <label className="aq-consent__row">
+                  <input
+                    type="checkbox"
+                    checked={marketingConsent}
+                    disabled={status === "submitting"}
+                    onChange={(event) =>
+                      setMarketingConsent(event.target.checked)
+                    }
+                  />
+                  <span>{section.text.marketingConsentLabel}</span>
+                </label>
+              </div>
+
+              {formError ? (
+                <p
+                  ref={errorRef}
+                  className="aq-error aq-error--form"
+                  role="alert"
+                  tabIndex={-1}
+                >
+                  {formError}
+                </p>
+              ) : null}
+
+              <button
+                type="submit"
+                className="aq-submit"
+                disabled={status === "submitting"}
+                aria-busy={status === "submitting"}
+              >
+                {status === "submitting"
+                  ? messages.submitting
+                  : section.text.submitLabel}
+              </button>
+              <p className="aq-form__note">{section.text.freeNotice}</p>
+            </form>
+          )}
+        </section>
+      );
+    }
+
+    if (section.id === "benefits") {
+      return (
+        <section
+          key={section.id}
+          {...sectionProps(section, "aq-section")}
+          aria-label={section.text.ariaLabel}
+        >
+          <h2 className="aq-section__title">{section.title}</h2>
+          <div className="aq-benefits">
+            {visibleItems(section).map((item) => (
+              <article key={item.id}>
+                <h3>{item.title}</h3>
+                {item.description ? <p>{item.description}</p> : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
+    if (section.id === "steps") {
+      return (
+        <section
+          key={section.id}
+          {...sectionProps(section, "aq-section")}
+          aria-label={section.text.ariaLabel}
+        >
+          <h2 className="aq-section__title">{section.title}</h2>
+          <ol className="aq-steps">
+            {visibleItems(section).map((step, index) => (
+              <li key={step.id}>
+                <span aria-hidden="true">{index + 1}</span>
+                <div>
+                  <strong>{step.title}</strong>
+                  {step.description ? <p>{step.description}</p> : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      );
+    }
+
+    if (section.id === "faq") {
+      return (
+        <section
+          key={section.id}
+          {...sectionProps(section, "aq-section")}
+          aria-label={section.text.ariaLabel}
+        >
+          <h2 className="aq-section__title">{section.title}</h2>
+          <div className="aq-faq">
+            {visibleItems(section).map((item) => (
+              <details key={item.id}>
+                <summary>{item.title}</summary>
+                {item.description ? <p>{item.description}</p> : null}
+              </details>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
+    if (section.id === "legalNotice") {
+      return (
+        <section
+          key={section.id}
+          {...sectionProps(section, "aq-footnote")}
+          aria-label={section.text.ariaLabel}
+        >
+          <p>
+            본 서비스는 <strong>{section.text.operatorName}</strong>
+            {section.description}
+          </p>
+        </section>
+      );
+    }
+
+    return null;
+  }
+
+  return (
+    <main id={mainId ?? undefined} className="aq-page">
+      <p className="sr-only" id={statusId} role="status" aria-live="polite">
+        {status === "submitting"
+          ? messages.submittingStatus
+          : status === "success"
+            ? `${messages.successTitle}. ${messages.successDescription}`
+            : formError}
+      </p>
+      {normalizedContent.sections.map(renderSection)}
     </main>
   );
 }

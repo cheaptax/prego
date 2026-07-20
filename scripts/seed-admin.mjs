@@ -2,9 +2,6 @@ import { cert, initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@gmail.com";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin";
-
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
@@ -13,6 +10,12 @@ function requiredEnv(name) {
 
 function privateKey() {
   return requiredEnv("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
+}
+
+const ADMIN_EMAIL = requiredEnv("ADMIN_EMAIL").trim().toLowerCase();
+const ADMIN_PASSWORD = requiredEnv("ADMIN_PASSWORD");
+if (ADMIN_PASSWORD.length < 8) {
+  throw new Error("ADMIN_PASSWORD must contain at least 8 characters");
 }
 
 if (!getApps().length) {
@@ -36,7 +39,7 @@ try {
     displayName: "관리자",
     disabled: false,
   };
-  if (ADMIN_PASSWORD.length >= 6) update.password = ADMIN_PASSWORD;
+  update.password = ADMIN_PASSWORD;
   await auth.updateUser(user.uid, update);
 } catch {
   const create = {
@@ -45,7 +48,7 @@ try {
     displayName: "관리자",
     disabled: false,
   };
-  if (ADMIN_PASSWORD.length >= 6) create.password = ADMIN_PASSWORD;
+  create.password = ADMIN_PASSWORD;
   user = await auth.createUser(create);
 }
 
@@ -62,9 +65,4 @@ await db.collection("users").doc(user.uid).set(
   { merge: true }
 );
 
-console.log(`Admin user ready: ${ADMIN_EMAIL}`);
-if (ADMIN_PASSWORD.length < 6) {
-  console.log(
-    "Firebase email/password sign-in requires at least 6 characters. The app handles admin/admin via /api/auth/admin-login custom token flow."
-  );
-}
+console.log(`Admin user ready: uid=${user.uid}`);
