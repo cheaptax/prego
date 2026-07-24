@@ -45,15 +45,24 @@ npm run dev
 
 - 사이트: http://localhost:3000
 - 관리자: http://localhost:3000/admin
-- 관리자 계정: `admin@gmail.com` / `admin`
+- 관리자 로그인은 Firebase 이메일·비밀번호 + `admin: true` claim (절차: [docs/ADMIN_AUTH_MIGRATION.md](docs/ADMIN_AUTH_MIGRATION.md))
+- 감사평가 관리자 운영 방법:
+  [docs/AUDIT_EVALUATION_ADMIN_OPERATIONS.md](docs/AUDIT_EVALUATION_ADMIN_OPERATIONS.md)
+- 감사평가 보안경계·보존 운영:
+  [docs/AUDIT_EVALUATION_SECURITY_BOUNDARY.md](docs/AUDIT_EVALUATION_SECURITY_BOUNDARY.md)
+- 감사평가 운영 배포·롤백·인수인계:
+  [docs/AUDIT_EVALUATION_PRODUCTION_RUNBOOK.md](docs/AUDIT_EVALUATION_PRODUCTION_RUNBOOK.md)
 
 ## Vercel 배포
 
+배포 전에 관리자 계정 이관이 끝났는지 확인하세요. `seed:admin`은 CI/Vercel 빌드에 넣지 마세요.
+
 ```bash
+npm run check:admin-ready -- --expected-project <FIREBASE_PROJECT_ID>
 vercel deploy --prod
 ```
 
-Vercel 대시보드에도 `.env.local`과 동일한 환경 변수를 등록해야 합니다.
+Vercel 대시보드에도 `.env.local`과 동일한 환경 변수를 등록해야 합니다. `ADMIN_PASSWORD`는 Vercel에 넣지 않습니다.
 
 ## 스크립트
 
@@ -62,7 +71,9 @@ Vercel 대시보드에도 `.env.local`과 동일한 환경 변수를 등록해�
 | `npm run dev` | 로컬 개발 서버 |
 | `npm run build` | 프로덕션 빌드 |
 | `npm run lint` | ESLint |
-| `npm run seed:admin` | 관리자 계정 시드 |
+| `npm run seed:admin` | 관리자 Auth bootstrap (수동, `--dry-run` / `--confirm-production`) |
+| `npm run check:admin-ready` | 배포 전 관리자 claim 읽기 전용 검사 |
+| `npm run preflight:audit-evaluation` | 감사평가 운영 환경·데이터 읽기 전용 dry-run |
 | `node scripts/smoke-prod.mjs` | 배포 URL 스모크 테스트 |
 
 ## 환경 변수
@@ -74,6 +85,6 @@ Vercel 대시보드에도 `.env.local`과 동일한 환경 변수를 등록해�
 | `FIREBASE_CLIENT_EMAIL` | 서비스 계정 이메일 |
 | `FIREBASE_PRIVATE_KEY` | 서비스 계정 개인키 |
 | `ADMIN_EMAIL` | 관리자 로그인 이메일 |
-| `ADMIN_PASSWORD` | 관리자 로그인 비밀번호 |
+| `ADMIN_PASSWORD` | seed apply 시에만 셸에 설정 (Git/Vercel/문서에 저장 금지) |
 
 템플릿: [.env.example](.env.example)

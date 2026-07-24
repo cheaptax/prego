@@ -31,14 +31,21 @@ const root = path.resolve(
 const timestamp = "2026-07-21T00:00:00.000Z";
 const scopedPageKeys = [
   "auth.login",
+  "auth.partnerLogin",
+  "auth.adminLogin",
   "auth.signup",
   "auth.pendingApproval",
+  "auth.portalAccessDenied",
   "legal.terms",
   "legal.privacy",
   "public.consult",
   "public.inquiries",
   "public.faq",
   "public.support",
+  "event.auditQuoteEvaluate",
+  "event.auditQuoteEvaluation",
+  "event.auditQuoteEvaluationReview",
+  "event.auditQuoteEvaluationReport",
   "partner.portal",
   "framework.notFound",
 ] as const;
@@ -195,19 +202,20 @@ describe("scoped route CMS completion", () => {
 describe("auth, guest/member, and payload safety", () => {
   it("keeps auth verification, endpoints, payload keys, limits, and consent requiredness in code", () => {
     const login = source("components/LoginForm.tsx");
+    const loginClient = source("lib/auth/login-client.ts");
     const signup = source("components/SignupForm.tsx");
     const signupApi = source("app/api/signup/route.ts");
     const consult = source("components/ConsultForm.tsx");
 
     for (const endpoint of [
-      "/api/me/status",
+      "/api/auth/portal-session",
       "/api/auth/find-email",
       "/api/auth/check-email",
       "/api/signup",
       "/api/consult",
     ]) {
       assert.ok(
-        `${login}\n${signup}\n${consult}`.includes(endpoint),
+        `${login}\n${loginClient}\n${signup}\n${consult}`.includes(endpoint),
         `missing protected endpoint ${endpoint}`,
       );
     }
@@ -251,8 +259,11 @@ describe("published routes and side-effect-free previews", () => {
   it("loads only published content for every scoped public route", () => {
     const routes = [
       ["app/login/page.tsx", "auth.login"],
+      ["app/partner/login/page.tsx", "auth.partnerLogin"],
+      ["app/admin/login/page.tsx", "auth.adminLogin"],
       ["app/signup/page.tsx", "auth.signup"],
       ["app/pending-approval/page.tsx", "auth.pendingApproval"],
+      ["app/portal-access-denied/page.tsx", "auth.portalAccessDenied"],
       ["app/terms/page.tsx", "legal.terms"],
       ["app/privacy/page.tsx", "legal.privacy"],
       ["app/consult/page.tsx", "public.consult"],
@@ -299,14 +310,29 @@ describe("published routes and side-effect-free previews", () => {
     assert.doesNotMatch(signup, /<label className="auth-check auth-check--row">/);
   });
 
-  it("keeps partner route safely locked to one required notice", () => {
+  it("keeps partner route gated with the CMS lockout fallback", () => {
     const partner = CMS_PAGE_DEFAULTS["partner.portal"];
-    assert.equal(partner.sections.length, 1);
-    assert.equal(partner.sections[0].id, "accessNotice");
-    assert.equal(partner.sections[0].locked, true);
-    assert.equal(partner.sections[0].visible, true);
+    assert.equal(partner.sections.length, 3);
+    const accessNotice = partner.sections.find(
+      (section) => section.id === "accessNotice",
+    );
+    assert.equal(accessNotice?.locked, true);
+    assert.equal(accessNotice?.visible, true);
+    assert.equal(
+      partner.sections.some((section) => section.id === "quoteEvaluation"),
+      true,
+    );
+    assert.equal(
+      partner.sections.find((section) => section.id === "quoteDocument")
+        ?.locked,
+      true,
+    );
     const route = source("app/partner/page.tsx");
-    assert.match(route, /<CmsSimplePage pageKey="partner\.portal" content=\{content\} \/>/);
-    assert.doesNotMatch(route, /AdminDashboard|PartnerDashboard|fetch\(/);
+    const dashboard = source("components/PartnerDashboard.tsx");
+    assert.match(route, /<PartnerDashboard content=\{content\} \/>/);
+    assert.match(dashboard, /tokenResult\.claims\.partner !== true/);
+    assert.match(dashboard, /\/api\/partner\/session/);
+    assert.match(dashboard, /accessNotice/);
+    assert.doesNotMatch(route, /AdminDashboard|fetch\(/);
   });
 });

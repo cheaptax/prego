@@ -205,7 +205,7 @@ describe("CMS page editor security and usability contract", () => {
       "app/api/admin/cms/assets/finalize/route.ts",
     ]) {
       const source = readFileSync(path.join(root, relativePath), "utf8");
-      assert.match(source, /requireAdmin\(request\)/);
+      assert.match(source, /requireAdminCapability\(request, "cms:(read|write)"\)/);
     }
   });
 

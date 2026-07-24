@@ -6,7 +6,12 @@ import {
   INQUIRY_CATEGORY_AUTO_LABEL,
   INQUIRY_SUPPORT_FIELD_OPTIONS,
 } from "@/lib/inquiry-categories";
+import { ensureQuoteRequest } from "@/lib/quotes/quote-requests";
 import type { ConsultRequestRecord } from "@/lib/firebase/schema";
+import {
+  assertInstitutionWriteAllowed,
+  InstitutionPurgeLockedError,
+} from "@/lib/test-data/purge-lock";
 
 export const runtime = "nodejs";
 
@@ -147,6 +152,7 @@ export async function POST(req: Request) {
         { status: 403 }
       );
     }
+    await assertInstitutionWriteAllowed(db, userCooperativeId);
 
     const record: ConsultRequestRecord = {
       id: requestRef.id,
@@ -160,6 +166,19 @@ export async function POST(req: Request) {
         body.cooperativeName || String(userData?.cooperativeName ?? ""),
       cooperativeDisplay: body.cooperativeDisplay,
       manualCooperativeName: body.manualCooperativeName,
+      ...(userData?.dataClassification
+        ? { dataClassification: userData.dataClassification }
+        : {}),
+      ...(userData?.sourceInstitutionId
+        ? { sourceInstitutionId: String(userData.sourceInstitutionId) }
+        : {}),
+      ...(userData?.testScenarioId
+        ? { testScenarioId: String(userData.testScenarioId) }
+        : {}),
+      ...(userData?.testMetadata &&
+      typeof userData.testMetadata === "object"
+        ? { testMetadata: userData.testMetadata }
+        : {}),
       sido: body.sido,
       sigungu: body.sigungu,
       subject: body.subject.trim(),
@@ -227,7 +246,11 @@ export async function POST(req: Request) {
     }
     record.attachments = storedAttachments;
 
+    await assertInstitutionWriteAllowed(db, userCooperativeId);
     await requestRef.set(withoutUndefined(record));
+    if (record.subject.includes("견적")) {
+      await ensureQuoteRequest(db, { sourceType: "consult", source: record }, now);
+    }
 
     if (record.parentRequestId) {
       try {
@@ -271,6 +294,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, id: requestRef.id, requestNumber });
   } catch (err) {
+    if (err instanceof InstitutionPurgeLockedError) {
+      return NextResponse.json(
+        { ok: false, error: err.code },
+        { status: err.status },
+      );
+    }
     const message = err instanceof Error ? err.message : "consult_submit_failed";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { onAuthStateChanged, signOut, type User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { logoutPortalSession } from "@/lib/auth/login-client";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
   getRequestStatusTone,
@@ -217,10 +218,12 @@ function VisibilityChip({
 export function MyPageDashboard({
   content,
   initialTab,
+  membershipConverted = false,
   previewMode = false,
 }: {
   content: CmsPageContent;
   initialTab?: string | string[];
+  membershipConverted?: boolean;
   previewMode?: boolean;
 }) {
   const router = useRouter();
@@ -270,7 +273,14 @@ export function MyPageDashboard({
   const [actionMessage, setActionMessage] = useState<{
     tone: "info" | "success" | "error";
     text: string;
-  } | null>(null);
+  } | null>(() =>
+    membershipConverted
+      ? {
+          tone: "success",
+          text: messages.temporaryConversionSuccess,
+        }
+      : null,
+  );
 
   const fetchOverview = useCallback(async () => {
     const user = getFirebaseAuth().currentUser;
@@ -332,6 +342,15 @@ export function MyPageDashboard({
       }
       setCurrentUser(user);
       try {
+        const tokenResult = await user.getIdTokenResult(true);
+        if (tokenResult.claims.admin === true) {
+          router.replace("/admin");
+          return;
+        }
+        if (tokenResult.claims.partner === true) {
+          router.replace("/partner");
+          return;
+        }
         await fetchOverview();
         setState("ready");
       } catch (err) {
@@ -417,7 +436,7 @@ export function MyPageDashboard({
   const handleLogout = async () => {
     if (previewMode) return;
     try {
-      await signOut(getFirebaseAuth());
+      await logoutPortalSession();
       router.push("/login");
     } catch {
       setActionMessage({
@@ -636,6 +655,9 @@ export function MyPageDashboard({
             </button>
             <Link className="admin-btn admin-btn--primary" href="/consult">
               {navigationCopy.text.newInquiryLabel}
+            </Link>
+            <Link className="admin-btn" href="/mypage/quotes">
+              견적함
             </Link>
           </div>
         </header>

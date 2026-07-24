@@ -4,7 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
   writeAuditLog,
 } from "@/lib/firebase/server";
 import type { FaqRecord } from "@/lib/firebase/schema";
@@ -34,7 +34,7 @@ export async function PATCH(
 ) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "faqs:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },
@@ -133,7 +133,7 @@ export async function DELETE(
 ) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "faqs:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

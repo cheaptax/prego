@@ -39,7 +39,8 @@ export type CmsAuditIssueCode =
   | "missing_preview_renderer"
   | "missing_admin_menu"
   | "missing_fallback_test"
-  | "invalid_schema_version";
+  | "invalid_schema_version"
+  | "missing_runtime_content_load";
 
 export type CmsAuditIssue = {
   code: CmsAuditIssueCode;
@@ -140,6 +141,16 @@ export function discoverAppPageRoutes(projectRoot: string) {
   }
 
   return [...routes].sort();
+}
+
+function discoverAppPageEntries(projectRoot: string) {
+  const appDirectory = path.join(projectRoot, "app");
+  const files: string[] = [];
+  walkPageFiles(appDirectory, files);
+  return files.flatMap((filePath) => {
+    const route = routeFromPageFile(appDirectory, filePath);
+    return route ? [{ route, filePath }] : [];
+  });
 }
 
 export function loadCmsRouteExceptions(projectRoot: string) {
@@ -405,6 +416,47 @@ export function auditCmsDefinitions(
   return issues;
 }
 
+export function auditCmsRuntimeConnections(
+  projectRoot: string,
+  definitions: readonly AuditableDefinition[],
+) {
+  const issues: CmsAuditIssue[] = [];
+  const entries = new Map(
+    discoverAppPageEntries(projectRoot).map((entry) => [
+      normalizeRoute(entry.route),
+      entry.filePath,
+    ]),
+  );
+  for (const definition of definitions) {
+    const filePath = entries.get(normalizeRoute(definition.route));
+    if (!filePath || definition.pageKey === "framework.notFound") continue;
+    const source = readFileSync(filePath, "utf8");
+    const escapedPageKey = definition.pageKey.replace(
+      /[.*+?^${}()|[\]\\]/gu,
+      "\\$&",
+    );
+    const directPageLoader = new RegExp(
+      `loadPublishedCmsPage\\(\\s*["']${escapedPageKey}["']`,
+      "u",
+    );
+    const connected =
+      directPageLoader.test(source) ||
+      (definition.pageKey === "home" && source.includes("loadPublishedHome(")) ||
+      (definition.pageKey === "event.auditQuote" &&
+        source.includes("loadPublishedAuditQuote("));
+    if (!connected) {
+      issues.push(
+        issue(
+          "missing_runtime_content_load",
+          definition.pageKey,
+          `${definition.route} page가 자신의 게시 CMS 콘텐츠를 로드하지 않습니다.`,
+        ),
+      );
+    }
+  }
+  return issues;
+}
+
 export function runCmsAudit(
   projectRoot: string,
   definitions: readonly AuditableDefinition[] = Object.values(
@@ -419,10 +471,11 @@ export function runCmsAudit(
     exceptions,
   );
   const definitionIssues = auditCmsDefinitions(definitions, projectRoot);
+  const runtimeIssues = auditCmsRuntimeConnections(projectRoot, definitions);
   return {
     discoveredRoutes,
     registeredRoutes: definitions.map(({ route }) => normalizeRoute(route)).sort(),
     exceptionRoutes: exceptions.map(({ route }) => normalizeRoute(route)).sort(),
-    issues: [...routeIssues, ...definitionIssues],
+    issues: [...routeIssues, ...definitionIssues, ...runtimeIssues],
   };
 }

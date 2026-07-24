@@ -11,35 +11,86 @@
     "cms:audit": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms-audit.mjs",
     "cms:audit:self-test": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms-audit.mjs --self-test",
     "cms:create": "node scripts/create-cms-feature.mjs",
-    "test": "npm run test:audit-quote && npm run test:cms",
+    "test": "npm run test:admin-rbac && npm run test:partner && npm run test:audit-quote && npm run test:audit-evaluation && npm run test:cms && npm run test:demo-cooperative && npm run test:test-data-scan",
+    "test:admin-rbac": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/admin/testing/*.test.ts\"",
+    "test:partner": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/partner/testing/*.test.ts\" \"lib/quotes/testing/*.test.ts\"",
     "test:audit-quote": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/audit-quote/testing/*.test.ts\" \"scripts/audit-quote/rules-emulator.test.mjs\"",
+    "test:audit-evaluation": "node --import tsx --test \"lib/audit-evaluation/testing/*.test.ts\"",
+    "test:audit-evaluation:rules": "firebase emulators:exec --project demo-audit-evaluation-security --only firestore,storage \"node --import tsx --test lib/audit-evaluation/testing/security.test.ts\"",
     "test:cms": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/cms/testing/*.test.ts\" \"scripts/cms/*.test.mjs\"",
     "test:integration": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/cms/testing/full-lifecycle.test.ts\" \"scripts/cms/audit-quote-lifecycle.test.mjs\"",
+    "test:demo-cooperative": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/cooperatives/testing/*.test.ts\"",
+    "test:test-data-scan": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test \"lib/test-data/testing/*.test.ts\"",
+    "test:test-data-purge:emulator": "firebase emulators:exec --project demo-step5-firestore-purge --only firestore \"node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test scripts/test-data/purge-firestore.emulator.test.mjs\"",
+    "test:test-data-purge-external:emulator": "firebase emulators:exec --project demo-step6-external-purge --only firestore,auth,storage \"node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types --test scripts/test-data/purge-auth-storage.emulator.test.mjs\"",
+    "test:demo-cooperative:emulator": "node --experimental-strip-types --test scripts/demo-cooperative/seed-dunggi.emulator.test.mjs",
+    "test:demo-cooperative:rules": "firebase emulators:exec --project demo-dunggi-local --only firestore \"npm run test:demo-cooperative:emulator\"",
     "test:e2e": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms-e2e.mjs",
+    "verify:audit-report-pdf": "node --import tsx scripts/verify-audit-report-pdf.ts",
+    "preflight:audit-evaluation": "node --import tsx scripts/audit-evaluation/production-preflight.ts",
     "test:cms:rules": "firebase emulators:exec --project demo-cms-local --only firestore,storage \"npm run test:cms\"",
     "cms:bootstrap": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/cms/bootstrap.ts",
     "smoke:audit-quote-page": "node scripts/smoke-audit-quote-page.mjs",
     "smoke:mvp:integrated": "node scripts/smoke-mvp-integrated.mjs",
-    "seed:admin": "node scripts/seed-admin.mjs"
+    "seed:admin": "node scripts/seed-admin.mjs",
+    "seed:demo-cooperative": "node --experimental-strip-types scripts/demo-cooperative/seed-dunggi.mjs",
+    "seed:test-cooperatives": "node --experimental-strip-types scripts/seed-test-cooperatives.mjs",
+    "seed:cooperative-master": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/seed-cooperative-master.mjs",
+    "data:scan-test": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/test-data/scan-manifest.mjs",
+    "data:purge-preview": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/test-data/scan-manifest.mjs --dry-run",
+    "migrate:legacy-test-tags": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/test-data/migrate-legacy-tags.mjs",
+    "check:admin-ready": "node scripts/check-admin-ready.mjs",
+    "migrate:admin-rbac": "node scripts/migrate-admin-rbac.mjs",
+    "migrate:partners": "node scripts/migrate-partners.mjs",
+    "migrate:members-to-prego": "node --import ./scripts/audit-quote/alias-loader.mjs --experimental-strip-types scripts/reassign-existing-members-to-prego.mjs",
+    "data:purge-legacy-nonghyup": "node scripts/purge-legacy-nonghyup-data.mjs"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
+    "@react-pdf/renderer": "^4.5.1",
     "firebase": "^12.12.1",
-    "firebase-admin": "^13.8.0",
-    "next": "^16.2.4",
+    "firebase-admin": "14.2.0",
+    "next": "^16.2.11",
+    "pdfjs-dist": "^6.1.200",
+    "pretendard": "^1.3.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "resend": "^6.18.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
+    "@napi-rs/canvas": "^1.0.2",
     "@types/node": "22.10.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^16.2.4",
-    "firebase-tools": "^15.24.0",
+    "eslint-config-next": "^16.2.11",
+    "firebase-tools": "15.24.0",
     "playwright": "^1.59.1",
+    "server-only": "^0.0.1",
+    "tsx": "^4.23.1",
     "typescript": "5.7.3"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11",
+    "@google-cloud/storage": {
+      "retry-request": "8.0.3",
+      "teeny-request": "10.1.3"
+    },
+    "gaxios": {
+      "uuid": "11.1.1"
+    },
+    "jwks-rsa": {
+      "jose": "4.15.9"
+    },
+    "postcss": "^8.5.21",
+    "retry-request": {
+      "teeny-request": "10.1.3"
+    },
+    "sharp": "^0.35.3",
+    "teeny-request": {
+      "uuid": "11.1.1"
+    }
   }
 }

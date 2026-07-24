@@ -18,8 +18,10 @@ import {
   IdempotencyKeySession,
   formatPhoneInput,
   validateAuditQuoteEmail,
+  validateAuditQuoteFiscalYear,
   validateAuditQuoteName,
   validateAuditQuotePhone,
+  validateAuditQuoteTargetCooperative,
 } from "@/lib/audit-quote/client-form";
 import type { PublicAuditQuoteConfig } from "@/lib/audit-quote/public-types";
 import { normalizeAuditQuoteCmsContent } from "@/lib/cms/audit-quote-content";
@@ -77,6 +79,8 @@ export function AuditQuoteEventPage({
     [content],
   );
   const messages = normalizedContent.messages;
+  const [targetCooperativeName, setTargetCooperativeName] = useState("");
+  const [fiscalYear, setFiscalYear] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -84,6 +88,8 @@ export function AuditQuoteEventPage({
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [honeypot, setHoneypot] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
+    targetCooperativeName?: string;
+    fiscalYear?: string;
     email?: string;
     name?: string;
     phone?: string;
@@ -94,6 +100,8 @@ export function AuditQuoteEventPage({
   const [publicReference, setPublicReference] = useState("");
 
   const idempotency = useRef(new IdempotencyKeySession());
+  const targetCooperativeRef = useRef<HTMLInputElement | null>(null);
+  const fiscalYearRef = useRef<HTMLInputElement | null>(null);
   const emailRef = useRef<HTMLInputElement | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const phoneRef = useRef<HTMLInputElement | null>(null);
@@ -119,6 +127,8 @@ export function AuditQuoteEventPage({
   }, [config.campaign, config.channel, config.pagePath, config.enabled]);
 
   function resetForNewSubmission() {
+    setTargetCooperativeName("");
+    setFiscalYear("");
     setEmail("");
     setName("");
     setPhone("");
@@ -130,7 +140,7 @@ export function AuditQuoteEventPage({
     setStatus("idle");
     setPublicReference("");
     idempotency.current.clearAfterSuccess();
-    window.setTimeout(() => emailRef.current?.focus(), 0);
+    window.setTimeout(() => targetCooperativeRef.current?.focus(), 0);
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -140,10 +150,23 @@ export function AuditQuoteEventPage({
 
     setFormError("");
 
+    const targetCooperativeResult =
+      validateAuditQuoteTargetCooperative(targetCooperativeName);
+    const fiscalYearResult = validateAuditQuoteFiscalYear(fiscalYear);
     const emailResult = validateAuditQuoteEmail(email);
     const nameResult = validateAuditQuoteName(name);
     const phoneResult = validateAuditQuotePhone(phone);
     const nextErrors: typeof fieldErrors = {};
+    if (!targetCooperativeResult.ok) {
+      nextErrors.targetCooperativeName = targetCooperativeName.trim()
+        ? messages.targetCooperativeInvalid
+        : messages.targetCooperativeRequired;
+    }
+    if (!fiscalYearResult.ok) {
+      nextErrors.fiscalYear = fiscalYear.trim()
+        ? messages.fiscalYearInvalid
+        : messages.fiscalYearRequired;
+    }
     if (!emailResult.ok) {
       nextErrors.email = email.trim()
         ? messages.emailInvalid
@@ -164,15 +187,26 @@ export function AuditQuoteEventPage({
     }
     setFieldErrors(nextErrors);
 
-    if (!emailResult.ok || !nameResult.ok || !phoneResult.ok || !privacyConsent) {
+    if (
+      !targetCooperativeResult.ok ||
+      !fiscalYearResult.ok ||
+      !emailResult.ok ||
+      !nameResult.ok ||
+      !phoneResult.ok ||
+      !privacyConsent
+    ) {
       setStatus("error");
-      const focusTarget = !emailResult.ok
-        ? emailRef
-        : !nameResult.ok
-          ? nameRef
-          : !phoneResult.ok
-            ? phoneRef
-            : null;
+      const focusTarget = !targetCooperativeResult.ok
+        ? targetCooperativeRef
+        : !fiscalYearResult.ok
+          ? fiscalYearRef
+          : !emailResult.ok
+            ? emailRef
+            : !nameResult.ok
+              ? nameRef
+              : !phoneResult.ok
+                ? phoneRef
+                : null;
       window.setTimeout(() => focusTarget?.current?.focus(), 0);
       return;
     }
@@ -198,6 +232,9 @@ export function AuditQuoteEventPage({
               email: emailResult.email,
               name: nameResult.name,
               phone: phoneResult.phone,
+              targetCooperativeName:
+                targetCooperativeResult.targetCooperativeName,
+              fiscalYear: fiscalYearResult.fiscalYear,
               marketingConsent,
               companyWebsite: honeypot,
             },
@@ -223,6 +260,10 @@ export function AuditQuoteEventPage({
         setFormError(
           code === "invalid_email"
             ? messages.emailInvalid
+            : code === "invalid_target_cooperative"
+              ? messages.targetCooperativeInvalid
+              : code === "invalid_fiscal_year"
+                ? messages.fiscalYearInvalid
             : code === "invalid_name"
               ? messages.nameInvalid
               : code === "invalid_phone"
@@ -335,6 +376,22 @@ export function AuditQuoteEventPage({
     }
 
     if (section.id === "intakeForm") {
+      const targetCooperativeDescriptions = [
+        section.text.targetCooperativeHelp
+          ? `${fieldId}-target-cooperative-help`
+          : "",
+        fieldErrors.targetCooperativeName
+          ? `${fieldId}-target-cooperative-error`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const fiscalYearDescriptions = [
+        section.text.fiscalYearHelp ? `${fieldId}-fiscal-year-help` : "",
+        fieldErrors.fiscalYear ? `${fieldId}-fiscal-year-error` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       const emailDescriptions = [
         section.text.emailHelp ? `${fieldId}-email-help` : "",
         fieldErrors.email ? `${fieldId}-email-error` : "",
@@ -382,6 +439,10 @@ export function AuditQuoteEventPage({
                 {messages.successTitle}
               </h2>
               <p>{messages.successDescription}</p>
+              <p>{messages.temporaryMemberNotice}</p>
+              <p className="aq-field__help">
+                {messages.temporaryMemberSecurityNotice}
+              </p>
               {publicReference ? (
                 <p className="aq-success__ref">
                   {messages.publicReferenceLabel}{" "}
@@ -406,6 +467,97 @@ export function AuditQuoteEventPage({
                   {section.text.formDescription}
                 </p>
               ) : null}
+              <div className="aq-field">
+                <label htmlFor={`${fieldId}-target-cooperative`}>
+                  {section.text.targetCooperativeLabel}
+                </label>
+                <input
+                  ref={targetCooperativeRef}
+                  id={`${fieldId}-target-cooperative`}
+                  type="text"
+                  name="targetCooperativeName"
+                  autoComplete="organization"
+                  placeholder={section.text.targetCooperativePlaceholder}
+                  value={targetCooperativeName}
+                  aria-invalid={Boolean(fieldErrors.targetCooperativeName)}
+                  aria-describedby={
+                    targetCooperativeDescriptions || undefined
+                  }
+                  disabled={status === "submitting"}
+                  onChange={(event) => {
+                    setTargetCooperativeName(event.target.value);
+                    if (fieldErrors.targetCooperativeName) {
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        targetCooperativeName: undefined,
+                      }));
+                    }
+                  }}
+                />
+                {section.text.targetCooperativeHelp ? (
+                  <p
+                    id={`${fieldId}-target-cooperative-help`}
+                    className="aq-field__help"
+                  >
+                    {section.text.targetCooperativeHelp}
+                  </p>
+                ) : null}
+                {fieldErrors.targetCooperativeName ? (
+                  <p
+                    id={`${fieldId}-target-cooperative-error`}
+                    className="aq-error"
+                    role="alert"
+                  >
+                    {fieldErrors.targetCooperativeName}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="aq-field">
+                <label htmlFor={`${fieldId}-fiscal-year`}>
+                  {section.text.fiscalYearLabel}
+                </label>
+                <input
+                  ref={fiscalYearRef}
+                  id={`${fieldId}-fiscal-year`}
+                  type="text"
+                  name="fiscalYear"
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder={section.text.fiscalYearPlaceholder}
+                  value={fiscalYear}
+                  aria-invalid={Boolean(fieldErrors.fiscalYear)}
+                  aria-describedby={fiscalYearDescriptions || undefined}
+                  disabled={status === "submitting"}
+                  onChange={(event) => {
+                    setFiscalYear(event.target.value.replace(/\D/gu, ""));
+                    if (fieldErrors.fiscalYear) {
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        fiscalYear: undefined,
+                      }));
+                    }
+                  }}
+                />
+                {section.text.fiscalYearHelp ? (
+                  <p
+                    id={`${fieldId}-fiscal-year-help`}
+                    className="aq-field__help"
+                  >
+                    {section.text.fiscalYearHelp}
+                  </p>
+                ) : null}
+                {fieldErrors.fiscalYear ? (
+                  <p
+                    id={`${fieldId}-fiscal-year-error`}
+                    className="aq-error"
+                    role="alert"
+                  >
+                    {fieldErrors.fiscalYear}
+                  </p>
+                ) : null}
+              </div>
+
               <div className="aq-field">
                 <label htmlFor={`${fieldId}-email`}>
                   {section.text.emailLabel}

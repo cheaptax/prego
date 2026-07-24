@@ -1,6 +1,6 @@
 "use client";
 
-import { onAuthStateChanged, signOut, type User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { logoutPortalSession } from "@/lib/auth/login-client";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { CMS_PUBLIC_GLOBAL_KEYS } from "@/lib/cms/constants";
 import {
@@ -956,9 +957,11 @@ function PublishDialog({
 export function CmsAdminConsole({
   content,
   previewMode = false,
+  canManageTestData = false,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
+  canManageTestData?: boolean;
 }) {
   const router = useRouter();
   const copy = useMemo(() => createAdminConsoleCopy(content), [content]);
@@ -1023,7 +1026,7 @@ export function CmsAdminConsole({
     const unsubscribe = onAuthStateChanged(getFirebaseAuth(), (user) => {
       if (!user) {
         setCurrentUser(null);
-        router.replace("/login");
+        router.replace("/admin/login");
         return;
       }
       setCurrentUser(user);
@@ -1167,6 +1170,11 @@ export function CmsAdminConsole({
           ) : (
             <Link href="/admin/operations">{shell.text("operationsLink")}</Link>
           )}
+          {!previewMode && canManageTestData ? (
+            <Link href="/admin/test-data">
+              {shell.text("testDataManagementLink")}
+            </Link>
+          ) : null}
           <div className="cms-console-user">
             <span aria-hidden="true">
               {(currentUser?.displayName ??
@@ -1185,8 +1193,8 @@ export function CmsAdminConsole({
             onClick={() =>
               previewMode
                 ? undefined
-                : signOut(getFirebaseAuth()).then(() =>
-                    router.replace("/login"),
+                : logoutPortalSession().then(() =>
+                    router.replace("/admin/login"),
                   )
             }
           >

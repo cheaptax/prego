@@ -17,6 +17,17 @@ const base = process.env.SMOKE_BASE_URL ?? "https://project-eta-one-64.vercel.ap
 const stamp = Date.now();
 const password = "testpass123";
 
+function adminCredentials() {
+  const email = process.env.SMOKE_ADMIN_EMAIL?.trim();
+  const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
+  if (!email || !adminPassword) {
+    throw new Error(
+      "SMOKE_ADMIN_EMAIL and SMOKE_ADMIN_PASSWORD are required",
+    );
+  }
+  return { email, password: adminPassword };
+}
+
 async function selectFirstNonEmpty(select) {
   const options = await select.locator("option").evaluateAll((opts) =>
     opts
@@ -168,10 +179,11 @@ async function loginAttempt(browser, email, attemptPassword) {
 }
 
 async function adminBrowserLogin(browser) {
+  const credentials = adminCredentials();
   const page = await browser.newPage();
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
-  await page.getByPlaceholder("example@email.com").fill("admin@gmail.com");
-  await page.getByPlaceholder("비밀번호를 입력하세요").fill("admin");
+  await page.getByPlaceholder("example@email.com").fill(credentials.email);
+  await page.getByPlaceholder("비밀번호를 입력하세요").fill(credentials.password);
   await page.getByRole("button", { name: /^로그인$/ }).click();
   await page.waitForURL("**/admin", { timeout: 20000 });
   await page.close();
@@ -237,29 +249,21 @@ async function logout(page) {
 }
 
 async function getAdminToken() {
-  const res = await fetch(`${base}/api/auth/admin-login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "admin@gmail.com", password: "admin" }),
-  });
-  const data = await res.json();
-  if (!res.ok || !data.token) throw new Error("admin login failed");
-  return customTokenToIdToken(data.token);
-}
-
-async function customTokenToIdToken(customToken) {
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
   if (!apiKey) throw new Error("NEXT_PUBLIC_FIREBASE_API_KEY is required");
+  const credentials = adminCredentials();
   const res = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${apiKey}`,
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
     {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: customToken, returnSecureToken: true }),
-    }
+    method: "POST",
+    headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...credentials, returnSecureToken: true }),
+    },
   );
   const data = await res.json();
-  if (!res.ok || !data.idToken) throw new Error(`custom token exchange failed: ${data.error?.message}`);
+  if (!res.ok || !data.idToken) {
+    throw new Error(`admin login failed: ${data.error?.message ?? "unknown"}`);
+  }
   return data.idToken;
 }
 

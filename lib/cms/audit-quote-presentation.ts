@@ -32,6 +32,30 @@ export const CMS_AUDIT_QUOTE_SECTION_PRESENTATION: Record<
         label: "신청 영역 접근성 이름",
         help: "화면 읽기 프로그램이 이 영역을 구분할 때 사용합니다.",
       },
+      targetCooperativeLabel: {
+        label: "대상 농협명 표시 이름",
+        help: "내부 입력 이름과 저장 필드는 바뀌지 않습니다.",
+      },
+      targetCooperativePlaceholder: {
+        label: "대상 농협명 입력 예시",
+        help: "입력칸 안에 흐리게 표시되는 예시입니다.",
+      },
+      targetCooperativeHelp: {
+        label: "대상 농협명 도움말",
+        help: "비워 두면 도움말을 표시하지 않습니다.",
+      },
+      fiscalYearLabel: {
+        label: "사업연도 표시 이름",
+        help: "내부 입력 이름과 저장 필드는 바뀌지 않습니다.",
+      },
+      fiscalYearPlaceholder: {
+        label: "사업연도 입력 예시",
+        help: "입력칸 안에 흐리게 표시되는 예시입니다.",
+      },
+      fiscalYearHelp: {
+        label: "사업연도 도움말",
+        help: "비워 두면 도움말을 표시하지 않습니다.",
+      },
       emailLabel: {
         label: "이메일 표시 이름",
         help: "내부 입력 이름과 저장 필드는 바뀌지 않습니다.",
@@ -181,6 +205,14 @@ export const CMS_AUDIT_QUOTE_MESSAGE_PRESENTATION: Record<
     label: "신청 완료 안내",
     help: "신청 완료 제목 아래에 표시됩니다.",
   },
+  temporaryMemberNotice: {
+    label: "임시회원과 견적 확인 경로 안내",
+    help: "견적 요청 완료 후 자동 계정과 견적 도착 메일 이용 방법을 안내합니다.",
+  },
+  temporaryMemberSecurityNotice: {
+    label: "임시회원 비밀번호 보안 안내",
+    help: "평문 임시비밀번호 대신 일회용 설정 링크를 사용한다는 안내입니다.",
+  },
   publicReferenceLabel: {
     label: "접수번호 이름",
     help: "서버가 발급한 접수번호 앞에 표시됩니다.",
@@ -188,6 +220,22 @@ export const CMS_AUDIT_QUOTE_MESSAGE_PRESENTATION: Record<
   resetLabel: {
     label: "다른 담당자로 신청 버튼",
     help: "완료 화면에서 입력 화면으로 돌아가는 버튼입니다.",
+  },
+  targetCooperativeRequired: {
+    label: "대상 농협명 미입력 안내",
+    help: "대상 농협명을 비워 둔 경우 표시됩니다.",
+  },
+  targetCooperativeInvalid: {
+    label: "대상 농협명 형식 오류 안내",
+    help: "대상 농협명 길이가 허용 범위를 벗어난 경우 표시됩니다.",
+  },
+  fiscalYearRequired: {
+    label: "사업연도 미입력 안내",
+    help: "감사 대상 사업연도를 비워 둔 경우 표시됩니다.",
+  },
+  fiscalYearInvalid: {
+    label: "사업연도 형식 오류 안내",
+    help: "사업연도가 허용 범위를 벗어난 경우 표시됩니다.",
   },
   emailRequired: {
     label: "이메일 미입력 안내",

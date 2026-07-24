@@ -1,0 +1,76 @@
+{
+  "manifest": {
+    "schemaVersion": 1,
+    "reviewManifestId": "legacy_coop-001_offline-fixture",
+    "institutionId": "coop-001",
+    "institutionName": "오프라인 검증용 농협",
+    "generatedAt": "2026-07-23T00:00:00.000Z",
+    "generatedBy": "offline-super-admin",
+    "environment": "offline",
+    "projectId": "demo-step8-offline",
+    "reviewVersion": 2,
+    "checksum": "offline-fixture-checksum",
+    "status": "READY",
+    "candidateCount": 1,
+    "reviewedCount": 1,
+    "report": {
+      "schemaVersion": 1,
+      "institutionId": "coop-001",
+      "institutionName": "오프라인 검증용 농협",
+      "institutionType": "지역농협",
+      "signupStatus": "CONNECTED",
+      "connectedAccountCount": 1,
+      "confirmedTestCount": 1,
+      "reviewRequiredCount": 0,
+      "preserveCount": 0,
+      "unresolvedCount": 0,
+      "pointDataCount": 0,
+      "questionAnswerDataCount": 0,
+      "quoteReportDataCount": 0,
+      "authUserCount": 0,
+      "storageObjectCount": 0,
+      "mixedData": false,
+      "cleanupReadiness": {
+        "status": "READY",
+        "reasons": []
+      },
+      "preservedMasterFields": [
+        "cooperative_id"
+      ],
+      "resetFields": [],
+      "warnings": []
+    }
+  },
+  "reviews": [
+    {
+      "schemaVersion": 1,
+      "reviewId": "legacy-review-offline-1",
+      "reviewManifestId": "legacy_coop-001_offline-fixture",
+      "candidateId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "institutionId": "coop-001",
+      "targetType": "FIRESTORE_DOCUMENT",
+      "resourceKey": "users/offline-seed-user",
+      "documentPath": "users/offline-seed-user",
+      "reviewedChangeToken": "users-offline-seed-user-v1",
+      "decision": "CONFIRMED_TEST",
+      "reason": "오프라인 dry-run 검증용 고정 seed 문서 ID",
+      "sourceEvidence": [
+        "FIXED_SEED_DOCUMENT_ID"
+      ],
+      "reviewedBy": "offline-super-admin",
+      "reviewedAt": "2026-07-23T00:00:00.000Z",
+      "reviewVersion": 2,
+      "status": "APPROVED"
+    }
+  ],
+  "documents": [
+    {
+      "documentPath": "users/offline-seed-user",
+      "exists": true,
+      "changeToken": "users-offline-seed-user-v1",
+      "data": {
+        "cooperativeId": "coop-001"
+      }
+    }
+  ]
+}

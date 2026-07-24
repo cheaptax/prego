@@ -7,7 +7,10 @@ import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 
 export async function generateMetadata(): Promise<Metadata> {
   const bundle = await loadPublishedCmsPage("auth.login");
-  return cmsPageMetadata(bundle.content, bundle.assetUrls);
+  return {
+    ...cmsPageMetadata(bundle.content, bundle.assetUrls),
+    robots: { index: false, follow: false },
+  };
 }
 
 export default async function LoginPage() {
@@ -15,7 +18,7 @@ export default async function LoginPage() {
   return (
     <>
       <Topbar />
-      <LoginPageRenderer content={content} />
+      <LoginPageRenderer content={content} pageKey="auth.login" />
       <Footer />
     </>
   );

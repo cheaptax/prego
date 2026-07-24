@@ -36,6 +36,8 @@ describe("audit-quote CMS payload boundary", () => {
         email: "finance.team@nonghyup.com",
         name: "김농협",
         phone: "010-1234-5678",
+        targetCooperativeName: "프리고농협",
+        fiscalYear: 2026,
         marketingConsent: true,
         companyWebsite: "",
       },
@@ -46,6 +48,8 @@ describe("audit-quote CMS payload boundary", () => {
       email: "finance.team@nonghyup.com",
       name: "김농협",
       phone: "010-1234-5678",
+      targetCooperativeName: "프리고농협",
+      fiscalYear: 2026,
       privacyConsent: true,
       privacyPolicyVersion: "2026-07-20",
       marketingConsent: true,
@@ -59,6 +63,8 @@ describe("audit-quote CMS payload boundary", () => {
       "email",
       "name",
       "phone",
+      "targetCooperativeName",
+      "fiscalYear",
       "privacyConsent",
       "privacyPolicyVersion",
       "marketingConsent",
@@ -83,6 +89,8 @@ describe("audit-quote CMS payload boundary", () => {
       email: "finance.team@nonghyup.com",
       name: "김농협",
       phone: "010-1234-5678",
+      targetCooperativeName: "프리고농협",
+      fiscalYear: 2026,
       marketingConsent: false,
       companyWebsite: "",
     };
@@ -103,7 +111,13 @@ describe("audit-quote CMS payload boundary", () => {
       path.join(root, "app/api/audit-quote/requests/route.ts"),
       "utf8",
     );
-    for (const name of ["email", "name", "phone"]) {
+    for (const name of [
+      "email",
+      "name",
+      "phone",
+      "targetCooperativeName",
+      "fiscalYear",
+    ]) {
       assert.match(pageSource, new RegExp(`name=\"${name}\"`));
     }
     assert.match(pageSource, /company-website/);

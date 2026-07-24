@@ -94,14 +94,15 @@ API에는 사용자 화면이 없으므로 `화면 구성` 열에는 endpoint �
 2. 관리자 판정은 이후 구현에서 Firebase `admin` custom claim으로 통일했고 이메일 문자열 fallback과 공유 관리자 로그인 endpoint를 비활성화했다.
 3. `/partner`는 내부 정책과 샘플 운영정보를 공개하므로 CMS 전환 전에 접근 차단 또는 제거가 선행되어야 한다.
 4. 별도 route-level loading/error/not-found 파일이 없어 초기 HTML은 client loading shell이며, 인증 후 오류는 컴포넌트 내부 상태로만 처리한다.
-5. 현재 CMS pageKey는 17개이며 `/terms`, `/privacy`, 관리자 운영 분리와 커스텀 404를 포함한다. CMS 자체 편집 도구 route는 pageKey 수에 중복 포함하지 않는다.
+5. 현재 CMS pageKey는 21개이며 감사인 견적 평가의 접속·진행·확인·정정·보고서 화면, `/terms`, `/privacy`, 관리자 운영 분리와 커스텀 404를 포함한다. CMS 자체 편집 도구 route는 pageKey 수에 중복 포함하지 않는다.
 
 ## 관리자 콘솔 구현 반영
 
 2026-07-20 CMS 관리자 콘솔 구현으로 다음 route가 추가·분리되었다.
 
 - `/admin`: 콘텐츠 대시보드, 페이지 관리, 공통 영역, 디자인 설정, 이미지·파일, 수정·게시 이력
-- `/admin/operations`: 기존 회원·상담·포인트 운영 기능
+- `/admin/operations`: 회원·상담·포인트 운영 기능과 기능 플래그로
+  보호되는 감사평가 운영 메뉴
 - `/admin/pages/[pageKey]`: 관리자 전용 3영역 페이지 편집기와 초안 미리보기
 - `GET /api/admin/cms/overview`: 관리자 전용 CMS 운영 요약과 페이지 목록
 - `GET, PATCH /api/admin/cms/pages/[pageKey]`: 관리자 전용 편집 데이터 조회와 초안 저장
@@ -139,9 +140,10 @@ API에는 사용자 화면이 없으므로 `화면 구성` 열에는 endpoint �
 
 ## 전체 사용자 화면 CMS 전환 완료
 
-2026-07-21 기준 App Router의 사용자 노출 화면은 아래 17개 안정 `pageKey`로 관리한다. 모두 `/admin` 페이지 목록에 업무용 한국어 이름, 실제 URL, 대상 사용자와 게시 상태가 표시되며 `/admin/pages/[pageKey]`에서 같은 실제 렌더러로 PC·태블릿·모바일 초안을 확인한다.
+2026-07-21 기준 App Router의 사용자 노출 화면은 아래 21개 안정 `pageKey`로 관리한다. 모두 `/admin` 페이지 목록에 업무용 한국어 이름, 실제 URL, 대상 사용자와 게시 상태가 표시되며 `/admin/pages/[pageKey]`에서 같은 실제 렌더러로 PC·태블릿·모바일 초안을 확인한다.
 
-- 공개·공통: `home`, `public.consult`, `public.inquiries`, `public.faq`, `public.support`, `event.auditQuote`
+- 공개·공통: `home`, `public.consult`, `public.inquiries`, `public.faq`, `public.support`, `event.auditQuote`, `event.auditQuoteEvaluate`
+- 견적 평가 고객 화면: `event.auditQuoteEvaluation`, `event.auditQuoteEvaluationReview`, `event.auditQuoteEvaluationReport`
 - 로그인·가입·법적 안내: `auth.login`, `auth.signup`, `auth.pendingApproval`, `legal.terms`, `legal.privacy`
 - 회원: `member.mypage`, `member.requestDetail`
 - 관리자: `admin.console`, `admin.operations`
@@ -162,7 +164,7 @@ API에는 사용자 화면이 없으므로 `화면 구성` 열에는 endpoint �
 - `/mypage`: 탭 표시 이름·순서, KPI·표·포인트·프로필·동의·toast·loading/error/empty 문구와 SEO를 전환했다. `overview|inquiries|points|profile` query 값, bearer/status/개인정보 projection, 포인트 집계와 동의 PATCH key는 보호한다.
 - `/mypage/requests/[requestId]`: 문의·첨부·답변 paywall·후속 지원·평가·완료 및 두 확인 모달의 전체 표시 문구와 SEO를 전환했다. request ID/ACL, 조직 1회 차감 transaction, rating/complete 순서, API 주소와 payload는 보호한다.
 - `/admin`: 콘텐츠 관리 메뉴·필터·지표·도움말·빈 상태·오류·게시 확인 창과 SEO를 `admin.console`로 전환했다. admin custom claim, CMS API, 초안/게시/이력 분리, optimistic conflict와 publish payload는 보호한다.
-- `/admin/operations`: 회원·운영자·문의·FAQ·회계감사 견적·포인트·감사로그 탭, 표·필터·상세·toast·모달과 SEO를 `admin.operations`로 전환했다. 관리자 권한, PII, 상태 전이, 점수·포인트 계산, Firestore key와 모든 admin API payload는 보호한다. 기존 native `confirm`/`prompt`는 접근 가능한 앱 확인 창으로 교체했다.
+- `/admin/operations`: 회원·운영자·문의·FAQ·회계감사 견적·포인트·감사로그와 감사평가 운영 탭, 표·필터·상세·toast·모달과 SEO를 `admin.operations`로 전환했다. 감사평가 운영 안에는 견적 평가 건, 평가기준 관리, 보고서 설정, 처리 오류, 감사로그 메뉴가 있으며 서버 기능 플래그가 꺼지면 표시하지 않는다. 관리자 권한, PII, 상태 전이, 점수·포인트 계산, Firestore key와 모든 admin API payload는 보호한다. 기존 native `confirm`/`prompt`는 접근 가능한 앱 확인 창으로 교체했다.
 - `/partner`: partner 인증과 배정 ACL이 아직 제품 범위에 없으므로 공개 샘플 운영정보를 제거했다. CMS에서는 잠긴 접근 안내와 안전한 CTA만 게시하며 실제 포털 데이터·폼은 노출하지 않는다.
 - 미등록 URL: `framework.notFound` 게시본으로 404 제목·설명·CTA·디자인을 표시하며 HTTP 404 처리는 Next.js가 보호한다.
 

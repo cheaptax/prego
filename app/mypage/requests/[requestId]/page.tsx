@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Footer } from "@/components/Footer";
 import { RequestDetailPage } from "@/components/RequestDetailPage";
 import { Topbar } from "@/components/Topbar";
+import { requirePortalPageSession } from "@/lib/auth/portal-page-guard";
 import { cmsPageMetadata } from "@/lib/cms/metadata";
 import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 
@@ -15,6 +16,7 @@ type Props = {
 };
 
 export default async function MyRequestDetail({ params }: Props) {
+  await requirePortalPageSession("customer");
   const { requestId } = await params;
   const { content } = await loadPublishedCmsPage("member.requestDetail");
 
@@ -24,7 +26,7 @@ export default async function MyRequestDetail({ params }: Props) {
       <main id="main" className="request-detail-page">
         <RequestDetailPage requestId={requestId} content={content} />
       </main>
-      <Footer />
+      <Footer showPortalLinks={false} />
     </>
   );
 }

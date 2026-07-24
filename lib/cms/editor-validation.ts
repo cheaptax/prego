@@ -41,14 +41,21 @@ const COLOR_HEX = {
 
 const COMPLETION_PAGE_KEYS = new Set<CmsPageKey>([
   "auth.login",
+  "auth.partnerLogin",
+  "auth.adminLogin",
   "auth.signup",
   "auth.pendingApproval",
+  "auth.portalAccessDenied",
   "legal.terms",
   "legal.privacy",
   "public.consult",
   "public.inquiries",
   "public.faq",
   "public.support",
+  "event.auditQuoteEvaluate",
+  "event.auditQuoteEvaluation",
+  "event.auditQuoteEvaluationReview",
+  "event.auditQuoteEvaluationReport",
   "partner.portal",
   "framework.notFound",
 ]);

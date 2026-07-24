@@ -7,14 +7,14 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   try {
-    await requireAdmin(req);
+    await requireAdminCapability(req, "auditQuotes:read");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

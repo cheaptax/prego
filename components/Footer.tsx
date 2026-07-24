@@ -2,16 +2,28 @@
 
 import Link from "next/link";
 import { useCmsGlobals } from "@/components/cms/CmsGlobalsProvider";
+import {
+  FOOTER_PORTAL_LINK_DEFAULTS,
+  FOOTER_PORTAL_NAVIGATION_LABEL,
+} from "@/lib/cms/footer-portal-links";
 import type { CmsGlobalContent } from "@/lib/cms/schemas";
 import { BrandMark } from "./BrandMark";
 
 export function Footer({
   content,
+  showPortalLinks = true,
 }: {
   content?: CmsGlobalContent;
+  showPortalLinks?: boolean;
 } = {}) {
   const globals = useCmsGlobals();
   const footer = content ?? globals.footer;
+  const partnerLogin =
+    footer.links.partnerLogin ??
+    FOOTER_PORTAL_LINK_DEFAULTS.partnerLogin;
+  const operatorLogin =
+    footer.links.operatorLogin ??
+    FOOTER_PORTAL_LINK_DEFAULTS.operatorLogin;
   return (
     <footer className="foot">
       <div className="foot__inner">
@@ -82,8 +94,23 @@ export function Footer({
       </div>
 
       <div className="foot__bar">
-        <p>{footer.text.copyright}</p>
-        <p>{footer.text.brandTagline}</p>
+        <div className="foot__bar-copy">
+          <p>{footer.text.copyright}</p>
+          <p>{footer.text.brandTagline}</p>
+        </div>
+        {showPortalLinks ? (
+          <nav
+            className="foot__portal-links"
+            aria-label={
+              footer.text.portalLoginNavigationLabel ||
+              FOOTER_PORTAL_NAVIGATION_LABEL
+            }
+          >
+            <Link href={partnerLogin.href}>{partnerLogin.label}</Link>
+            <span aria-hidden="true">|</span>
+            <Link href={operatorLogin.href}>{operatorLogin.label}</Link>
+          </nav>
+        ) : null}
       </div>
     </footer>
   );

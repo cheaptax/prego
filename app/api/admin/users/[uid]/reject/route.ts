@@ -4,7 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
   writeAuditLog,
 } from "@/lib/firebase/server";
 import type { UserRecord } from "@/lib/firebase/schema";
@@ -19,7 +19,7 @@ export async function POST(
 ) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "members:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

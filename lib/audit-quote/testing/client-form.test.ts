@@ -5,15 +5,17 @@ import {
   formatPhoneInput,
   mapAuditQuoteApiError,
   validateAuditQuoteEmail,
+  validateAuditQuoteFiscalYear,
   validateAuditQuoteName,
   validateAuditQuotePhone,
+  validateAuditQuoteTargetCooperative,
 } from "@/lib/audit-quote/client-form";
 import { getPublicAuditQuoteConfig } from "@/lib/audit-quote/public-config";
 
 describe("audit-quote client form helpers", () => {
-  it("only accepts nonghyup.com emails and maps API errors", () => {
+  it("checks email syntax client-side and maps API errors", () => {
     assert.equal(validateAuditQuoteEmail("  Kim.NH@nonghyup.com ").ok, true);
-    assert.equal(validateAuditQuoteEmail("a@b.co").ok, false);
+    assert.equal(validateAuditQuoteEmail("a@b.co").ok, true);
     assert.equal(validateAuditQuoteEmail("bad").ok, false);
     assert.equal(
       mapAuditQuoteApiError("consent_required").includes("@"),
@@ -34,6 +36,19 @@ describe("audit-quote client form helpers", () => {
 
     assert.equal(formatPhoneInput("0101234"), "010-1234");
     assert.equal(formatPhoneInput("01012345678"), "010-1234-5678");
+  });
+
+  it("validates the target cooperative and fiscal year", () => {
+    const cooperative =
+      validateAuditQuoteTargetCooperative("  프리고 농협  ");
+    assert.equal(cooperative.ok, true);
+    if (cooperative.ok) {
+      assert.equal(cooperative.targetCooperativeName, "프리고 농협");
+    }
+    assert.equal(validateAuditQuoteTargetCooperative("").ok, false);
+    assert.equal(validateAuditQuoteFiscalYear("2026").ok, true);
+    assert.equal(validateAuditQuoteFiscalYear("20e6").ok, false);
+    assert.equal(validateAuditQuoteFiscalYear("1999").ok, false);
   });
 
   it("reuses idempotency key until success clear", () => {

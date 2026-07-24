@@ -1,5 +1,5 @@
 import {
-  isNonghyupEmail,
+  isValidBusinessEmail,
   normalizeEmail,
 } from "@/lib/audit-quote/email-core";
 import {
@@ -13,10 +13,10 @@ import {
 export function validateAuditQuoteEmail(raw: string) {
   const email = normalizeEmail(raw);
   if (!email) return { ok: false as const, error: "농협 이메일을 입력해 주세요." };
-  if (!isNonghyupEmail(email)) {
+  if (!isValidBusinessEmail(email)) {
     return {
       ok: false as const,
-      error: "농협 이메일(@nonghyup.com)만 신청할 수 있어요.",
+      error: "올바른 이메일 주소를 입력해 주세요.",
     };
   }
   return { ok: true as const, email };
@@ -42,6 +42,44 @@ export function validateAuditQuotePhone(raw: string) {
   return { ok: true as const, phone: formatKoreanMobile(digits) };
 }
 
+export function validateAuditQuoteTargetCooperative(raw: string) {
+  const targetCooperativeName = raw
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!targetCooperativeName) {
+    return { ok: false as const, error: "대상 농협명을 입력해 주세요." };
+  }
+  if (
+    targetCooperativeName.length < 2 ||
+    targetCooperativeName.length > 300
+  ) {
+    return {
+      ok: false as const,
+      error: "대상 농협명을 2자 이상 300자 이하로 입력해 주세요.",
+    };
+  }
+  return { ok: true as const, targetCooperativeName };
+}
+
+export function validateAuditQuoteFiscalYear(raw: string) {
+  if (!/^\d{4}$/u.test(raw.trim())) {
+    return { ok: false as const, error: "사업연도 4자리를 입력해 주세요." };
+  }
+  const fiscalYear = Number(raw);
+  if (
+    !Number.isSafeInteger(fiscalYear) ||
+    fiscalYear < 2_000 ||
+    fiscalYear > 2_100
+  ) {
+    return {
+      ok: false as const,
+      error: "사업연도는 2000년부터 2100년 사이로 입력해 주세요.",
+    };
+  }
+  return { ok: true as const, fiscalYear };
+}
+
 /** Live input mask: keeps digits only and re-inserts hyphens. */
 export function formatPhoneInput(raw: string) {
   const digits = normalizePhoneDigits(raw).slice(0, 11);
@@ -61,6 +99,10 @@ export function mapAuditQuoteApiError(code: string | undefined) {
       return "담당자 이름을 정확히 입력해 주세요.";
     case "invalid_phone":
       return "올바른 휴대폰 번호를 입력해 주세요.";
+    case "invalid_target_cooperative":
+      return "대상 농협명을 정확히 입력해 주세요.";
+    case "invalid_fiscal_year":
+      return "사업연도를 정확히 입력해 주세요.";
     case "consent_required":
       return "개인정보 수집·이용에 동의해 주세요.";
     case "privacy_version_mismatch":

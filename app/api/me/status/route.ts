@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
-import { getUserRecord, verifyBearerToken } from "@/lib/firebase/server";
+import {
+  authErrorCode,
+  authErrorStatus,
+  requireMember,
+} from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  let decoded;
+  let user;
   try {
-    decoded = await verifyBearerToken(req);
-  } catch {
+    ({ profile: user } = await requireMember(req));
+  } catch (error) {
     return NextResponse.json(
-      { ok: false, error: "missing_or_invalid_token" },
-      { status: 401 }
+      { ok: false, error: authErrorCode(error) },
+      { status: authErrorStatus(error) },
     );
-  }
-
-  const user = await getUserRecord(decoded.uid);
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "profile_not_found" }, { status: 404 });
   }
 
   return NextResponse.json({

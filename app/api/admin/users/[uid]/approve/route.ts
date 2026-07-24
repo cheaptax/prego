@@ -4,7 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
   writeAuditLog,
 } from "@/lib/firebase/server";
 import type {
@@ -13,6 +13,15 @@ import type {
   PointTransactionRecord,
   UserRecord,
 } from "@/lib/firebase/schema";
+import {
+  DEMO_COOPERATIVE_COLLECTION,
+  getTestCooperativeDefinition,
+  nextDemoSignupStatus,
+  parseTestCooperativeMaster,
+} from "@/lib/cooperatives/demo-cooperative";
+import { inheritTestRootMetadata } from "@/lib/test-data/root-metadata";
+import { PURGE_LOCK_COLLECTION } from "@/lib/test-data/purge-job-types";
+import { isActivePurgeLock } from "@/lib/test-data/purge-lock";
 import { signupPointPolicy } from "@/lib/platform";
 
 export const runtime = "nodejs";
@@ -23,7 +32,7 @@ export async function POST(
 ) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "members:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },
@@ -46,6 +55,15 @@ export async function POST(
     if (!user.cooperativeId) {
       return { ok: false as const, error: "missing_cooperative" };
     }
+    const purgeLockSnapshot = await transaction.get(
+      db.collection(PURGE_LOCK_COLLECTION).doc(user.cooperativeId),
+    );
+    if (
+      purgeLockSnapshot.exists &&
+      isActivePurgeLock(purgeLockSnapshot.data())
+    ) {
+      return { ok: false as const, error: "institution_purge_in_progress" };
+    }
     if (user.status === "active") {
       return {
         ok: true as const,
@@ -64,6 +82,24 @@ export async function POST(
     const existing = orgSnapshot.exists
       ? (orgSnapshot.data() as OrganizationRecord)
       : null;
+    const demoMasterRef =
+      getTestCooperativeDefinition(user.cooperativeId)
+        ? db
+            .collection(DEMO_COOPERATIVE_COLLECTION)
+            .doc(user.cooperativeId)
+        : null;
+    const demoMasterSnapshot = demoMasterRef
+      ? await transaction.get(demoMasterRef)
+      : null;
+    const demoMaster = demoMasterSnapshot
+      ? parseTestCooperativeMaster(
+          demoMasterSnapshot.data(),
+          user.cooperativeId,
+        )
+      : null;
+    if (demoMasterRef && !demoMaster) {
+      return { ok: false as const, error: "invalid_demo_cooperative_master" };
+    }
     const isFirstUser = !existing;
     const wasPreviouslyJoined = Boolean(existing?.users?.includes(uid));
     const grantedPoints = wasPreviouslyJoined
@@ -75,6 +111,7 @@ export async function POST(
     transaction.set(
       orgRef,
       {
+        ...inheritTestRootMetadata(user),
         cooperativeId: user.cooperativeId,
         nh_org_id: user.nh_org_id ?? user.cooperativeId,
         cooperativeName: user.cooperativeName ?? user.manualCooperativeName ?? "",
@@ -85,6 +122,17 @@ export async function POST(
       } satisfies OrganizationRecord,
       { merge: true }
     );
+
+    if (demoMasterRef && demoMaster) {
+      transaction.update(demoMasterRef, {
+        signupStatus: nextDemoSignupStatus(
+          demoMaster.signupStatus,
+          "APPROVED",
+        ),
+        updatedAt: now,
+        updatedBy: admin.uid,
+      });
+    }
 
     transaction.set(
       userRef,

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { CmsCommonAreaEditor } from "@/components/cms-editor/CmsCommonAreaEditor";
+import { requirePortalPageSession } from "@/lib/auth/portal-page-guard";
 import {
   CMS_PUBLIC_GLOBAL_KEYS,
   type CmsGlobalKey,
@@ -17,6 +18,7 @@ export default async function CmsGlobalEditorPage({
 }: {
   params: Promise<{ documentKey: string }>;
 }) {
+  await requirePortalPageSession("admin");
   const { documentKey } = await params;
   if (
     !(CMS_PUBLIC_GLOBAL_KEYS as readonly string[]).includes(documentKey)

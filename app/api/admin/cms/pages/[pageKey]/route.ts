@@ -16,7 +16,7 @@ import {
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
@@ -51,7 +51,10 @@ function repositoryErrorResponse(error: CmsRepositoryError) {
 
 async function authorize(request: Request) {
   try {
-    return { admin: await requireAdmin(request), response: null };
+    return {
+      admin: await requireAdminCapability(request, "cms:write"),
+      response: null,
+    };
   } catch (error) {
     return {
       admin: null,

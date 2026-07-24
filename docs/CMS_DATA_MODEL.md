@@ -57,7 +57,7 @@ client overwrite와 delete는 차단한다.
 
 ### pageKey
 
-`home`, `auth.login`, `auth.signup`, `auth.pendingApproval`, `legal.terms`, `legal.privacy`, `public.consult`, `public.inquiries`, `public.faq`, `public.support`, `event.auditQuote`, `member.mypage`, `member.requestDetail`, `partner.portal`, `admin.console`, `admin.operations`, `framework.notFound`
+`home`, `auth.login`, `auth.signup`, `auth.pendingApproval`, `legal.terms`, `legal.privacy`, `public.consult`, `public.inquiries`, `public.faq`, `public.support`, `event.auditQuote`, `event.auditQuoteEvaluate`, `event.auditQuoteEvaluation`, `event.auditQuoteEvaluationReview`, `event.auditQuoteEvaluationReport`, `member.mypage`, `member.requestDetail`, `partner.portal`, `admin.console`, `admin.operations`, `framework.notFound`
 
 route는 `lib/cms/constants.ts`의 `CMS_PAGE_ROUTES`에 고정한다. CMS 문서의 route가 고정 route와 다르면 resolver가 사용하지 않는다.
 

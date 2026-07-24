@@ -3,7 +3,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  verifyBearerToken,
+  requireWritableActiveMember,
 } from "@/lib/firebase/server";
 import type { UserRecord } from "@/lib/firebase/schema";
 
@@ -17,15 +17,16 @@ type Payload = {
 const UPDATE_KEYS: ConsentUpdateKey[] = ["marketing", "email", "sms", "kakao"];
 
 export async function PATCH(req: Request) {
-  let decoded;
+  let memberSession;
   try {
-    decoded = await verifyBearerToken(req);
+    memberSession = await requireWritableActiveMember(req);
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(error) },
       { status: authErrorStatus(error) }
     );
   }
+  const { decoded } = memberSession;
 
   let body: Payload;
   try {

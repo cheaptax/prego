@@ -1,10 +1,15 @@
 import { LoginForm } from "@/components/LoginForm";
+import {
+  getPortalLoginPageConfig,
+  type PortalLoginPageKey,
+} from "@/lib/auth/login-page";
 import { getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
 
 export function LoginPageRenderer({
   content,
+  pageKey = "auth.login",
   mainId = "main",
   editing = false,
   previewMode = false,
@@ -12,14 +17,16 @@ export function LoginPageRenderer({
   onSelectSection,
 }: {
   content: CmsPageContent;
+  pageKey?: PortalLoginPageKey;
   mainId?: string | null;
   editing?: boolean;
   previewMode?: boolean;
   selectedSectionId?: string;
   onSelectSection?: (sectionId: string) => void;
 }) {
-  const hero = getCmsSection(content, "auth.login", "hero");
-  const form = getCmsSection(content, "auth.login", "loginForm");
+  const config = getPortalLoginPageConfig(pageKey);
+  const hero = getCmsSection(content, pageKey, "hero");
+  const form = getCmsSection(content, pageKey, "loginForm");
 
   function sectionProps(section: CmsSection, className: string) {
     const root = cmsSectionRootProps(section, className);
@@ -73,7 +80,14 @@ export function LoginPageRenderer({
           <span className="login-card__tag">{form.eyebrow}</span>
           <h2 className="login-card__title">{form.title}</h2>
           <p className="login-card__lede">{form.description}</p>
-          <LoginForm content={content} previewMode={previewMode} />
+          <LoginForm
+            content={content}
+            pageKey={pageKey}
+            expectedPortal={config.expectedPortal}
+            legacyCrossPortal={config.legacyCrossPortal}
+            showEmailLookup={config.showEmailLookup}
+            previewMode={previewMode}
+          />
         </section>
       </section>
     </main>

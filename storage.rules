@@ -6,10 +6,29 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function isActiveAccount(user) {
+      return (
+        'accountStatus' in user
+        && user.accountStatus == 'active'
+      ) || (
+        !('accountStatus' in user)
+        && user.status == 'active'
+      );
+    }
+
     function isAdmin() {
       return signedIn()
         && 'admin' in request.auth.token
-        && request.auth.token.admin == true;
+        && request.auth.token.admin == true
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(
+          /databases/(default)/documents/users/$(request.auth.uid)
+        ).data.role == 'admin'
+        && isActiveAccount(
+          firestore.get(
+            /databases/(default)/documents/users/$(request.auth.uid)
+          ).data
+        );
     }
 
     function isAllowedCmsUpload() {
@@ -44,7 +63,36 @@ service firebase.storage {
     }
 
     match /consult-attachments/{allPaths=**} {
-      allow read, write: if isAdmin();
+      // Partner attachment delivery must go through an assignment-authorized
+      // server endpoint or signed URL. Storage paths alone do not prove scope.
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /partner-assets/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /quotes/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Audit evaluation files are accessed only through server-authorized
+    // short-lived URLs. Firebase client credentials never grant access.
+    match /audit-evaluation/originals/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /audit-evaluation/quarantine/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /audit-evaluation/reports/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /audit-evaluation/temp/{allPaths=**} {
+      allow read, write: if false;
     }
 
     match /{allPaths=**} {

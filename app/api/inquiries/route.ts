@@ -40,7 +40,7 @@ async function getOptionalUser(req: Request) {
 
   const decoded = await adminAuth().verifyIdToken(token);
   const user = await getUserRecord(decoded.uid);
-  return user?.status === "active" ? user : null;
+  return user?.role === "member" && user.status === "active" ? user : null;
 }
 
 export async function GET(req: Request) {

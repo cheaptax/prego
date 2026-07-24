@@ -13,6 +13,17 @@ import {
   formatAdminOperationsMessage,
 } from "@/lib/cms/admin-operations-content";
 import type { CmsPageContent } from "@/lib/cms/schemas";
+import { getPartnerProfessionLabel } from "@/lib/partner-professions";
+import { MIN_AUDIT_QUOTE_ASSIGNMENTS } from "@/lib/quotes/audit-quote-assignment";
+import type { QuoteAssignmentRecord } from "@/lib/firebase/schema";
+
+type AssignablePartner = {
+  id: string;
+  displayName: string;
+  name: string;
+  profession: string;
+  contactEmail: string;
+};
 
 type Props = {
   onMessage: (message: { tone: "success" | "error"; text: string }) => void;
@@ -95,6 +106,12 @@ export function AdminAuditQuotesPanel({
   const [draftAssignee, setDraftAssignee] = useState("");
   const [draftQuoteCount, setDraftQuoteCount] = useState("0");
   const [listVersion, setListVersion] = useState(0);
+  const [assignablePartners, setAssignablePartners] = useState<
+    AssignablePartner[]
+  >([]);
+  const [selectedPartnerId, setSelectedPartnerId] = useState("");
+  const [assignments, setAssignments] = useState<QuoteAssignmentRecord[]>([]);
+  const [assigning, setAssigning] = useState(false);
 
   useEffect(() => {
     if (previewMode) return;
@@ -106,10 +123,16 @@ export function AdminAuditQuotesPanel({
           statusFilter && statusFilter !== "all"
             ? `?status=${encodeURIComponent(statusFilter)}`
             : "";
-        const data = await adminFetch(`/api/admin/audit-quotes${query}`);
+        const [listData, partnerData] = await Promise.all([
+          adminFetch(`/api/admin/audit-quotes${query}`),
+          adminFetch("/api/admin/audit-quotes/partners"),
+        ]);
         if (cancelled) return;
-        setItems((data.items as AuditQuoteListItem[]) ?? []);
-        setReceivedCount(Number(data.receivedCount ?? 0));
+        setItems((listData.items as AuditQuoteListItem[]) ?? []);
+        setReceivedCount(Number(listData.receivedCount ?? 0));
+        setAssignablePartners(
+          (partnerData.partners as AssignablePartner[]) ?? [],
+        );
       } catch (error) {
         if (cancelled) return;
         onMessage({
@@ -134,17 +157,25 @@ export function AdminAuditQuotesPanel({
     if (previewMode) {
       setSelectedId(requestId);
       setDetail(previewQuote);
+      setAssignments([]);
       return;
     }
     setSelectedId(requestId);
     setDetailLoading(true);
     try {
-      const data = await adminFetch(`/api/admin/audit-quotes/${requestId}`);
+      const [data, assignData] = await Promise.all([
+        adminFetch(`/api/admin/audit-quotes/${requestId}`),
+        adminFetch(`/api/admin/audit-quotes/${requestId}/assign`),
+      ]);
       const item = data.item as AuditQuoteDetail;
       setDetail(item);
       setDraftStatus(item.status);
       setDraftAssignee(item.assignedTo ?? "");
       setDraftQuoteCount(String(item.quoteCount));
+      setAssignments(
+        (assignData.assignments as QuoteAssignmentRecord[]) ?? [],
+      );
+      setSelectedPartnerId("");
     } catch (error) {
       onMessage({
         tone: "error",
@@ -200,6 +231,95 @@ export function AdminAuditQuotesPanel({
       if (selectedId) await loadDetail(selectedId);
     } finally {
       setSaving(false);
+    }
+  }
+
+  const assignedPartnerIds = useMemo(
+    () => new Set(assignments.map((assignment) => assignment.partnerId)),
+    [assignments],
+  );
+  const availablePartners = useMemo(
+    () =>
+      assignablePartners.filter(
+        (partner) => !assignedPartnerIds.has(partner.id),
+      ),
+    [assignablePartners, assignedPartnerIds],
+  );
+  const targetQuoteCount = Math.max(
+    Number(draftQuoteCount) || 0,
+    assignments.length,
+    MIN_AUDIT_QUOTE_ASSIGNMENTS,
+  );
+
+  async function assignPartner() {
+    if (!detail || previewMode || !selectedPartnerId) return;
+    setAssigning(true);
+    try {
+      const data = await adminFetch(
+        `/api/admin/audit-quotes/${detail.requestId}/assign`,
+        {
+          method: "POST",
+          body: JSON.stringify({ partnerId: selectedPartnerId }),
+        },
+      );
+      const item = data.item as AuditQuoteDetail;
+      setDetail(item);
+      setDraftStatus(item.status);
+      setDraftAssignee(item.assignedTo ?? "");
+      setDraftQuoteCount(String(item.quoteCount));
+      setAssignments((data.assignments as QuoteAssignmentRecord[]) ?? []);
+      setSelectedPartnerId("");
+      onMessage({
+        tone: "success",
+        text: section.text("partnerAssignSuccess"),
+      });
+      setListVersion((value) => value + 1);
+    } catch (error) {
+      const code = error instanceof AdminRequestError ? error.code : "";
+      onMessage({
+        tone: "error",
+        text:
+          code === "partner_inactive"
+            ? section.text("partnerInactiveError")
+            : code === "partner_scope_mismatch"
+              ? section.text("partnerScopeError")
+              : code === "partner_already_assigned"
+                ? section.text("partnerAlreadyAssignedError")
+                : code === "missing_partner"
+                  ? section.text("partnerRequiredError")
+                  : section.text("partnerAssignFailed"),
+      });
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  async function revokeAssignment(partnerId: string) {
+    if (!detail || previewMode) return;
+    setAssigning(true);
+    try {
+      await adminFetch(
+        `/api/admin/audit-quotes/${detail.requestId}/assign?partnerId=${encodeURIComponent(partnerId)}`,
+        { method: "DELETE" },
+      );
+      const assignData = await adminFetch(
+        `/api/admin/audit-quotes/${detail.requestId}/assign`,
+      );
+      setAssignments(
+        (assignData.assignments as QuoteAssignmentRecord[]) ?? [],
+      );
+      onMessage({
+        tone: "success",
+        text: section.text("partnerUnassignSuccess"),
+      });
+      setListVersion((value) => value + 1);
+    } catch {
+      onMessage({
+        tone: "error",
+        text: section.text("partnerUnassignFailed"),
+      });
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -398,23 +518,111 @@ export function AdminAuditQuotesPanel({
             </label>
 
             <label className="admin-field">
+              <span>{section.text("partnerAssignLabel")}</span>
+              <select
+                value={selectedPartnerId}
+                onChange={(event) => setSelectedPartnerId(event.target.value)}
+              >
+                <option value="">{section.text("partnerAssignPlaceholder")}</option>
+                {availablePartners.map((partner) => (
+                  <option key={partner.id} value={partner.id}>
+                    {partner.displayName} ·{" "}
+                    {getPartnerProfessionLabel(partner.profession)}
+                  </option>
+                ))}
+              </select>
+              <small className="admin-form__hint">
+                {section.text("partnerAssignHelp")}
+              </small>
+              <small className="admin-form__hint">
+                {section.text("partnerAssignProgressPrefix")} {assignments.length}
+                {" / "}
+                {targetQuoteCount}
+                {assignments.length < MIN_AUDIT_QUOTE_ASSIGNMENTS
+                  ? ` (${section.text("partnerAssignMinimumHint")})`
+                  : ""}
+              </small>
+            </label>
+
+            <div className="admin-topbar__actions">
+              <button
+                type="button"
+                className="admin-btn admin-btn--primary"
+                disabled={
+                  assigning ||
+                  !selectedPartnerId ||
+                  previewMode ||
+                  availablePartners.length === 0
+                }
+                onClick={() => void assignPartner()}
+              >
+                {assigning
+                  ? section.text("partnerAssigning")
+                  : section.text("partnerAssignAction")}
+              </button>
+            </div>
+
+            {assignments.length > 0 ? (
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>{section.text("assignedPartnerColumn")}</th>
+                      <th>{section.text("assignmentStatusColumn")}</th>
+                      <th>{section.text("assignmentActionColumn")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignments.map((assignment) => (
+                      <tr key={assignment.id}>
+                        <td>{assignment.partnerName}</td>
+                        <td>{assignment.status}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="admin-link"
+                            disabled={assigning || previewMode}
+                            onClick={() =>
+                              void revokeAssignment(assignment.partnerId)}
+                          >
+                            {section.text("partnerUnassignAction")}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="admin-form__hint">
+                {section.text("noPartnerAssigned")}
+              </p>
+            )}
+
+            <label className="admin-field">
               <span>{section.text("assignee")}</span>
               <input
                 value={draftAssignee}
                 onChange={(event) => setDraftAssignee(event.target.value)}
                 placeholder={section.text("assigneePlaceholder")}
               />
+              <small className="admin-form__hint">
+                {section.text("internalAssigneeHelp")}
+              </small>
             </label>
 
             <label className="admin-field">
               <span>{section.text("quoteCount")}</span>
               <input
                 type="number"
-                min={0}
+                min={MIN_AUDIT_QUOTE_ASSIGNMENTS}
                 max={50}
                 value={draftQuoteCount}
                 onChange={(event) => setDraftQuoteCount(event.target.value)}
               />
+              <small className="admin-form__hint">
+                {section.text("quoteCountHelp")}
+              </small>
             </label>
 
             <div className="admin-topbar__actions">

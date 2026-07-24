@@ -1,10 +1,12 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
 
 type Props = {
   pageKey:
     | "auth.pendingApproval"
+    | "auth.portalAccessDenied"
     | "public.support"
     | "legal.terms"
     | "legal.privacy"
@@ -16,6 +18,7 @@ type Props = {
   previewMode?: boolean;
   selectedSectionId?: string;
   onSelectSection?: (sectionId: string) => void;
+  cardActions?: ReactNode;
 };
 
 function highlightedTitle(section: CmsSection) {
@@ -47,6 +50,7 @@ export function CmsSimplePage({
   previewMode = false,
   selectedSectionId,
   onSelectSection,
+  cardActions,
 }: Props) {
   function sectionProps(section: CmsSection, className: string) {
     const root = cmsSectionRootProps(section, className);
@@ -71,6 +75,7 @@ export function CmsSimplePage({
   );
   const isLoginLayout =
     pageKey === "auth.pendingApproval" ||
+    pageKey === "auth.portalAccessDenied" ||
     pageKey === "public.support" ||
     pageKey === "partner.portal" ||
     pageKey === "framework.notFound";
@@ -117,24 +122,25 @@ export function CmsSimplePage({
             {card.description ? (
               <p className="login-card__lede">{card.description}</p>
             ) : null}
-            {card.actions.map((action, index) => (
-              <Link
-                className={
-                  index === 0
-                    ? "login-card__primary"
-                    : "login-card__ghost"
-                }
-                href={action.href}
-                key={action.id}
-                onClick={
-                  editing || previewMode
-                    ? (event) => event.preventDefault()
-                    : undefined
-                }
-              >
-                {action.label}
-              </Link>
-            ))}
+            {cardActions ??
+              card.actions.map((action, index) => (
+                <Link
+                  className={
+                    index === 0
+                      ? "login-card__primary"
+                      : "login-card__ghost"
+                  }
+                  href={action.href}
+                  key={action.id}
+                  onClick={
+                    editing || previewMode
+                      ? (event) => event.preventDefault()
+                      : undefined
+                  }
+                >
+                  {action.label}
+                </Link>
+              ))}
           </section>
         </section>
       </main>

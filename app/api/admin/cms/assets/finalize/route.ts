@@ -17,7 +17,7 @@ import { adminStorage } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
@@ -38,7 +38,7 @@ const payloadSchema = z
 export async function POST(request: Request) {
   let admin;
   try {
-    admin = await requireAdmin(request);
+    admin = await requireAdminCapability(request, "cms:write");
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(error) },

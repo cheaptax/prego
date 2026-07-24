@@ -26,6 +26,21 @@ function optionalEnv(...names: string[]) {
 
 export function getFirebaseAdminApp() {
   if (getApps().length) return getApps()[0];
+  if (
+    process.env.FIRESTORE_EMULATOR_HOST ||
+    process.env.FIREBASE_AUTH_EMULATOR_HOST ||
+    process.env.FIREBASE_STORAGE_EMULATOR_HOST
+  ) {
+    return initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID?.trim() ||
+        process.env.GCLOUD_PROJECT?.trim() ||
+        "demo-local",
+      storageBucket: optionalEnv(
+        "FIREBASE_STORAGE_BUCKET",
+        "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET"
+      ),
+    });
+  }
 
   return initializeApp({
     credential: cert({

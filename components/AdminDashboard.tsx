@@ -1,6 +1,7 @@
 "use client";
 
-import { onAuthStateChanged, signOut, type User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   createContext,
@@ -8,8 +9,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type FormEvent,
 } from "react";
+import { logoutPortalSession } from "@/lib/auth/login-client";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { describeAuditLog } from "@/lib/audit-log-display";
 import {
@@ -47,14 +51,46 @@ import type {
   AnswerRecord,
   AnswerRatingRecord,
   AnswerViewRecord,
+  AdminCapability,
+  AdminPermission,
+  AdminRole,
   AuditLogRecord,
+  AuthorizationContext,
   ConsultRequestRecord,
   FaqRecord,
   OrganizationRecord,
+  PartnerAnswerDraftRecord,
+  PartnerAssignmentRecord,
+  PartnerRecord,
   PointLedgerRecord,
   PointTransactionRecord,
   UserRecord,
 } from "@/lib/firebase/schema";
+import {
+  ADMIN_CAPABILITIES,
+  ADMIN_ROLE_LABELS,
+  ADMIN_ROLES,
+  getAdminRole,
+} from "@/lib/admin/rbac";
+import {
+  canShowAdminAction,
+  canShowAdminMenu,
+} from "@/lib/admin/menu-permissions";
+import { PartnerManagementPanel as PartnerManagementApiPanel } from "@/components/admin/PartnerManagementPanel";
+import {
+  MANAGEABLE_ADMIN_PERMISSIONS,
+  OPERATOR_PAGE_SIZE_OPTIONS,
+  dangerousOperatorChanges,
+  getAssignableAdminRoles,
+  getRolePermissionPreview,
+  operatorAccountStatus,
+  operatorProtection,
+  operatorServerErrorCopyKey,
+  permissionCopyKeys,
+  validateOperatorForm,
+  type OperatorFormErrors,
+  type OperatorListItem,
+} from "@/lib/admin/operator-ui";
 import { AdminAuditQuotesPanel } from "@/components/AdminAuditQuotesPanel";
 import {
   ADMIN_FAQ_CATEGORIES,
@@ -68,14 +104,45 @@ import {
 } from "@/lib/cms/admin-operations-content";
 import { ADMIN_OPERATIONS_PREVIEW_DATA } from "@/lib/cms/admin-operations-preview";
 import type { CmsPageContent } from "@/lib/cms/schemas";
+import type { CooperativeSearchItem } from "@/lib/cooperatives/demo-cooperative";
+import { partitionAdminDashboardData } from "@/lib/admin/dashboard-classification";
+import { CooperativeMasterPanel } from "@/components/admin/CooperativeMasterPanel";
+
+const AdminAuditEvaluationPanel = dynamic(
+  () =>
+    import("@/components/AdminAuditEvaluationPanel").then(
+      (module) => module.AdminAuditEvaluationPanel,
+    ),
+);
 
 type State = "loading" | "ready" | "denied" | "error";
 
 type TabKey = AdminOperationTabId;
-type MemberSubtab = "members" | "operators";
+type MemberSubtab = "members" | "operators" | "cooperatives";
 type OperatorEditorState = {
   mode: "create" | "edit";
   operator: UserRecord | null;
+  serverError?: string;
+};
+
+type OperatorMutationPayload = {
+  name: string;
+  email: string;
+  password?: string;
+  position: string;
+  duty: string;
+  status?: UserRecord["status"];
+  adminRole?: AdminRole;
+  adminCapabilityAllow?: AdminCapability[];
+  adminCapabilityDeny?: AdminCapability[];
+};
+
+type OperatorConfirmationState = {
+  kind: "permission" | "password" | "delete" | "update";
+  operator: UserRecord;
+  nextStatus?: UserRecord["status"];
+  payload?: OperatorMutationPayload;
+  warningKeys?: string[];
 };
 
 const AdminOperationsCopyContext =
@@ -87,6 +154,50 @@ function useAdminOperationsCopy() {
     throw new Error("Admin operations copy is unavailable.");
   }
   return value;
+}
+
+function useModalFocus<T extends HTMLElement>(
+  onClose: () => void,
+  locked = false,
+) {
+  const panelRef = useRef<T>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (locked) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusableSelector =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    panel?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !panel) return;
+      const focusable = [...panel.querySelectorAll<HTMLElement>(focusableSelector)];
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previous?.focus();
+    };
+  }, [locked]);
+  return panelRef;
 }
 
 const LEGACY_NON_ASSIGNEE_TAGS = new Set([
@@ -272,7 +383,6 @@ function formatRatingScore(score: number, copy: AdminOperationsCopy) {
 
 type InquiryActionKind = "write" | "edit" | "complete";
 
-/** 접수번호 · 제목 · 작성자 · 담당자 통합 검색 (공백으로 여러 키워드) */
 function matchesInquirySearch(
   request: ConsultRequestRecord,
   managers: string[],
@@ -299,7 +409,6 @@ function matchesInquirySearch(
   return tokens.every((token) => fields.some((field) => field.includes(token)));
 }
 
-/** 답변 최초 등록 또는 최종 수정 시각 */
 function getAnswerRespondedAt(
   answer: AnswerRecord | undefined,
   request: ConsultRequestRecord,
@@ -308,7 +417,6 @@ function getAnswerRespondedAt(
   return answer.updatedAt ?? request.answeredAt ?? answer.createdAt ?? null;
 }
 
-/** 문의 목록 우측 액션 버튼 종류 (고객 열람 후에만 완료 상태) */
 function getInquiryActionKind(status: ResolvedRequestStatus): InquiryActionKind {
   if (status === "ANSWER_PUBLISHED" || status === "COMPLETED") {
     return "complete";
@@ -442,13 +550,24 @@ function VisibilityPill({ value }: { value?: string }) {
 export function AdminDashboard({
   content,
   previewMode = false,
+  auditEvaluationAdminEnabled = previewMode,
+  canManageTestData = false,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
+  auditEvaluationAdminEnabled?: boolean;
+  canManageTestData?: boolean;
 }) {
   const router = useRouter();
   const copy = useMemo(() => createAdminOperationsCopy(content), [content]);
-  const TABS = copy.tabs;
+  const FEATURE_TABS = useMemo(
+    () =>
+      copy.tabs.filter(
+        (item) =>
+          item.key !== "auditEvaluations" || auditEvaluationAdminEnabled,
+      ),
+    [auditEvaluationAdminEnabled, copy.tabs],
+  );
   const inquiryCopy = copy.section("inquiries");
   const faqCategoryOptions = ADMIN_FAQ_CATEGORIES.map((option) => ({
     value: option.value,
@@ -483,6 +602,27 @@ export function AdminDashboard({
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>(
     previewMode ? ADMIN_OPERATIONS_PREVIEW_DATA.auditLogs : [],
   );
+  const [adminContext, setAdminContext] = useState<AuthorizationContext | null>(
+    previewMode
+      ? {
+          uid: "preview-admin",
+          accountType: "admin",
+          status: "active",
+          adminRole: "super_admin",
+          permissions: [...ADMIN_CAPABILITIES],
+          scopes: ["ALL"],
+        }
+      : null,
+  );
+  const [partners, setPartners] = useState<PartnerRecord[]>([]);
+  const [partnerAssignments, setPartnerAssignments] = useState<
+    PartnerAssignmentRecord[]
+  >([]);
+  const [partnerAnswerDrafts, setPartnerAnswerDrafts] = useState<
+    PartnerAnswerDraftRecord[]
+  >([]);
+  const [partnerActionLoading, setPartnerActionLoading] = useState(false);
+  const [partnerRevisionNote, setPartnerRevisionNote] = useState("");
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState<{ tone: "info" | "success" | "error"; text: string } | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
@@ -490,6 +630,18 @@ export function AdminDashboard({
   const [memberSearch, setMemberSearch] = useState("");
   const [selectedMemberUid, setSelectedMemberUid] = useState<string | null>(null);
   const [operatorSearch, setOperatorSearch] = useState("");
+  const [operatorRoleFilter, setOperatorRoleFilter] = useState("");
+  const [operatorStatusFilter, setOperatorStatusFilter] = useState("");
+  const [operatorPartnerFilter, setOperatorPartnerFilter] = useState("");
+  const [operatorPage, setOperatorPage] = useState(1);
+  const [operatorPageSize, setOperatorPageSize] = useState(20);
+  const [operatorList, setOperatorList] = useState<OperatorListItem[]>([]);
+  const [operatorListTotal, setOperatorListTotal] = useState(0);
+  const [operatorTotalPages, setOperatorTotalPages] = useState(1);
+  const [activeSuperAdminCount, setActiveSuperAdminCount] = useState(0);
+  const [operatorListLoading, setOperatorListLoading] = useState(false);
+  const [operatorListError, setOperatorListError] = useState("");
+  const [operatorRefreshKey, setOperatorRefreshKey] = useState(0);
   const [selectedOperatorUid, setSelectedOperatorUid] = useState<string | null>(null);
   const [operatorEditor, setOperatorEditor] = useState<OperatorEditorState | null>(null);
   const [operatorActionLoading, setOperatorActionLoading] = useState(false);
@@ -541,11 +693,10 @@ export function AdminDashboard({
   } | null>(null);
   const [memberActionReason, setMemberActionReason] = useState("");
   const [memberActionLoading, setMemberActionLoading] = useState(false);
-  const [operatorConfirmation, setOperatorConfirmation] = useState<{
-    kind: "permission" | "password" | "delete";
-    operator: UserRecord;
-    nextStatus?: UserRecord["status"];
-  } | null>(null);
+  const [memberCooperativeEditor, setMemberCooperativeEditor] =
+    useState<UserRecord | null>(null);
+  const [operatorConfirmation, setOperatorConfirmation] =
+    useState<OperatorConfirmationState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(
     previewMode ? new Date("2026-07-20T09:30:00.000Z") : null,
@@ -570,9 +721,17 @@ export function AdminDashboard({
       ledger?: PointLedgerRecord[];
       pointTransactions?: PointTransactionRecord[];
       auditLogs?: AuditLogRecord[];
+      adminCapabilities?: AdminCapability[];
+      adminContext?: AuthorizationContext;
+      partners?: PartnerRecord[];
+      partnerAssignments?: PartnerAssignmentRecord[];
+      partnerAnswerDrafts?: PartnerAnswerDraftRecord[];
       error?: string;
     };
 
+    if (res.status === 401 || res.status === 403) {
+      throw new Error("permission_denied");
+    }
     if (!res.ok || !data.ok) {
       throw new Error(copy.message("genericError"));
     }
@@ -586,8 +745,135 @@ export function AdminDashboard({
     setLedger(data.ledger ?? []);
     setPointTransactions(data.pointTransactions ?? []);
     setAuditLogs(data.auditLogs ?? []);
+    setAdminContext(data.adminContext ?? null);
+    if (
+      data.adminContext &&
+      !canShowAdminAction(data.adminContext, "members:read") &&
+      canShowAdminMenu(data.adminContext, "operators")
+    ) {
+      setMemberSubtab("operators");
+    }
+    setPartners(data.partners ?? []);
+    setPartnerAssignments(data.partnerAssignments ?? []);
+    setPartnerAnswerDrafts(data.partnerAnswerDrafts ?? []);
     setLastUpdated(new Date());
   }, [copy, previewMode]);
+
+  const TABS = useMemo(
+    () =>
+      FEATURE_TABS.filter((item) =>
+        canShowAdminMenu(adminContext, item.key),
+      ),
+    [FEATURE_TABS, adminContext],
+  );
+
+  const fetchOperators = useCallback(async () => {
+    if (previewMode) {
+      const previewOperators = users
+        .filter((user) => user.role === "admin")
+        .map((user) => ({
+          ...user,
+          accountStatus: operatorAccountStatus(user),
+          scopes: ["ALL"] as OperatorListItem["scopes"],
+        }));
+      setOperatorList(previewOperators);
+      setOperatorListTotal(previewOperators.length);
+      setOperatorTotalPages(1);
+      setActiveSuperAdminCount(
+        previewOperators.filter(
+          (operator) =>
+            operator.adminRole === "super_admin" &&
+            operator.accountStatus === "active",
+        ).length,
+      );
+      return;
+    }
+    const user = getFirebaseAuth().currentUser;
+    if (!user) return;
+    setOperatorListLoading(true);
+    setOperatorListError("");
+    try {
+      const idToken = await user.getIdToken();
+      const params = new URLSearchParams({
+        page: String(operatorPage),
+        pageSize: String(operatorPageSize),
+      });
+      if (operatorSearch.trim()) params.set("search", operatorSearch.trim());
+      if (operatorRoleFilter) params.set("role", operatorRoleFilter);
+      if (operatorStatusFilter) params.set("status", operatorStatusFilter);
+      if (operatorPartnerFilter) {
+        params.set("partner", operatorPartnerFilter);
+      }
+      const res = await fetch(`/api/admin/operators?${params.toString()}`, {
+        headers: { authorization: `Bearer ${idToken}` },
+      });
+      const data = (await res.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            operators?: OperatorListItem[];
+            activeSuperAdminCount?: number;
+            pagination?: {
+              page: number;
+              pageSize: number;
+              total: number;
+              totalPages: number;
+            };
+            error?: string;
+          }
+        | null;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error ?? "operator_list_failed");
+      }
+      setOperatorList(data.operators ?? []);
+      setOperatorListTotal(data.pagination?.total ?? 0);
+      setOperatorTotalPages(data.pagination?.totalPages ?? 1);
+      setActiveSuperAdminCount(data.activeSuperAdminCount ?? 0);
+      if (
+        data.pagination?.page &&
+        data.pagination.page !== operatorPage
+      ) {
+        setOperatorPage(data.pagination.page);
+      }
+    } catch {
+      setOperatorList([]);
+      setOperatorListError(copy.message("operatorListFailed"));
+    } finally {
+      setOperatorListLoading(false);
+    }
+  }, [
+    copy,
+    operatorPage,
+    operatorPageSize,
+    operatorPartnerFilter,
+    operatorRoleFilter,
+    operatorSearch,
+    operatorStatusFilter,
+    previewMode,
+    users,
+  ]);
+
+  useEffect(() => {
+    if (
+      state !== "ready" ||
+      tab !== "members" ||
+      memberSubtab !== "operators" ||
+      !canShowAdminMenu(adminContext, "operators")
+    ) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      void fetchOperators();
+    }, operatorSearch ? 250 : 0);
+    return () => window.clearTimeout(timeout);
+  }, [
+    adminContext,
+    fetchOperators,
+    memberSubtab,
+    operatorRefreshKey,
+    operatorSearch,
+    state,
+    tab,
+  ]);
 
   const fetchFaqs = useCallback(async () => {
     if (previewMode) return;
@@ -813,7 +1099,7 @@ export function AdminDashboard({
         unsubscribe = onAuthStateChanged(auth, async (user) => {
           if (!user) {
             setCurrentUser(null);
-            router.push("/login");
+            router.push("/admin/login");
             return;
           }
 
@@ -829,7 +1115,14 @@ export function AdminDashboard({
 
             await fetchDashboard();
             setState("ready");
-          } catch {
+          } catch (caught) {
+            if (
+              caught instanceof Error &&
+              caught.message === "permission_denied"
+            ) {
+              setState("denied");
+              return;
+            }
             setState("error");
             setError(copy.message("genericError"));
           }
@@ -850,12 +1143,43 @@ export function AdminDashboard({
     () => users.filter((user) => user.role !== "admin"),
     [users],
   );
-  const operatorUsers = useMemo(
+  const productionDashboard = useMemo(
     () =>
-      users
-        .filter((user) => user.role === "admin")
-        .sort((a, b) => (b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? "")),
-    [users],
+      partitionAdminDashboardData({
+        users,
+        requests,
+        answers,
+        ratings,
+        answerViews,
+        organizations,
+        ledger,
+        pointTransactions,
+        auditLogs,
+      }).production,
+    [
+      answerViews,
+      answers,
+      auditLogs,
+      ledger,
+      organizations,
+      pointTransactions,
+      ratings,
+      requests,
+      users,
+    ],
+  );
+  const operatorUsers = useMemo<OperatorListItem[]>(
+    () =>
+      previewMode
+        ? users
+            .filter((user) => user.role === "admin")
+            .map((user) => ({
+              ...user,
+              accountStatus: operatorAccountStatus(user),
+              scopes: ["ALL"] as OperatorListItem["scopes"],
+            }))
+        : operatorList,
+    [operatorList, previewMode, users],
   );
 
   const filteredMembers = useMemo(() => {
@@ -880,23 +1204,7 @@ export function AdminDashboard({
     const selected = memberUsers.find((user) => user.uid === selectedMemberUid);
     return selected ?? filteredMembers[0] ?? null;
   }, [filteredMembers, memberUsers, selectedMemberUid]);
-  const filteredOperators = useMemo(() => {
-    const query = operatorSearch.trim().toLowerCase();
-    if (!query) return operatorUsers;
-    return operatorUsers.filter((user) =>
-      [
-        user.name,
-        user.email,
-        user.position,
-        user.duty,
-        memberStatusLabel(copy, user.status),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [operatorSearch, operatorUsers, copy]);
+  const filteredOperators = operatorUsers;
   const selectedOperator = useMemo(() => {
     const selected = operatorUsers.find((user) => user.uid === selectedOperatorUid);
     return selected ?? filteredOperators[0] ?? null;
@@ -911,8 +1219,54 @@ export function AdminDashboard({
       ),
     [auditLogs, selectedOperator],
   );
+  const selectedOperatorProtection = selectedOperator
+    ? operatorProtection({
+        operator: selectedOperator,
+        actorUid: currentUser?.uid,
+        actorRole: adminContext?.adminRole,
+        activeSuperAdminCount,
+      })
+    : null;
   const selectedOperatorIsProtected = Boolean(
-    selectedOperator && selectedOperator.uid === currentUser?.uid,
+    selectedOperatorProtection?.self,
+  );
+  const selectedOperatorIsLastSuperAdmin = Boolean(
+    selectedOperatorProtection?.lastSuperAdmin,
+  );
+  const canReadMembers = canShowAdminAction(adminContext, "members:read");
+  const canWriteMembers = canShowAdminAction(adminContext, "members:write");
+  const canReadCooperatives = canShowAdminAction(
+    adminContext,
+    "cooperatives:read",
+  );
+  const canWriteCooperatives = canShowAdminAction(
+    adminContext,
+    "cooperatives:write",
+  );
+  const canReadOperators = canShowAdminMenu(adminContext, "operators");
+  const canCreateOperators = canShowAdminAction(
+    adminContext,
+    "operators:create",
+  );
+  const canUpdateOperators = canShowAdminAction(
+    adminContext,
+    "operators:update",
+  );
+  const canDisableOperators = canShowAdminAction(
+    adminContext,
+    "operators:disable",
+  );
+  const canDeleteOperators = canShowAdminAction(
+    adminContext,
+    "operators:delete",
+  );
+  const canManageOperatorRoles = canShowAdminAction(
+    adminContext,
+    "operators:manageRoles",
+  );
+  const canResetOperatorPasswords = canShowAdminAction(
+    adminContext,
+    "operators:resetPassword",
   );
   const selectedMemberOrganization = useMemo(
     () =>
@@ -1059,62 +1413,81 @@ export function AdminDashboard({
 
   const referenceTime = lastUpdated?.getTime() ?? 0;
   const memberDelta = useMemo(
-    () => deriveDelta(memberUsers, referenceTime),
-    [memberUsers, referenceTime],
+    () => deriveDelta(productionDashboard.users, referenceTime),
+    [productionDashboard.users, referenceTime],
   );
   const requestDelta = useMemo(
-    () => deriveDelta(requests, referenceTime),
-    [requests, referenceTime],
+    () => deriveDelta(productionDashboard.requests, referenceTime),
+    [productionDashboard.requests, referenceTime],
   );
   const answerDelta = useMemo(
-    () => deriveDelta(answers, referenceTime),
-    [answers, referenceTime],
+    () => deriveDelta(productionDashboard.answers, referenceTime),
+    [productionDashboard.answers, referenceTime],
   );
   const ratingDelta = useMemo(
-    () => deriveDelta(ratings, referenceTime),
-    [ratings, referenceTime],
+    () => deriveDelta(productionDashboard.ratings, referenceTime),
+    [productionDashboard.ratings, referenceTime],
   );
 
   const inquiriesSeries = useMemo(
-    () => buildDailySeries(requests, 14, referenceTime),
-    [requests, referenceTime],
+    () => buildDailySeries(productionDashboard.requests, 14, referenceTime),
+    [productionDashboard.requests, referenceTime],
   );
   const answersSeries = useMemo(
-    () => buildDailySeries(answers, 14, referenceTime),
-    [answers, referenceTime],
+    () => buildDailySeries(productionDashboard.answers, 14, referenceTime),
+    [productionDashboard.answers, referenceTime],
   );
   const signupsSeries = useMemo(
-    () => buildDailySeries(memberUsers, 14, referenceTime),
-    [memberUsers, referenceTime],
+    () => buildDailySeries(productionDashboard.users, 14, referenceTime),
+    [productionDashboard.users, referenceTime],
   );
 
   const answeredCount = useMemo(
-    () => requests.filter((request) => answerByRequestId.has(request.id)).length,
-    [requests, answerByRequestId],
+    () =>
+      productionDashboard.requests.filter((request) =>
+        answerByRequestId.has(request.id),
+      ).length,
+    [productionDashboard.requests, answerByRequestId],
   );
-  const answerRate = requests.length > 0 ? answeredCount / requests.length : 0;
+  const answerRate =
+    productionDashboard.requests.length > 0
+      ? answeredCount / productionDashboard.requests.length
+      : 0;
 
   const ratingScoreAvg = useMemo(() => {
-    if (!ratings.length) return 0;
-    const sum = ratings.reduce((total, rating) => total + (rating.score ?? 0), 0);
-    return sum / ratings.length;
-  }, [ratings]);
+    if (!productionDashboard.ratings.length) return 0;
+    const sum = productionDashboard.ratings.reduce(
+      (total, rating) => total + (rating.score ?? 0),
+      0,
+    );
+    return sum / productionDashboard.ratings.length;
+  }, [productionDashboard.ratings]);
 
   const helpfulRate = useMemo(() => {
-    const scored = ratings.filter((rating) => typeof rating.helpful === "boolean");
+    const scored = productionDashboard.ratings.filter(
+      (rating) => typeof rating.helpful === "boolean",
+    );
     if (!scored.length) return 0;
     return scored.filter((rating) => rating.helpful).length / scored.length;
-  }, [ratings]);
+  }, [productionDashboard.ratings]);
 
+  const dashboardTotalWalletBalance = useMemo(
+    () =>
+      productionDashboard.organizations.reduce(
+        (total, organization) => total + (organization.walletBalance ?? 0),
+        0,
+      ),
+    [productionDashboard.organizations],
+  );
   const totalWalletBalance = useMemo(
     () => organizations.reduce((total, organization) => total + (organization.walletBalance ?? 0), 0),
     [organizations],
   );
 
-  const pointsSpent30d = useMemo(() => {
+  const dashboardPointsSpent30d = useMemo(() => {
     if (!referenceTime) return 0;
     const cutoff = referenceTime - 30 * 24 * 60 * 60 * 1000;
-    return ledger
+    return productionDashboard.ledger
       .filter((entry) => {
         if (!entry.createdAt) return false;
         const time = new Date(entry.createdAt).getTime();
@@ -1122,11 +1495,11 @@ export function AdminDashboard({
         return entry.event === "answer_view" || entry.event === "admin_adjustment_debit";
       })
       .reduce((total, entry) => total + Math.abs(entry.points ?? 0), 0);
-  }, [ledger, referenceTime]);
+  }, [productionDashboard.ledger, referenceTime]);
 
   const orgInquiryCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const request of requests) {
+    for (const request of productionDashboard.requests) {
       const key =
         request.cooperativeName ??
         request.cooperativeDisplay ??
@@ -1138,7 +1511,7 @@ export function AdminDashboard({
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 6);
-  }, [requests, copy]);
+  }, [productionDashboard.requests, copy]);
 
   const organizationsByUpdatedAt = useMemo(
     () =>
@@ -1231,12 +1604,12 @@ export function AdminDashboard({
 
   const recentActivity = useMemo(
     () =>
-      auditLogs.slice(0, 12).map((log) => ({
+      productionDashboard.auditLogs.slice(0, 12).map((log) => ({
         id: log.id,
         time: log.createdAt,
         ...formatAuditLog(log),
       })),
-    [auditLogs, formatAuditLog],
+    [productionDashboard.auditLogs, formatAuditLog],
   );
 
   const activeRequest = useMemo(
@@ -1504,20 +1877,14 @@ export function AdminDashboard({
     setMemberActionReason,
   ]);
 
-  const submitOperatorEditor = useCallback(
-    async (payload: {
-      name: string;
-      email: string;
-      password?: string;
-      position: string;
-      duty: string;
-      status: UserRecord["status"];
-    }) => {
+  const saveOperatorMutation = useCallback(
+    async (payload: OperatorMutationPayload) => {
       if (!operatorEditor || previewMode) return;
       const user = getFirebaseAuth().currentUser;
       if (!user) return;
       setActionMessage(null);
       setOperatorActionLoading(true);
+      let serverError = "";
       try {
         const idToken = await user.getIdToken();
         const isCreate = operatorEditor.mode === "create";
@@ -1538,9 +1905,11 @@ export function AdminDashboard({
           | { ok?: boolean; error?: string; operator?: UserRecord }
           | null;
         if (!res.ok || !data?.ok) {
-          throw new Error(copy.message("operatorSaveFailed"));
+          serverError = data?.error ?? "operator_save_failed";
+          throw new Error("operator_save_failed");
         }
         setOperatorEditor(null);
+        setOperatorConfirmation(null);
         setActionMessage({
           tone: "success",
           text: isCreate
@@ -1548,11 +1917,18 @@ export function AdminDashboard({
             : copy.message("operatorUpdated"),
         });
         await refreshDashboard();
+        setOperatorRefreshKey((current) => current + 1);
         if (data.operator?.uid) setSelectedOperatorUid(data.operator.uid);
       } catch {
+        const errorText = copy.message(
+          operatorServerErrorCopyKey(serverError),
+        );
+        setOperatorEditor((current) =>
+          current ? { ...current, serverError: errorText } : current,
+        );
         setActionMessage({
           tone: "error",
-          text: copy.message("operatorSaveFailed"),
+          text: errorText,
         });
       } finally {
         setOperatorActionLoading(false);
@@ -1565,9 +1941,47 @@ export function AdminDashboard({
       copy,
       setActionMessage,
       setOperatorActionLoading,
+      setOperatorConfirmation,
       setOperatorEditor,
+      setOperatorRefreshKey,
       setSelectedOperatorUid,
     ],
+  );
+
+  const submitOperatorEditor = useCallback(
+    (payload: OperatorMutationPayload) => {
+      if (
+        operatorEditor?.mode === "edit" &&
+        operatorEditor.operator
+      ) {
+        const changes = dangerousOperatorChanges(
+          operatorEditor.operator,
+          {
+            adminRole:
+              payload.adminRole ??
+              getAdminRole(operatorEditor.operator),
+            status:
+              payload.status ?? operatorEditor.operator.status,
+          },
+        );
+        const warningKeys = [
+          changes.superAdminRoleChange && "operatorConfirmSuperAdminChange",
+          changes.roleDemotion && "operatorConfirmRoleDemotion",
+          changes.deactivation && "operatorConfirmDeactivation",
+        ].filter(Boolean) as string[];
+        if (warningKeys.length > 0) {
+          setOperatorConfirmation({
+            kind: "update",
+            operator: operatorEditor.operator,
+            payload,
+            warningKeys,
+          });
+          return;
+        }
+      }
+      void saveOperatorMutation(payload);
+    },
+    [operatorEditor, saveOperatorMutation, setOperatorConfirmation],
   );
 
   const changeOperatorPermission = useCallback(
@@ -1601,6 +2015,7 @@ export function AdminDashboard({
         });
         setOperatorConfirmation(null);
         await refreshDashboard();
+        setOperatorRefreshKey((current) => current + 1);
       } catch {
         setActionMessage({
           tone: "error",
@@ -1617,6 +2032,7 @@ export function AdminDashboard({
       setActionMessage,
       setOperatorActionLoading,
       setOperatorConfirmation,
+      setOperatorRefreshKey,
     ],
   );
 
@@ -1656,6 +2072,7 @@ export function AdminDashboard({
         });
         setOperatorConfirmation(null);
         await refreshDashboard();
+        setOperatorRefreshKey((current) => current + 1);
       } catch {
         setActionMessage({
           tone: "error",
@@ -1672,6 +2089,7 @@ export function AdminDashboard({
       setActionMessage,
       setOperatorActionLoading,
       setOperatorConfirmation,
+      setOperatorRefreshKey,
     ],
   );
 
@@ -1700,6 +2118,7 @@ export function AdminDashboard({
         });
         setOperatorConfirmation(null);
         await refreshDashboard();
+        setOperatorRefreshKey((current) => current + 1);
       } catch {
         setActionMessage({
           tone: "error",
@@ -1716,7 +2135,101 @@ export function AdminDashboard({
       setActionMessage,
       setOperatorActionLoading,
       setOperatorConfirmation,
+      setOperatorRefreshKey,
       setSelectedOperatorUid,
+    ],
+  );
+
+  const assignPartnerToRequest = useCallback(
+    async (requestId: string, partnerId: string) => {
+      if (previewMode) return;
+      const user = getFirebaseAuth().currentUser;
+      if (!user) return;
+      setPartnerActionLoading(true);
+      try {
+        const idToken = await user.getIdToken();
+        const res = await fetch(
+          `/api/admin/requests/${requestId}/partner-assignment`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${idToken}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ partnerId }),
+          },
+        );
+        const data = (await res.json().catch(() => null)) as
+          | { ok?: boolean }
+          | null;
+        if (!res.ok || !data?.ok) throw new Error("partner_assign_failed");
+        setActionMessage({
+          tone: "success",
+          text: copy.section("partners").text("partnerAssigned"),
+        });
+        await refreshDashboard();
+      } catch {
+        setActionMessage({
+          tone: "error",
+          text: copy.section("partners").text("partnerAssignFailed"),
+        });
+      } finally {
+        setPartnerActionLoading(false);
+      }
+    },
+    [copy, previewMode, refreshDashboard, setActionMessage],
+  );
+
+  const actOnPartnerDraft = useCallback(
+    async (
+      draft: PartnerAnswerDraftRecord,
+      action: "approve" | "request_revision",
+    ) => {
+      if (previewMode) return;
+      const user = getFirebaseAuth().currentUser;
+      if (!user) return;
+      setPartnerActionLoading(true);
+      try {
+        const idToken = await user.getIdToken();
+        const res = await fetch(`/api/admin/partner-drafts/${draft.id}`, {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${idToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            action,
+            revisionNote: partnerRevisionNote,
+          }),
+        });
+        const data = (await res.json().catch(() => null)) as
+          | { ok?: boolean }
+          | null;
+        if (!res.ok || !data?.ok) throw new Error("partner_draft_failed");
+        setPartnerRevisionNote("");
+        setActionMessage({
+          tone: "success",
+          text:
+            action === "approve"
+              ? copy.section("partners").text("draftApproved")
+              : copy.section("partners").text("draftRevisionRequested"),
+        });
+        await refreshDashboard();
+      } catch {
+        setActionMessage({
+          tone: "error",
+          text: copy.section("partners").text("draftActionFailed"),
+        });
+      } finally {
+        setPartnerActionLoading(false);
+      }
+    },
+    [
+      copy,
+      partnerRevisionNote,
+      previewMode,
+      refreshDashboard,
+      setActionMessage,
     ],
   );
 
@@ -1742,7 +2255,9 @@ export function AdminDashboard({
           <button
             className="admin-btn admin-btn--primary"
             type="button"
-            onClick={() => signOut(getFirebaseAuth()).then(() => router.push("/login"))}
+            onClick={() =>
+              logoutPortalSession().then(() => router.push("/admin/login"))
+            }
           >
             {copy.message("loginAgain")}
           </button>
@@ -1793,6 +2308,20 @@ export function AdminDashboard({
               <span className="admin-nav__desc">{item.description}</span>
             </button>
           ))}
+          {canManageTestData ? (
+            <button
+              type="button"
+              className="admin-nav__item"
+              onClick={() => router.push("/admin/test-data")}
+            >
+              <span className="admin-nav__label">
+                {copy.section("testDataManagement").text("menuTitle")}
+              </span>
+              <span className="admin-nav__desc">
+                {copy.section("testDataManagement").text("menuDescription")}
+              </span>
+            </button>
+          ) : null}
         </nav>
 
         <div className="admin-sidebar__footer">
@@ -1815,7 +2344,9 @@ export function AdminDashboard({
           <button
             className="admin-btn admin-btn--ghost admin-btn--block"
             type="button"
-            onClick={() => signOut(getFirebaseAuth()).then(() => router.push("/login"))}
+            onClick={() =>
+              logoutPortalSession().then(() => router.push("/admin/login"))
+            }
           >
             {copy.section("navigation").text("logout")}
           </button>
@@ -1868,10 +2399,16 @@ export function AdminDashboard({
 
         {tab === "overview" && (
           <div className="admin-grid">
+            <div
+              className="admin-toast admin-toast--info admin-card--span-3"
+              role="status"
+            >
+              {copy.section("overview").text("productionDataNotice")}
+            </div>
             <div className="admin-kpi-grid">
               <KpiCard
                 label={copy.section("overview").text("memberKpi")}
-                value={memberUsers.length.toLocaleString()}
+                value={productionDashboard.users.length.toLocaleString()}
                 suffix={copy.section("overview").text("peopleUnit")}
                 delta={memberDelta}
                 series={signupsSeries.map((point) => point.value)}
@@ -1879,7 +2416,7 @@ export function AdminDashboard({
               />
               <KpiCard
                 label={copy.section("overview").text("requestKpi")}
-                value={requests.length.toLocaleString()}
+                value={productionDashboard.requests.length.toLocaleString()}
                 suffix={copy.section("overview").text("countUnit")}
                 delta={requestDelta}
                 series={inquiriesSeries.map((point) => point.value)}
@@ -1887,7 +2424,7 @@ export function AdminDashboard({
               />
               <KpiCard
                 label={copy.section("overview").text("answerKpi")}
-                value={answers.length.toLocaleString()}
+                value={productionDashboard.answers.length.toLocaleString()}
                 suffix={copy.section("overview").text("countUnit")}
                 delta={answerDelta}
                 series={answersSeries.map((point) => point.value)}
@@ -1895,10 +2432,10 @@ export function AdminDashboard({
               />
               <KpiCard
                 label={copy.section("overview").text("ratingKpi")}
-                value={ratings.length ? ratingScoreAvg.toFixed(2) : "-"}
-                suffix={ratings.length ? "/5.0" : ""}
+                value={productionDashboard.ratings.length ? ratingScoreAvg.toFixed(2) : "-"}
+                suffix={productionDashboard.ratings.length ? "/5.0" : ""}
                 delta={ratingDelta}
-                helper={`${copy.section("overview").text("helpfulPrefix")} ${(helpfulRate * 100).toFixed(0)}% · ${ratings.length}${copy.section("overview").text("countUnit")}`}
+                helper={`${copy.section("overview").text("helpfulPrefix")} ${(helpfulRate * 100).toFixed(0)}% · ${productionDashboard.ratings.length}${copy.section("overview").text("countUnit")}`}
                 tone="violet"
               />
             </div>
@@ -1940,7 +2477,7 @@ export function AdminDashboard({
                   <span>{copy.section("overview").text("answerRate")}</span>
                   <strong>{(answerRate * 100).toFixed(1)}%</strong>
                   <em>
-                    {answeredCount}/{requests.length}{" "}
+                    {answeredCount}/{productionDashboard.requests.length}{" "}
                     {copy.section("overview").text("countUnit")}
                   </em>
                 </li>
@@ -1951,12 +2488,12 @@ export function AdminDashboard({
                 </li>
                 <li>
                   <span>{copy.section("overview").text("totalWalletBalance")}</span>
-                  <strong>{formatPoints(totalWalletBalance, copy)}</strong>
-                  <em>{organizations.length}{copy.section("overview").text("organizationTotalSuffix")}</em>
+                  <strong>{formatPoints(dashboardTotalWalletBalance, copy)}</strong>
+                  <em>{productionDashboard.organizations.length}{copy.section("overview").text("organizationTotalSuffix")}</em>
                 </li>
                 <li>
                   <span>{copy.section("overview").text("recentSpend")}</span>
-                  <strong>{formatPoints(pointsSpent30d, copy)}</strong>
+                  <strong>{formatPoints(dashboardPointsSpent30d, copy)}</strong>
                   <em>{copy.section("overview").text("recentSpendHelp")}</em>
                 </li>
               </ul>
@@ -2036,29 +2573,45 @@ export function AdminDashboard({
         {tab === "members" && (
           <>
             <div className="admin-subtabs" role="tablist" aria-label={copy.section("members").text("subtabsAriaLabel")}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={memberSubtab === "members"}
-                className={`admin-subtab${memberSubtab === "members" ? " is-active" : ""}`}
-                onClick={() => setMemberSubtab("members")}
-              >
-                <span>{copy.section("members").item("members")}</span>
-                <em>{copy.section("members").text("memberTabDescription")}</em>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={memberSubtab === "operators"}
-                className={`admin-subtab${memberSubtab === "operators" ? " is-active" : ""}`}
-                onClick={() => setMemberSubtab("operators")}
-              >
-                <span>{copy.section("members").item("operators")}</span>
-                <em>{copy.section("members").text("operatorTabDescription")}</em>
-              </button>
+              {canReadMembers && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={memberSubtab === "members"}
+                  className={`admin-subtab${memberSubtab === "members" ? " is-active" : ""}`}
+                  onClick={() => setMemberSubtab("members")}
+                >
+                  <span>{copy.section("members").item("members")}</span>
+                  <em>{copy.section("members").text("memberTabDescription")}</em>
+                </button>
+              )}
+              {canReadCooperatives && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={memberSubtab === "cooperatives"}
+                  className={`admin-subtab${memberSubtab === "cooperatives" ? " is-active" : ""}`}
+                  onClick={() => setMemberSubtab("cooperatives")}
+                >
+                  <span>{copy.section("members").item("cooperatives")}</span>
+                  <em>{copy.section("members").text("cooperativeMasterTabDescription")}</em>
+                </button>
+              )}
+              {canReadOperators && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={memberSubtab === "operators"}
+                  className={`admin-subtab${memberSubtab === "operators" ? " is-active" : ""}`}
+                  onClick={() => setMemberSubtab("operators")}
+                >
+                  <span>{copy.section("members").item("operators")}</span>
+                  <em>{copy.section("members").text("operatorTabDescription")}</em>
+                </button>
+              )}
             </div>
 
-            {memberSubtab === "members" && (
+            {memberSubtab === "members" && canReadMembers && (
               <div className="admin-grid admin-grid--members">
                 <div className="admin-card admin-card--span-2">
                   <header className="admin-card__head">
@@ -2169,48 +2722,174 @@ export function AdminDashboard({
                   auditLogs={selectedMemberAudits}
                   formatAuditLog={formatAuditLog}
                   onAction={requestMemberAction}
+                  canChangeCooperative={canWriteMembers}
+                  onChangeCooperative={setMemberCooperativeEditor}
                 />
               </div>
             )}
 
-            {memberSubtab === "operators" && (
+            {memberSubtab === "cooperatives" && canReadCooperatives && (
+              <CooperativeMasterPanel
+                copy={copy}
+                canWrite={canWriteCooperatives}
+              />
+            )}
+
+            {memberSubtab === "operators" && canReadOperators && (
               <div className="admin-grid admin-grid--members">
                 <div className="admin-card admin-card--span-2">
                   <header className="admin-card__head">
                     <div>
                       <h2>{copy.section("members").text("operatorListTitle")}</h2>
-                      <p>{copy.section("inquiries").text("totalPrefix")} {operatorUsers.length.toLocaleString()}{copy.section("members").text("operatorListSuffix")}</p>
+                      <p>{copy.section("inquiries").text("totalPrefix")} {operatorListTotal.toLocaleString()}{copy.section("members").text("operatorListSuffix")}</p>
                     </div>
                     <div className="admin-card__tools">
-                      <input
-                        type="search"
-                        className="admin-search"
-                        placeholder={copy.section("members").text("operatorSearchPlaceholder")}
-                        value={operatorSearch}
-                        onChange={(event) => setOperatorSearch(event.target.value)}
-                      />
                       <button
                         type="button"
-                        className="admin-btn admin-btn--primary"
-                        onClick={() => setOperatorEditor({ mode: "create", operator: null })}
+                        className="admin-btn"
+                        onClick={() =>
+                          setOperatorRefreshKey((current) => current + 1)}
+                        disabled={operatorListLoading}
                       >
-                        {copy.section("members").text("addOperator")}
+                        {operatorListLoading
+                          ? copy.section("navigation").text("refreshing")
+                          : copy.section("navigation").text("refresh")}
                       </button>
+                      {canCreateOperators && (
+                        <button
+                          type="button"
+                          className="admin-btn admin-btn--primary"
+                          onClick={() =>
+                            setOperatorEditor({
+                              mode: "create",
+                              operator: null,
+                            })}
+                        >
+                          {copy.section("members").text("addOperator")}
+                        </button>
+                      )}
                     </div>
                   </header>
-                  <div className="admin-table-wrap">
-                    <table className="admin-table">
+                  <div className="admin-operator-filters">
+                    <label>
+                      <span>{copy.section("members").text("operatorSearchLabel")}</span>
+                      <input
+                        type="search"
+                        className="admin-input"
+                        placeholder={copy.section("members").text("operatorSearchPlaceholder")}
+                        value={operatorSearch}
+                        onChange={(event) => {
+                          setOperatorSearch(event.target.value);
+                          setOperatorPage(1);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      <span>{copy.section("members").text("operatorRoleFilterLabel")}</span>
+                      <select
+                        className="admin-input"
+                        value={operatorRoleFilter}
+                        onChange={(event) => {
+                          setOperatorRoleFilter(event.target.value);
+                          setOperatorPage(1);
+                        }}
+                      >
+                        <option value="">{copy.section("members").text("filterAll")}</option>
+                        {ADMIN_ROLES.map((role) => (
+                          <option key={role} value={role}>
+                            {ADMIN_ROLE_LABELS[role]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{copy.section("members").text("operatorStatusFilterLabel")}</span>
+                      <select
+                        className="admin-input"
+                        value={operatorStatusFilter}
+                        onChange={(event) => {
+                          setOperatorStatusFilter(event.target.value);
+                          setOperatorPage(1);
+                        }}
+                      >
+                        <option value="">{copy.section("members").text("filterAll")}</option>
+                        <option value="active">{copy.section("members").text("statusActive")}</option>
+                        <option value="invited">{copy.section("members").text("statusInvited")}</option>
+                        <option value="suspended">{copy.section("members").text("statusSuspended")}</option>
+                        <option value="disabled">{copy.section("members").text("statusDisabled")}</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{copy.section("members").text("operatorPartnerFilterLabel")}</span>
+                      <select
+                        className="admin-input"
+                        value={operatorPartnerFilter}
+                        onChange={(event) => {
+                          setOperatorPartnerFilter(event.target.value);
+                          setOperatorPage(1);
+                        }}
+                      >
+                        <option value="">{copy.section("members").text("filterAll")}</option>
+                        <option value="internal">{copy.section("members").text("internalOperatorAffiliation")}</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{copy.section("members").text("pageSizeLabel")}</span>
+                      <select
+                        className="admin-input"
+                        value={operatorPageSize}
+                        onChange={(event) => {
+                          setOperatorPageSize(Number(event.target.value));
+                          setOperatorPage(1);
+                        }}
+                      >
+                        {OPERATOR_PAGE_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>
+                            {size}{copy.section("members").text("pageSizeSuffix")}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {operatorListError && (
+                    <div className="admin-inline-state admin-inline-state--error" role="alert">
+                      <span>{operatorListError}</span>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--sm"
+                        onClick={() =>
+                          setOperatorRefreshKey((current) => current + 1)}
+                      >
+                        {copy.message("retry")}
+                      </button>
+                    </div>
+                  )}
+                  <div className="admin-table-wrap admin-table-wrap--operators">
+                    <table className="admin-table admin-table--operators">
                       <thead>
                         <tr>
                           <th>{copy.section("members").text("operatorColumn")}</th>
-                          <th>{copy.section("members").text("roleColumn")}</th>
-                          <th>{copy.section("members").text("permissionColumn")}</th>
+                          <th>{copy.section("members").text("positionDutyColumn")}</th>
+                          <th>{copy.section("members").text("adminRoleColumn")}</th>
+                          <th>{copy.section("members").text("affiliationColumn")}</th>
+                          <th>{copy.section("members").text("scopeColumn")}</th>
+                          <th>{copy.section("members").text("statusColumn")}</th>
+                          <th>{copy.section("members").text("lastLoginColumn")}</th>
                           <th>{copy.section("members").text("updatedColumn")}</th>
+                          <th>{copy.section("members").text("manageColumn")}</th>
                         </tr>
                       </thead>
                       <tbody>
+                        {operatorListLoading && (
+                          <tr>
+                            <td colSpan={9} className="admin-empty" aria-live="polite">
+                              {copy.section("members").text("operatorLoading")}
+                            </td>
+                          </tr>
+                        )}
                         {filteredOperators.map((operator) => {
                           const initial = (operator.name ?? operator.email ?? "?").slice(0, 1).toUpperCase();
+                          const status = operatorAccountStatus(operator);
                           return (
                             <tr
                               key={operator.uid}
@@ -2230,9 +2909,9 @@ export function AdminDashboard({
                               <td>
                                 <div className="admin-cell-user">
                                   <span className="admin-avatar" aria-hidden="true">{initial}</span>
-                                  <div>
+                                  <div className="admin-cell-user__text">
                                     <strong>{operator.name || copy.section("members").text("unnamed")}</strong>
-                                    <span>{operator.email}</span>
+                                    <span title={operator.email}>{operator.email}</span>
                                   </div>
                                 </div>
                               </td>
@@ -2241,33 +2920,90 @@ export function AdminDashboard({
                                 <span className="admin-cell-sub">{operator.duty || copy.section("members").text("administratorFallback")}</span>
                               </td>
                               <td>
-                                <span
-                                  className={`admin-pill admin-pill--${getMemberStatusTone(operator.status)}`}
-                                >
-                                  <span className="admin-pill__dot" aria-hidden="true" />
-                                  {operator.status === "active"
-                                    ? copy.section("members").text("permissionGranted")
-                                    : copy.section("members").text("permissionRevoked")}
+                                <span className="admin-chip">
+                                  {ADMIN_ROLE_LABELS[getAdminRole(operator)]}
                                 </span>
                               </td>
+                              <td>{operator.partnerName || copy.section("members").text("internalOperatorAffiliation")}</td>
+                              <td>{operator.scopes.map((scope) => copy.section("members").text(`scope.${scope}`)).join(", ")}</td>
+                              <td>
+                                <span
+                                  className={`admin-pill admin-pill--${getMemberStatusTone(status === "active" ? "active" : "rejected")}`}
+                                >
+                                  <span className="admin-pill__dot" aria-hidden="true" />
+                                  {copy.section("members").text(`status.${status}`)}
+                                </span>
+                              </td>
+                              <td>{operator.lastLoginAt ? formatDate(operator.lastLoginAt) : copy.section("members").text("noLoginRecord")}</td>
                               <td>{formatDate(operator.updatedAt ?? operator.createdAt)}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="admin-btn admin-btn--sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedOperatorUid(operator.uid);
+                                  }}
+                                >
+                                  {copy.section("members").text("viewDetails")}
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
-                        {filteredOperators.length === 0 && (
+                        {!operatorListLoading && filteredOperators.length === 0 && !operatorListError && (
                           <tr>
-                            <td colSpan={4} className="admin-empty">{copy.section("members").text("operatorEmpty")}</td>
+                            <td colSpan={9} className="admin-empty">{copy.section("members").text("operatorEmpty")}</td>
                           </tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+                  <nav
+                    className="admin-pagination"
+                    aria-label={copy.section("members").text("operatorPaginationAriaLabel")}
+                  >
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn--sm"
+                      onClick={() =>
+                        setOperatorPage((current) => Math.max(1, current - 1))}
+                      disabled={operatorPage <= 1 || operatorListLoading}
+                    >
+                      {copy.section("members").text("previousPage")}
+                    </button>
+                    <span>
+                      {operatorPage.toLocaleString()} / {operatorTotalPages.toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn--sm"
+                      onClick={() =>
+                        setOperatorPage((current) =>
+                          Math.min(operatorTotalPages, current + 1))}
+                      disabled={
+                        operatorPage >= operatorTotalPages ||
+                        operatorListLoading
+                      }
+                    >
+                      {copy.section("members").text("nextPage")}
+                    </button>
+                  </nav>
                 </div>
                 <OperatorDetailPanel
                   operator={selectedOperator}
                   auditLogs={selectedOperatorAudits}
                   formatAuditLog={formatAuditLog}
                   isProtected={selectedOperatorIsProtected}
+                  isLastSuperAdmin={selectedOperatorIsLastSuperAdmin}
+                  actorCanReachTarget={
+                    selectedOperatorProtection?.actorCanReachTarget ?? false
+                  }
+                  canUpdate={canUpdateOperators}
+                  canDisable={canDisableOperators}
+                  canDelete={canDeleteOperators}
+                  canManageRoles={canManageOperatorRoles}
+                  canResetPassword={canResetOperatorPasswords}
                   loading={operatorActionLoading}
                   onEdit={(operator) => setOperatorEditor({ mode: "edit", operator })}
                   onChangePermission={(operator, status) =>
@@ -2287,6 +3023,25 @@ export function AdminDashboard({
               </div>
             )}
           </>
+        )}
+
+        {tab === "partners" && (
+          <PartnerManagementApiPanel
+            copy={copy}
+            adminContext={adminContext}
+            auditLogs={auditLogs}
+            previewMode={previewMode}
+            previewPartners={partners}
+            assignments={partnerAssignments}
+            drafts={partnerAnswerDrafts}
+            requests={requests}
+            workflowLoading={partnerActionLoading}
+            revisionNote={partnerRevisionNote}
+            refreshVersion={String(referenceTime)}
+            onRevisionNoteChange={setPartnerRevisionNote}
+            onAssignPartner={assignPartnerToRequest}
+            onDraftAction={actOnPartnerDraft}
+          />
         )}
 
         {tab === "inquiries" && (
@@ -2747,6 +3502,14 @@ export function AdminDashboard({
           />
         )}
 
+        {auditEvaluationAdminEnabled && tab === "auditEvaluations" && (
+          <AdminAuditEvaluationPanel
+            onMessage={setActionMessage}
+            content={content}
+            previewMode={previewMode}
+          />
+        )}
+
         {tab === "points" && (
           <div className="admin-grid admin-grid--points">
             <div className="admin-card admin-points-list">
@@ -3150,15 +3913,44 @@ export function AdminDashboard({
         />
       )}
 
+      {memberCooperativeEditor && (
+        <MemberCooperativeEditorModal
+          user={memberCooperativeEditor}
+          onClose={() => setMemberCooperativeEditor(null)}
+          onChanged={async (unchanged) => {
+            setMemberCooperativeEditor(null);
+            setActionMessage({
+              tone: unchanged ? "info" : "success",
+              text: copy
+                .section("members")
+                .text(
+                  unchanged
+                    ? "cooperativeChangeUnchanged"
+                    : "cooperativeChangeSuccess",
+                ),
+            });
+            await refreshDashboard();
+          }}
+        />
+      )}
+
       {operatorEditor && (
         <OperatorEditorModal
           mode={operatorEditor.mode}
           operator={operatorEditor.operator}
           loading={operatorActionLoading}
+          suspended={operatorConfirmation?.kind === "update"}
+          serverError={operatorEditor.serverError}
+          actorUid={currentUser?.uid}
+          actorRole={adminContext?.adminRole}
+          activeSuperAdminCount={activeSuperAdminCount}
+          canUpdate={canUpdateOperators}
+          canManageRoles={canManageOperatorRoles}
+          canDisable={canDisableOperators}
           onClose={() => {
             if (!operatorActionLoading) setOperatorEditor(null);
           }}
-          onSubmit={(payload) => void submitOperatorEditor(payload)}
+          onSubmit={submitOperatorEditor}
         />
       )}
 
@@ -3201,6 +3993,9 @@ export function AdminDashboard({
             void resetOperatorPassword(operator, password)
           }
           onDeleteConfirm={(operator) => void deleteOperator(operator)}
+          onUpdateConfirm={(payload) =>
+            void saveOperatorMutation(payload)
+          }
         />
       )}
     </div>
@@ -3595,6 +4390,230 @@ function MemberActionModal({
   );
 }
 
+function MemberCooperativeEditorModal({
+  user,
+  onClose,
+  onChanged,
+}: {
+  user: UserRecord;
+  onClose: () => void;
+  onChanged: (unchanged: boolean) => Promise<void>;
+}) {
+  const copy = useAdminOperationsCopy();
+  const members = copy.section("members");
+  const dialogs = copy.section("dialogs");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<CooperativeSearchItem[]>([]);
+  const [selected, setSelected] = useState<CooperativeSearchItem | null>(null);
+  const [reason, setReason] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (!normalized) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const response = await fetch(
+          `/api/cooperatives/search?q=${encodeURIComponent(normalized)}`,
+          { signal: controller.signal },
+        );
+        const payload = (await response.json().catch(() => null)) as
+          | { ok?: boolean; results?: CooperativeSearchItem[] }
+          | null;
+        setResults(
+          response.ok && payload?.ok && Array.isArray(payload.results)
+            ? payload.results
+            : [],
+        );
+      } catch (searchError) {
+        if (
+          !(searchError instanceof DOMException) ||
+          searchError.name !== "AbortError"
+        ) {
+          setResults([]);
+        }
+      } finally {
+        setSearching(false);
+      }
+    }, 150);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  const submit = async () => {
+    if (!selected || reason.trim().length < 2 || saving) return;
+    const currentUser = getFirebaseAuth().currentUser;
+    if (!currentUser) {
+      setError(members.text("cooperativeChangeFailed"));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(
+        `/api/admin/users/${user.uid}/cooperative`,
+        {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${idToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            cooperativeId: selected.cooperative_id,
+            reason: reason.trim(),
+          }),
+        },
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; unchanged?: boolean }
+        | null;
+      if (!response.ok || !payload?.ok) {
+        setError(members.text("cooperativeChangeFailed"));
+        return;
+      }
+      await onChanged(payload.unchanged === true);
+    } catch {
+      setError(members.text("cooperativeChangeFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="admin-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={members.text("cooperativeEditorAriaLabel")}
+    >
+      <button
+        type="button"
+        className="admin-modal__backdrop"
+        aria-label={dialogs.text("close")}
+        onClick={onClose}
+        disabled={saving}
+      />
+      <div className="admin-modal__panel admin-modal__panel--sm">
+        <header className="admin-modal__head">
+          <div>
+            <p className="admin-modal__eyebrow">
+              {members.text("cooperativeEditorEyebrow")}
+            </p>
+            <h2>{members.text("cooperativeEditorTitle")}</h2>
+          </div>
+        </header>
+        <div className="admin-modal__body">
+          <p className="admin-modal__lede">
+            {members.text("cooperativeEditorDescription")}
+          </p>
+          <section className="admin-modal__quote">
+            <h3>{members.text("currentCooperativeLabel")}</h3>
+            <p>
+              <strong>
+                {user.cooperativeName ??
+                  user.manualCooperativeName ??
+                  members.text("unspecified")}
+              </strong>
+              {user.cooperativeId ? (
+                <span className="admin-cell-sub"> · {user.cooperativeId}</span>
+              ) : null}
+            </p>
+          </section>
+          <label className="admin-modal__field">
+            <span>{members.text("newCooperativeSearchLabel")}</span>
+            <input
+              className="admin-input"
+              type="search"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSelected(null);
+              }}
+              placeholder={members.text("newCooperativeSearchPlaceholder")}
+              disabled={saving}
+            />
+          </label>
+          {searching ? (
+            <p className="admin-cell-sub">
+              {members.text("cooperativeSearchLoading")}
+            </p>
+          ) : null}
+          {!searching && query.trim() && results.length === 0 ? (
+            <p className="admin-cell-sub">
+              {members.text("cooperativeSearchEmpty")}
+            </p>
+          ) : null}
+          {results.length > 0 ? (
+            <ul className="admin-mini-feed">
+              {results.map((cooperative) => (
+                <li key={cooperative.cooperative_id}>
+                  <button
+                    type="button"
+                    className={`admin-btn${
+                      selected?.cooperative_id === cooperative.cooperative_id
+                        ? " admin-btn--primary"
+                        : ""
+                    }`}
+                    onClick={() => setSelected(cooperative)}
+                    disabled={saving}
+                  >
+                    {cooperative.cooperative_name}
+                  </button>
+                  <span>{cooperative.cooperative_id}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <label className="admin-modal__field">
+            <span>{members.text("cooperativeChangeReasonLabel")}</span>
+            <textarea
+              className="admin-input admin-input--area"
+              rows={3}
+              maxLength={300}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder={members.text("cooperativeChangeReasonPlaceholder")}
+              disabled={saving}
+            />
+          </label>
+          {error ? (
+            <p className="admin-modal__warning" role="alert">{error}</p>
+          ) : null}
+          <div className="admin-modal__actions">
+            <button
+              type="button"
+              className="admin-btn admin-btn--ghost"
+              onClick={onClose}
+              disabled={saving}
+            >
+              {members.text("cooperativeChangeCancel")}
+            </button>
+            <button
+              type="button"
+              className="admin-btn admin-btn--primary"
+              onClick={() => void submit()}
+              disabled={!selected || reason.trim().length < 2 || saving}
+            >
+              {saving
+                ? members.text("cooperativeChangeSaving")
+                : members.text("cooperativeChangeConfirm")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function KpiCard({
   label,
   value,
@@ -3767,6 +4786,13 @@ function OperatorDetailPanel({
   auditLogs,
   formatAuditLog,
   isProtected,
+  isLastSuperAdmin,
+  actorCanReachTarget,
+  canUpdate,
+  canDisable,
+  canDelete,
+  canManageRoles,
+  canResetPassword,
   loading,
   onEdit,
   onChangePermission,
@@ -3777,6 +4803,13 @@ function OperatorDetailPanel({
   auditLogs: AuditLogRecord[];
   formatAuditLog: (log: AuditLogRecord) => ReturnType<typeof describeAuditLog>;
   isProtected: boolean;
+  isLastSuperAdmin: boolean;
+  actorCanReachTarget: boolean;
+  canUpdate: boolean;
+  canDisable: boolean;
+  canDelete: boolean;
+  canManageRoles: boolean;
+  canResetPassword: boolean;
   loading: boolean;
   onEdit: (operator: UserRecord) => void;
   onChangePermission: (operator: UserRecord, status: UserRecord["status"]) => void;
@@ -3798,7 +4831,16 @@ function OperatorDetailPanel({
     );
   }
 
-  const isActive = operator.status === "active";
+  const status = operatorAccountStatus(operator);
+  const isActive = status === "active";
+  const targetBlocked = !actorCanReachTarget && !isProtected;
+  const protectionMessage = isProtected
+    ? members.text("operatorSelfProtectionDescription")
+    : isLastSuperAdmin
+      ? members.text("operatorLastSuperAdminDescription")
+      : targetBlocked
+        ? members.text("operatorHigherRoleDescription")
+        : "";
 
   return (
     <aside className="admin-card admin-member-detail">
@@ -3814,9 +4856,7 @@ function OperatorDetailPanel({
           className={`admin-pill admin-pill--${getMemberStatusTone(operator.status)}`}
         >
           <span className="admin-pill__dot" aria-hidden="true" />
-          {isActive
-            ? members.text("permissionGranted")
-            : members.text("permissionRevoked")}
+          {members.text(`status.${status}`)}
         </span>
       </header>
 
@@ -3840,6 +4880,26 @@ function OperatorDetailPanel({
             <dd>{operator.duty || members.text("administratorFallback")}</dd>
           </div>
           <div>
+            <dt>{members.text("adminRoleColumn")}</dt>
+            <dd>{ADMIN_ROLE_LABELS[getAdminRole(operator)]}</dd>
+          </div>
+          <div>
+            <dt>{members.text("affiliationColumn")}</dt>
+            <dd>{members.text("internalOperatorAffiliation")}</dd>
+          </div>
+          <div>
+            <dt>{members.text("scopeColumn")}</dt>
+            <dd>{members.text("scope.ALL")}</dd>
+          </div>
+          <div>
+            <dt>{members.text("lastLoginColumn")}</dt>
+            <dd>
+              {"lastLoginAt" in operator && typeof operator.lastLoginAt === "string"
+                ? formatDate(operator.lastLoginAt)
+                : members.text("noLoginRecord")}
+            </dd>
+          </div>
+          <div>
             <dt>{members.text("createdAtLabel")}</dt>
             <dd>{formatDate(operator.createdAt)}</dd>
           </div>
@@ -3854,45 +4914,60 @@ function OperatorDetailPanel({
         <h3>{members.text("operatorActionsTitle")}</h3>
         <p className="admin-cell-sub">
           {members.text("operatorActionsDescription")}
-          {isProtected
-            ? ` ${members.text("protectedOperatorDescription")}`
-            : ""}
+          {protectionMessage ? ` ${protectionMessage}` : ""}
         </p>
         <div className="admin-operator-actions">
-          <button
-            type="button"
-            className="admin-btn admin-btn--primary"
-            onClick={() => onEdit(operator)}
-            disabled={loading}
-          >
-            {members.text("editOperator")}
-          </button>
-          <button
-            type="button"
-            className="admin-btn"
-            onClick={() => onResetPassword(operator)}
-            disabled={loading}
-          >
-            {members.text("resetPassword")}
-          </button>
-          <button
-            type="button"
-            className={isActive ? "admin-btn admin-btn--danger" : "admin-btn"}
-            onClick={() => onChangePermission(operator, isActive ? "rejected" : "active")}
-            disabled={loading || (isActive && isProtected)}
-          >
-            {isActive
-              ? members.text("permissionRevoked")
-              : members.text("permissionGranted")}
-          </button>
-          <button
-            type="button"
-            className="admin-btn admin-btn--danger"
-            onClick={() => onDelete(operator)}
-            disabled={loading || isProtected}
-          >
-            {members.text("deleteAccount")}
-          </button>
+          {(canUpdate || canManageRoles) && (
+            <button
+              type="button"
+              className="admin-btn admin-btn--primary"
+              onClick={() => onEdit(operator)}
+              disabled={loading || targetBlocked}
+            >
+              {members.text("editOperator")}
+            </button>
+          )}
+          {canResetPassword && (
+            <button
+              type="button"
+              className="admin-btn"
+              onClick={() => onResetPassword(operator)}
+              disabled={loading || targetBlocked}
+            >
+              {members.text("resetPassword")}
+            </button>
+          )}
+          {canDisable && (
+            <button
+              type="button"
+              className={isActive ? "admin-btn admin-btn--danger" : "admin-btn"}
+              onClick={() => onChangePermission(operator, isActive ? "rejected" : "active")}
+              disabled={
+                loading ||
+                targetBlocked ||
+                (isActive && (isProtected || isLastSuperAdmin))
+              }
+            >
+              {isActive
+                ? members.text("deactivateOperator")
+                : members.text("activateOperator")}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              className="admin-btn admin-btn--danger"
+              onClick={() => onDelete(operator)}
+              disabled={
+                loading ||
+                targetBlocked ||
+                isProtected ||
+                isLastSuperAdmin
+              }
+            >
+              {members.text("deleteAccount")}
+            </button>
+          )}
         </div>
       </section>
 
@@ -3921,78 +4996,202 @@ function OperatorEditorModal({
   mode,
   operator,
   loading,
+  suspended,
+  serverError,
+  actorUid,
+  actorRole,
+  activeSuperAdminCount,
+  canUpdate,
+  canManageRoles,
+  canDisable,
   onClose,
   onSubmit,
 }: {
   mode: "create" | "edit";
   operator: UserRecord | null;
   loading: boolean;
+  suspended: boolean;
+  serverError?: string;
+  actorUid?: string;
+  actorRole?: AdminRole;
+  activeSuperAdminCount: number;
+  canUpdate: boolean;
+  canManageRoles: boolean;
+  canDisable: boolean;
   onClose: () => void;
-  onSubmit: (payload: {
-    name: string;
-    email: string;
-    password?: string;
-    position: string;
-    duty: string;
-    status: UserRecord["status"];
-  }) => void;
+  onSubmit: (payload: OperatorMutationPayload) => void;
 }) {
   const copy = useAdminOperationsCopy();
   const members = copy.section("members");
   const dialogs = copy.section("dialogs");
+  const isCreate = mode === "create";
+  const assignableRoles = getAssignableAdminRoles(actorRole);
+  const currentRole = operator?.adminRole ?? "super_admin";
+  const roleOptions = Array.from(
+    new Set<AdminRole>([
+      ...(!isCreate ? [currentRole] : []),
+      ...assignableRoles,
+    ]),
+  );
   const [name, setName] = useState(operator?.name ?? "");
   const [email, setEmail] = useState(operator?.email ?? "");
-  const [position, setPosition] = useState(operator?.position || "운영자");
-  const [duty, setDuty] = useState(operator?.duty || "관리자");
+  const [position, setPosition] = useState(
+    operator?.position || members.text("operatorPositionDefault"),
+  );
+  const [duty, setDuty] = useState(
+    operator?.duty || members.text("operatorDutyDefault"),
+  );
   const [status, setStatus] = useState<UserRecord["status"]>(
     operator?.status === "rejected" ? "rejected" : "active",
   );
+  const [adminRole, setAdminRole] = useState<AdminRole>(
+    operator?.adminRole ?? assignableRoles[0] ?? "operations_manager",
+  );
+  const [adminCapabilityAllow, setAdminCapabilityAllow] = useState<
+    AdminCapability[]
+  >(operator?.adminCapabilityAllow ?? []);
+  const [adminCapabilityDeny, setAdminCapabilityDeny] = useState<
+    AdminCapability[]
+  >(operator?.adminCapabilityDeny ?? []);
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const isCreate = mode === "create";
+  const [fieldErrors, setFieldErrors] = useState<OperatorFormErrors>({});
+  const panelRef = useModalFocus<HTMLFormElement>(
+    onClose,
+    loading || suspended,
+  );
+  const protection = operator
+    ? operatorProtection({
+        operator,
+        actorUid,
+        actorRole,
+        activeSuperAdminCount,
+      })
+    : null;
+  const sensitiveChangeBlocked = Boolean(
+    !isCreate && protection?.blocksSensitiveChange,
+  );
+  const canEditProfile = isCreate || canUpdate;
+  const canEditRole =
+    roleOptions.length > 0 &&
+    (isCreate || (canManageRoles && !sensitiveChangeBlocked));
+  const canEditStatus =
+    isCreate || (canDisable && !sensitiveChangeBlocked);
+  const canEditOverrides =
+    canManageRoles && (isCreate || !sensitiveChangeBlocked);
 
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+  const permissionLabel = (permission: AdminPermission) => {
+    const keys = permissionCopyKeys(permission);
+    return `${members.text(keys.resource)} · ${members.text(keys.action)}`;
+  };
+
+  const fieldErrorText = (
+    field: keyof OperatorFormErrors,
+    code: string | undefined,
+  ) => {
+    if (!code) return "";
+    if (field === "email" && code === "invalid") {
+      return members.text("operatorEmailInvalidError");
+    }
+    if (field === "password") {
+      return members.text("operatorPasswordPolicyError");
+    }
+    if (field === "adminRole") {
+      return members.text("operatorRoleError");
+    }
+    return members.text("operatorFieldRequiredError");
+  };
+
+  const toggleCapability = (
+    capability: AdminCapability,
+    kind: "allow" | "deny",
+  ) => {
+    const setter =
+      kind === "allow" ? setAdminCapabilityAllow : setAdminCapabilityDeny;
+    const oppositeSetter =
+      kind === "allow" ? setAdminCapabilityDeny : setAdminCapabilityAllow;
+    setter((current) =>
+      current.includes(capability)
+        ? current.filter((item) => item !== capability)
+        : [...current, capability],
+    );
+    oppositeSetter((current) => current.filter((item) => item !== capability));
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
-    if (!trimmedName || !trimmedEmail) {
-      setError(members.text("operatorRequiredError"));
-      return;
-    }
-    if (isCreate && trimmedPassword.length < 8) {
-      setError(members.text("operatorCreatePasswordError"));
-      return;
-    }
-    if (!isCreate && trimmedPassword && trimmedPassword.length < 8) {
-      setError(members.text("operatorEditPasswordError"));
-      return;
-    }
-    setError("");
-    onSubmit({
+    const errors = validateOperatorForm({
+      mode,
       name: trimmedName,
       email: trimmedEmail,
-      password: trimmedPassword || undefined,
-      position: position.trim() || "운영자",
-      duty: duty.trim() || "관리자",
-      status,
+      password: isCreate ? trimmedPassword : undefined,
+      adminRole,
     });
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+    const payload: OperatorMutationPayload = {
+      name: trimmedName,
+      email: trimmedEmail,
+      password: isCreate ? trimmedPassword : undefined,
+      position: position.trim() || members.text("operatorPositionDefault"),
+      duty: duty.trim() || ADMIN_ROLE_LABELS[adminRole],
+    };
+    if (isCreate || adminRole !== currentRole) {
+      payload.adminRole = adminRole;
+    }
+    if (isCreate || status !== operator?.status) {
+      payload.status = status;
+    }
+    const currentAllow = operator?.adminCapabilityAllow ?? [];
+    const currentDeny = operator?.adminCapabilityDeny ?? [];
+    const samePermissions = (
+      left: AdminCapability[],
+      right: AdminCapability[],
+    ) =>
+      [...left].sort().join("|") === [...right].sort().join("|");
+    if (
+      isCreate ||
+      !samePermissions(adminCapabilityAllow, currentAllow)
+    ) {
+      payload.adminCapabilityAllow = adminCapabilityAllow;
+    }
+    if (
+      isCreate ||
+      !samePermissions(adminCapabilityDeny, currentDeny)
+    ) {
+      payload.adminCapabilityDeny = adminCapabilityDeny;
+    }
+    onSubmit(payload);
   };
 
   return (
-    <div className="admin-modal" role="dialog" aria-modal="true" aria-label={members.text("operatorEditorAriaLabel")}>
+    <div
+      className={`admin-modal${suspended ? " is-suspended" : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-hidden={suspended || undefined}
+      aria-labelledby="operator-editor-title"
+    >
       <button
         type="button"
         className="admin-modal__backdrop"
         aria-label={dialogs.text("close")}
         onClick={onClose}
-        disabled={loading}
+        disabled={loading || suspended}
       />
-      <form className="admin-modal__panel admin-modal__panel--sm" onSubmit={submit}>
+      <form
+        ref={panelRef}
+        className="admin-modal__panel admin-modal__panel--operator"
+        onSubmit={submit}
+      >
         <header className="admin-modal__head">
           <div>
             <p className="admin-modal__eyebrow">{members.text("operatorEditorEyebrow")}</p>
-            <h2>
+            <h2 id="operator-editor-title">
               {isCreate
                 ? members.text("operatorEditorCreateTitle")
                 : members.text("operatorEditorEditTitle")}
@@ -4003,84 +5202,230 @@ function OperatorEditorModal({
             className="admin-modal__close"
             aria-label={dialogs.text("close")}
             onClick={onClose}
-            disabled={loading}
+            disabled={loading || suspended}
           >
             ×
           </button>
         </header>
         <div className="admin-modal__body">
-          <label className="admin-modal__field">
-            {members.text("nameLabel")}
-            <input
-              className="auth-field__input"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={loading}
-            />
-          </label>
-          <label className="admin-modal__field">
-            {members.text("emailLabel")}
-            <input
-              className="auth-field__input"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              disabled={loading}
-            />
-          </label>
-          <label className="admin-modal__field">
-            {members.text("roleColumn")}
-            <input
-              className="auth-field__input"
-              value={position}
-              onChange={(event) => setPosition(event.target.value)}
-              disabled={loading}
-            />
-          </label>
-          <label className="admin-modal__field">
-            {members.text("permissionGroupLabel")}
-            <input
-              className="auth-field__input"
-              value={duty}
-              onChange={(event) => setDuty(event.target.value)}
-              disabled={loading}
-            />
-          </label>
-          <label className="admin-modal__field">
-            {members.text("permissionStatusLabel")}
-            <select
-              className="auth-field__input"
-              value={status}
-              onChange={(event) => setStatus(event.target.value as UserRecord["status"])}
-              disabled={loading}
-            >
-              <option value="active">{members.text("permissionGranted")}</option>
-              <option value="rejected">{members.text("permissionRevoked")}</option>
-            </select>
-          </label>
-          <label className="admin-modal__field">
-            {isCreate
-              ? members.text("temporaryPasswordLabel")
-              : members.text("newPasswordLabel")}
-            <input
-              className="auth-field__input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder={
-                isCreate
-                  ? members.text("temporaryPasswordPlaceholder")
-                  : members.text("newPasswordPlaceholder")
-              }
-              disabled={loading}
-            />
-          </label>
-          {error && <p className="admin-form__error">{error}</p>}
+          <div className="admin-operator-form-grid">
+            <label className="admin-modal__field">
+              {members.text("nameLabel")}
+              <input
+                className="admin-input"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={loading || !canEditProfile}
+                aria-invalid={Boolean(fieldErrors.name)}
+                aria-describedby={fieldErrors.name ? "operator-name-error" : undefined}
+                data-autofocus
+              />
+              {fieldErrors.name && (
+                <small id="operator-name-error" className="admin-field-error">
+                  {fieldErrorText("name", fieldErrors.name)}
+                </small>
+              )}
+            </label>
+            <label className="admin-modal__field">
+              {members.text("emailLabel")}
+              <input
+                className="admin-input"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                disabled={loading || !canEditProfile}
+                aria-invalid={Boolean(fieldErrors.email)}
+                aria-describedby={fieldErrors.email ? "operator-email-error" : undefined}
+              />
+              {fieldErrors.email && (
+                <small id="operator-email-error" className="admin-field-error">
+                  {fieldErrorText("email", fieldErrors.email)}
+                </small>
+              )}
+            </label>
+            <label className="admin-modal__field">
+              {members.text("positionLabel")}
+              <input
+                className="admin-input"
+                value={position}
+                onChange={(event) => setPosition(event.target.value)}
+                disabled={loading || !canEditProfile}
+              />
+            </label>
+            <label className="admin-modal__field">
+              {members.text("dutyLabel")}
+              <input
+                className="admin-input"
+                value={duty}
+                onChange={(event) => setDuty(event.target.value)}
+                disabled={loading || !canEditProfile}
+              />
+            </label>
+            <label className="admin-modal__field">
+              {members.text("adminRolePresetLabel")}
+              <select
+                className="admin-input"
+                value={adminRole}
+                onChange={(event) => {
+                  const nextRole = event.target.value as AdminRole;
+                  setAdminRole(nextRole);
+                  setDuty(ADMIN_ROLE_LABELS[nextRole]);
+                }}
+                disabled={loading || !canEditRole}
+                aria-invalid={Boolean(fieldErrors.adminRole)}
+              >
+                {roleOptions.map((role) => (
+                  <option key={role} value={role}>
+                    {ADMIN_ROLE_LABELS[role]}
+                  </option>
+                ))}
+              </select>
+              <small className="admin-form__hint">
+                {members.text(`roleDescription.${adminRole}`)}
+              </small>
+            </label>
+            <label className="admin-modal__field">
+              {members.text("permissionStatusLabel")}
+              <select
+                className="admin-input"
+                value={status}
+                onChange={(event) =>
+                  setStatus(event.target.value as UserRecord["status"])}
+                disabled={loading || !canEditStatus}
+              >
+                <option value="active">{members.text("statusActive")}</option>
+                <option value="rejected">{members.text("statusDisabled")}</option>
+              </select>
+            </label>
+            <label className="admin-modal__field">
+              {members.text("affiliationColumn")}
+              <select className="admin-input" value="internal" disabled>
+                <option value="internal">
+                  {members.text("internalOperatorAffiliation")}
+                </option>
+              </select>
+              <small className="admin-form__hint">
+                {members.text("operatorAffiliationHelp")}
+              </small>
+            </label>
+            <label className="admin-modal__field">
+              {members.text("scopeColumn")}
+              <select className="admin-input" value="ALL" disabled>
+                <option value="ALL">{members.text("scope.ALL")}</option>
+              </select>
+              <small className="admin-form__hint">
+                {members.text("operatorScopeHelp")}
+              </small>
+            </label>
+          </div>
+
+          <section className="admin-role-preview" aria-live="polite">
+            <div>
+              <strong>{members.text("rolePreviewTitle")}</strong>
+              <span>{ADMIN_ROLE_LABELS[adminRole]}</span>
+            </div>
+            <p>{members.text(`roleDescription.${adminRole}`)}</p>
+            <ul>
+              {getRolePermissionPreview(adminRole).map((permission) => (
+                <li key={permission}>{permissionLabel(permission)}</li>
+              ))}
+            </ul>
+          </section>
+
+          {canManageRoles && (
+            <details className="admin-operator-permissions">
+              <summary>{members.text("permissionOverridesTitle")}</summary>
+              <p>{members.text("permissionOverridesDescription")}</p>
+              <div className="admin-permission-list">
+                {MANAGEABLE_ADMIN_PERMISSIONS.map((permission) => (
+                  <div key={permission} className="admin-permission-row">
+                    <span>{permissionLabel(permission)}</span>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={adminCapabilityAllow.includes(permission)}
+                        onChange={() => toggleCapability(permission, "allow")}
+                        disabled={loading || !canEditOverrides}
+                      />
+                      {members.text("permissionAllow")}
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={adminCapabilityDeny.includes(permission)}
+                        onChange={() => toggleCapability(permission, "deny")}
+                        disabled={loading || !canEditOverrides}
+                      />
+                      {members.text("permissionDeny")}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
+          {isCreate && (
+            <section className="admin-operator-invitation">
+              <label className="admin-modal__field">
+                {members.text("invitationMethodLabel")}
+                <select className="admin-input" value="temporary_password" disabled>
+                  <option value="temporary_password">
+                    {members.text("temporaryPasswordMethod")}
+                  </option>
+                </select>
+              </label>
+              <label className="admin-modal__field">
+                {members.text("temporaryPasswordLabel")}
+                <input
+                  className="admin-input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={members.text("temporaryPasswordPlaceholder")}
+                  disabled={loading}
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby="operator-password-help"
+                />
+                <small id="operator-password-help" className="admin-form__hint">
+                  {members.text("passwordPolicyHelp")}
+                </small>
+                {fieldErrors.password && (
+                  <small className="admin-field-error">
+                    {fieldErrorText("password", fieldErrors.password)}
+                  </small>
+                )}
+              </label>
+              <p className="admin-form__hint">
+                {members.text("invitationMethodHelp")}
+              </p>
+            </section>
+          )}
+
+          {sensitiveChangeBlocked && (
+            <p className="admin-modal__warning" role="status">
+              {protection?.self
+                ? members.text("operatorSelfProtectionDescription")
+                : protection?.lastSuperAdmin
+                  ? members.text("operatorLastSuperAdminDescription")
+                  : members.text("operatorHigherRoleDescription")}
+            </p>
+          )}
+          {serverError && (
+            <p className="admin-form__error" role="alert">
+              {serverError}
+            </p>
+          )}
           <div className="admin-modal__actions">
-            <button type="button" className="admin-btn" onClick={onClose} disabled={loading}>
+            <button type="button" className="admin-btn" onClick={onClose} disabled={loading || suspended}>
               {dialogs.text("cancel")}
             </button>
-            <button type="submit" className="admin-btn admin-btn--primary" disabled={loading}>
+            <button
+              type="submit"
+              className="admin-btn admin-btn--primary"
+              disabled={loading || suspended || !canEditProfile}
+            >
               {loading ? dialogs.text("saving") : dialogs.text("save")}
             </button>
           </div>
@@ -4098,6 +5443,8 @@ function MemberDetailPanel({
   auditLogs,
   formatAuditLog,
   onAction,
+  canChangeCooperative,
+  onChangeCooperative,
 }: {
   user: UserRecord | null;
   organization: OrganizationRecord | null;
@@ -4109,6 +5456,8 @@ function MemberDetailPanel({
     uid: string,
     type: "approve" | "reject" | "deactivate" | "reactivate",
   ) => void;
+  canChangeCooperative: boolean;
+  onChangeCooperative: (user: UserRecord) => void;
 }) {
   const copy = useAdminOperationsCopy();
   const members = copy.section("members");
@@ -4297,6 +5646,15 @@ function MemberDetailPanel({
             <dd>{organization ? formatDate(organization.createdAt) : "-"}</dd>
           </div>
         </dl>
+        {canChangeCooperative && user.role === "member" && (
+          <button
+            type="button"
+            className="admin-btn admin-btn--block"
+            onClick={() => onChangeCooperative(user)}
+          >
+            {members.text("changeCooperativeButton")}
+          </button>
+        )}
       </section>
 
       <section className="admin-member-block">
@@ -4895,6 +6253,7 @@ function AdminConfirmationModal({
   onConfirm: () => void;
 }) {
   const dialogCopy = useAdminOperationsCopy().section("dialogs");
+  const panelRef = useModalFocus<HTMLDivElement>(onClose, loading);
   return (
     <div className="admin-modal" role="dialog" aria-modal="true" aria-label={title}>
       <button
@@ -4904,7 +6263,10 @@ function AdminConfirmationModal({
         onClick={onClose}
         disabled={loading}
       />
-      <div className="admin-modal__panel admin-modal__panel--sm">
+      <div
+        ref={panelRef}
+        className="admin-modal__panel admin-modal__panel--sm"
+      >
         <header className="admin-modal__head">
           <h2>{title}</h2>
         </header>
@@ -4921,6 +6283,7 @@ function AdminConfirmationModal({
               className="admin-btn admin-btn--ghost"
               onClick={onClose}
               disabled={loading}
+              data-autofocus
             >
               {dialogCopy.text("cancel")}
             </button>
@@ -4946,12 +6309,9 @@ function OperatorActionConfirmModal({
   onPermissionConfirm,
   onPasswordConfirm,
   onDeleteConfirm,
+  onUpdateConfirm,
 }: {
-  confirmation: {
-    kind: "permission" | "password" | "delete";
-    operator: UserRecord;
-    nextStatus?: UserRecord["status"];
-  };
+  confirmation: OperatorConfirmationState;
   loading: boolean;
   onClose: () => void;
   onPermissionConfirm: (
@@ -4960,6 +6320,7 @@ function OperatorActionConfirmModal({
   ) => void;
   onPasswordConfirm: (operator: UserRecord, password: string) => void;
   onDeleteConfirm: (operator: UserRecord) => void;
+  onUpdateConfirm: (payload: OperatorMutationPayload) => void;
 }) {
   const copy = useAdminOperationsCopy();
   const dialogs = copy.section("dialogs");
@@ -4968,6 +6329,22 @@ function OperatorActionConfirmModal({
   const [validation, setValidation] = useState("");
   const operatorName =
     confirmation.operator.name || confirmation.operator.email;
+
+  if (confirmation.kind === "update" && confirmation.payload) {
+    return (
+      <AdminConfirmationModal
+        title={dialogs.text("operatorUpdateConfirmTitle")}
+        description={`${operatorName} · ${dialogs.text("operatorUpdateConfirmDescription")}`}
+        warning={confirmation.warningKeys
+          ?.map((key) => members.text(key))
+          .join(" ")}
+        confirmLabel={dialogs.text("saveChanges")}
+        loading={loading}
+        onClose={onClose}
+        onConfirm={() => onUpdateConfirm(confirmation.payload!)}
+      />
+    );
+  }
 
   if (confirmation.kind === "password") {
     return (
@@ -5047,8 +6424,8 @@ function OperatorActionConfirmModal({
   const confirmLabel = isDelete
     ? members.text("deleteAccount")
     : nextStatus === "active"
-      ? members.text("permissionGranted")
-      : members.text("permissionRevoked");
+      ? members.text("activateOperator")
+      : members.text("deactivateOperator");
   return (
     <AdminConfirmationModal
       title={

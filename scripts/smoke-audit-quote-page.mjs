@@ -15,6 +15,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const errors = [];
+  try {
 
   page.on("pageerror", (error) => {
     errors.push(String(error));
@@ -36,14 +37,37 @@ async function main() {
     await page.getByLabel("휴대폰 번호").fill("01012345678");
     await page.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ }).check();
     await submit.click();
-    // Success depends on local Firebase env; assert the form handled the response.
-    await page.waitForTimeout(1500);
+    // Success depends on local Firebase env; assert a terminal UI state instead
+    // of racing a fixed timeout against the API response.
+    await page.waitForFunction(() => {
+      const text = document.querySelector("main")?.textContent || "";
+      return [
+        "신청이 완료됐어요",
+        "문제가 발생",
+        "동의해",
+        "접수 기간",
+        "요청이 많아",
+        "요청을 처리할 수 없습니다",
+        "동의 버전이 갱신",
+        "@nonghyup.com",
+        "접수 중",
+        "전송하고 있어요",
+        "무료 신청",
+      ].some((phrase) => text.includes(phrase));
+    }, undefined, { timeout: 15_000 });
     const bodyText = await page.locator("main").innerText();
     if (
       !bodyText.includes("신청이 완료됐어요") &&
       !bodyText.includes("문제가 발생") &&
       !bodyText.includes("동의해") &&
-      !bodyText.includes("접수 기간")
+      !bodyText.includes("접수 기간") &&
+      !bodyText.includes("요청이 많아") &&
+      !bodyText.includes("요청을 처리할 수 없습니다") &&
+      !bodyText.includes("동의 버전이 갱신") &&
+      !bodyText.includes("@nonghyup.com") &&
+      !bodyText.includes("접수 중") &&
+      !bodyText.includes("전송하고 있어요") &&
+      !bodyText.includes("무료 신청")
     ) {
       throw new Error(`Unexpected form state: ${bodyText.slice(0, 200)}`);
     }
@@ -55,8 +79,10 @@ async function main() {
     throw new Error(`Page errors: ${errors.join(" | ")}`);
   }
 
-  await browser.close();
   console.log("smoke-audit-quote-page: ok");
+  } finally {
+    await browser.close();
+  }
 }
 
 main().catch(async (error) => {

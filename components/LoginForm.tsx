@@ -2,78 +2,46 @@
 
 import { FirebaseError } from "firebase/app";
 import {
-  browserLocalPersistence,
-  browserSessionPersistence,
   sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  setPersistence,
 } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { getFirebaseLoginErrorMessage } from "@/lib/auth/login-errors";
+import {
+  loginWithEmailAndPassword,
+  PortalLoginError,
+} from "@/lib/auth/login-client";
+import type { PortalType } from "@/lib/auth/portal";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
   formatKrMobilePhoneInput,
   KR_MOBILE_PHONE_MAX_INPUT_LENGTH,
   normalizeKrMobilePhone,
 } from "@/lib/phone";
+import type { CmsPageKey } from "@/lib/cms/constants";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
 
-function getFirebaseMessage(
-  error: unknown,
-  messages: CmsPageContent["messages"],
-) {
-  if (error instanceof FirebaseError) {
-    switch (error.code) {
-      case "auth/invalid-credential":
-      case "auth/user-not-found":
-      case "auth/wrong-password":
-        return messages.invalidCredentials;
-      case "auth/too-many-requests":
-        return messages.tooManyRequests;
-      case "auth/network-request-failed":
-        return messages.networkError;
-      default:
-        return messages.genericError;
-    }
-  }
-
-  if (error instanceof Error && error.message) {
-    return messages.genericError;
-  }
-
-  return messages.genericError;
-}
-
-async function getMemberStatus() {
-  const user = getFirebaseAuth().currentUser;
-  if (!user) throw new Error("missing_current_user");
-  const idToken = await user.getIdToken();
-  const res = await fetch("/api/me/status", {
-    headers: { authorization: `Bearer ${idToken}` },
-  });
-  const data = (await res.json().catch(() => null)) as {
-    ok?: boolean;
-    status?: string;
-    error?: string;
-  } | null;
-  if (!res.ok || !data?.ok) {
-    throw new Error(data?.error ?? "status_check_failed");
-  }
-  return data.status;
-}
-
 export function LoginForm({
   content,
+  pageKey = "auth.login",
+  expectedPortal = "customer",
+  legacyCrossPortal = true,
+  showEmailLookup = true,
   previewMode = false,
 }: {
   content: CmsPageContent;
+  pageKey?: CmsPageKey;
+  expectedPortal?: PortalType;
+  legacyCrossPortal?: boolean;
+  showEmailLookup?: boolean;
   previewMode?: boolean;
 }) {
   const router = useRouter();
-  const formCopy = getCmsSection(content, "auth.login", "loginForm");
-  const recoveryCopy = getCmsSection(content, "auth.login", "recovery");
+  const formCopy = getCmsSection(content, pageKey, "loginForm");
+  const recoveryCopy = getCmsSection(content, pageKey, "recovery");
   const messages = content.messages;
+  const secondaryAction = formCopy.actions[0];
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [findName, setFindName] = useState("");
@@ -89,6 +57,8 @@ export function LoginForm({
     null
   );
   const [error, setError] = useState("");
+  const [portalRedirect, setPortalRedirect] = useState("");
+  const submittingRef = useRef(false);
   const [recoveryMessage, setRecoveryMessage] = useState<{
     tone: "success" | "error";
     text: string;
@@ -96,45 +66,50 @@ export function LoginForm({
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (previewMode) return;
+    if (previewMode || submittingRef.current) return;
     setError("");
+    setPortalRedirect("");
 
     if (!email.trim()) return setError(messages.emailRequired);
     if (!password) return setError(messages.passwordRequired);
 
+    submittingRef.current = true;
     setStatus("submitting");
     const normalizedEmail = email.trim().toLowerCase();
 
     try {
-      const auth = getFirebaseAuth();
-      await setPersistence(
-        auth,
-        autoLogin ? browserLocalPersistence : browserSessionPersistence
-      );
-
-      const credential = await signInWithEmailAndPassword(
-        auth,
-        normalizedEmail,
+      const result = await loginWithEmailAndPassword({
+        email: normalizedEmail,
         password,
-      );
-      const tokenResult = await credential.user.getIdTokenResult(true);
-      if (tokenResult.claims.admin === true) {
-        router.push("/admin");
-        router.refresh();
+        rememberMe: autoLogin,
+        expectedPortal,
+      });
+      if (!result.ok) {
+        if (legacyCrossPortal) {
+          router.replace(result.redirectPath);
+          router.refresh();
+          return;
+        }
+        setError(messages.portalMismatch);
+        setPortalRedirect(result.redirectPath);
         return;
       }
-
-      const memberStatus = await getMemberStatus();
-      if (memberStatus !== "active") {
-        router.push("/pending-approval");
-        router.refresh();
-        return;
-      }
-      router.push("/mypage");
+      router.replace(result.redirectPath);
       router.refresh();
     } catch (err) {
-      setError(getFirebaseMessage(err, messages));
+      setError(
+        err instanceof PortalLoginError &&
+          err.code === "account_unavailable"
+          ? messages.accountUnavailable
+          : getFirebaseLoginErrorMessage(err, {
+              invalidCredentials: messages.invalidCredentials,
+              tooManyRequests: messages.tooManyRequests,
+              networkError: messages.networkError,
+              genericError: messages.genericError,
+            }),
+      );
     } finally {
+      submittingRef.current = false;
       setStatus("idle");
     }
   };
@@ -265,17 +240,27 @@ export function LoginForm({
           />
           <span>{formCopy.text.autoLoginLabel}</span>
         </label>
-        <a
-          href={formCopy.actions[0]?.href ?? "/signup"}
-          onClick={previewMode ? (event) => event.preventDefault() : undefined}
-        >
-          {formCopy.text.signupLabel}
-        </a>
+        {secondaryAction ? (
+          <a
+            href={secondaryAction.href}
+            onClick={
+              previewMode ? (event) => event.preventDefault() : undefined
+            }
+          >
+            {formCopy.text.signupLabel || secondaryAction.label}
+          </a>
+        ) : null}
       </div>
 
       {error && (
         <p className="login-form__error" role="alert">
           {error}
+          {portalRedirect && (
+            <>
+              {" "}
+              <a href={portalRedirect}>{messages.portalMoveLabel}</a>
+            </>
+          )}
         </p>
       )}
 
@@ -294,16 +279,22 @@ export function LoginForm({
           className="login-recovery__links"
           aria-label={recoveryCopy.text.ariaLabel}
         >
-          <button
-            type="button"
-            onClick={() => {
-              setRecoveryMode((mode) => (mode === "email" ? null : "email"));
-              setRecoveryMessage(null);
-            }}
-          >
-            {recoveryCopy.text.findEmailLabel}
-          </button>
-          <span aria-hidden="true">·</span>
+          {showEmailLookup ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setRecoveryMode((mode) =>
+                    mode === "email" ? null : "email"
+                  );
+                  setRecoveryMessage(null);
+                }}
+              >
+                {recoveryCopy.text.findEmailLabel}
+              </button>
+              <span aria-hidden="true">·</span>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -318,7 +309,7 @@ export function LoginForm({
           </button>
         </div>
 
-        {recoveryMode === "email" && (
+        {showEmailLookup && recoveryMode === "email" && (
           <div className="login-recovery__panel">
             <label>
               <span>{recoveryCopy.text.nameLabel}</span>

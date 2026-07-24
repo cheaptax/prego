@@ -85,6 +85,10 @@ const TEXT_FIELDS: Partial<
       label: "저작권 문구",
       help: "하단 맨 아래 왼쪽에 표시됩니다.",
     },
+    portalLoginNavigationLabel: {
+      label: "제휴사·운영자 로그인 영역 설명",
+      help: "화면 읽기 도구가 하단 보조 로그인 링크를 설명할 때 사용합니다.",
+    },
   },
   support: {
     title: {
@@ -112,6 +116,8 @@ const LINK_NAMES: Record<string, string> = {
   inquiries: "문의게시판 링크",
   about: "센터 소개 링크",
   support: "고객지원 플로팅 버튼",
+  partnerLogin: "제휴사 로그인 링크",
+  operatorLogin: "운영자 로그인 링크",
 };
 
 function Field({

@@ -10,9 +10,15 @@ import {
 } from "@/lib/audit-quote/security";
 import type {
   AuditQuoteErrorBody,
+  AuditQuoteRequestRecord,
   AuditQuoteSuccessBody,
 } from "@/lib/audit-quote/types";
-import { adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import {
+  ensureQuoteRequest,
+  quoteRequestIdFor,
+} from "@/lib/quotes/quote-requests";
+import { provisionTemporaryQuoteMember } from "@/lib/members/temporary-quote-member";
 
 export const runtime = "nodejs";
 
@@ -20,6 +26,8 @@ type Payload = {
   email?: string;
   name?: string;
   phone?: string;
+  targetCooperativeName?: string;
+  fiscalYear?: number;
   privacyConsent?: boolean;
   privacyPolicyVersion?: string;
   marketingConsent?: boolean;
@@ -81,6 +89,8 @@ export async function POST(req: Request) {
         email: body.email ?? "",
         contactName: body.name ?? "",
         phone: body.phone ?? "",
+        targetCooperativeName: body.targetCooperativeName ?? "",
+        fiscalYear: body.fiscalYear ?? Number.NaN,
         privacyConsent: body.privacyConsent === true,
         privacyPolicyVersion: body.privacyPolicyVersion ?? "",
         marketingConsent: body.marketingConsent === true,
@@ -100,6 +110,33 @@ export async function POST(req: Request) {
       return jsonError(result.error, result.status);
     }
 
+    if (result.kind === "success") {
+      const db = adminDb();
+      const quoteSourceSnapshot = await db
+        .collection("auditQuoteRequests")
+        .doc(result.requestId)
+        .get();
+      if (quoteSourceSnapshot.exists) {
+        const source =
+          quoteSourceSnapshot.data() as AuditQuoteRequestRecord;
+        const quoteRequest = await ensureQuoteRequest(db, {
+          sourceType: "audit_quote",
+          source,
+        });
+        await provisionTemporaryQuoteMember({
+          db,
+          auth: adminAuth(),
+          requestId: result.requestId,
+          quoteRequestId:
+            quoteRequest.id ||
+            quoteRequestIdFor("audit_quote", result.requestId),
+          email: source.email,
+          contactName: source.contactName ?? "",
+          phone: source.phone ?? "",
+          marketingConsent: source.marketingConsent === true,
+        });
+      }
+    }
     if (result.kind === "success" && result.created) {
       // Fire-and-forget: notification failure must not fail customer intake.
       void notifyAuditQuoteReceived(adminDb(), {

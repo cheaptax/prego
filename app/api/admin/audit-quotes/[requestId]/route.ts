@@ -14,7 +14,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
   writeAuditLog,
 } from "@/lib/firebase/server";
 
@@ -44,7 +44,7 @@ function toIso(value: unknown) {
 
 export async function GET(req: Request, { params }: Params) {
   try {
-    await requireAdmin(req);
+    await requireAdminCapability(req, "auditQuotes:read");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },
@@ -68,7 +68,7 @@ export async function GET(req: Request, { params }: Params) {
 export async function PATCH(req: Request, { params }: Params) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "auditQuotes:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

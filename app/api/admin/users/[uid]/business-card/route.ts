@@ -3,7 +3,7 @@ import { adminDb, adminStorage } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 import type { UserRecord } from "@/lib/firebase/schema";
 
@@ -23,7 +23,7 @@ export async function GET(
   context: { params: Promise<{ uid: string }> },
 ) {
   try {
-    await requireAdmin(req);
+    await requireAdminCapability(req, "members:read");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

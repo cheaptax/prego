@@ -1,6 +1,8 @@
 import { chromium } from "playwright";
 
 const base = process.env.SMOKE_BASE_URL ?? "https://project-eta-one-64.vercel.app";
+const adminEmail = process.env.SMOKE_ADMIN_EMAIL;
+const adminPassword = process.env.SMOKE_ADMIN_PASSWORD;
 const stamp = Date.now();
 
 async function collect(page) {
@@ -36,11 +38,11 @@ const browser = await chromium.launch({ headless: true });
 const results = [];
 
 try {
-  {
+  if (adminEmail && adminPassword) {
     const { page, consoleErrors } = await newPage(browser);
     await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
-    await page.getByPlaceholder("example@email.com").fill("admin@gmail.com");
-    await page.getByPlaceholder("비밀번호를 입력하세요").fill("admin");
+    await page.getByPlaceholder("example@email.com").fill(adminEmail);
+    await page.getByPlaceholder("비밀번호를 입력하세요").fill(adminPassword);
     await page.getByRole("button", { name: /^로그인$/ }).click();
     await page.waitForTimeout(2500);
     results.push({
@@ -50,6 +52,12 @@ try {
       consoleErrors,
     });
     await page.close();
+  } else {
+    results.push({
+      test: "admin login",
+      skipped: true,
+      reason: "SMOKE_ADMIN_EMAIL and SMOKE_ADMIN_PASSWORD are required",
+    });
   }
 
   {

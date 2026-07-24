@@ -156,7 +156,7 @@ describe("CMS administrator route security contract", () => {
       "app/api/admin/cms/pages/[pageKey]/publish/route.ts",
     ]) {
       const source = readFileSync(path.join(root, relativePath), "utf8");
-      assert.match(source, /await requireAdmin\(request\)/);
+      assert.match(source, /await requireAdminCapability\(request, "cms:(read|write)"\)/);
     }
   });
 
@@ -264,7 +264,11 @@ describe("CMS administrator route security contract", () => {
     );
     assert.match(page, /loadPublishedCmsPage\("admin\.console"\)/);
     assert.match(page, /cmsPageMetadata\(bundle\.content, bundle\.assetUrls\)/);
-    assert.match(page, /<CmsAdminConsole content=\{content\} \/>/);
+    assert.match(page, /<CmsAdminConsole[\s\S]*content=\{content\}/);
+    assert.match(
+      page,
+      /canManageTestData=\{account\.role === "super_admin"\}/,
+    );
     assert.doesNotMatch(page, /draft|loadCmsPageEditorData/i);
     assert.match(publicLoader, /resolvePublishedPage\(repository, pageKey\)/);
     assert.match(

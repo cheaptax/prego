@@ -4,8 +4,10 @@ import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 export const ADMIN_OPERATION_TAB_IDS = [
   "overview",
   "members",
+  "partners",
   "inquiries",
   "auditQuotes",
+  "auditEvaluations",
   "points",
   "audit",
 ] as const;
@@ -15,8 +17,10 @@ export type AdminOperationTabId = (typeof ADMIN_OPERATION_TAB_IDS)[number];
 const TAB_DESCRIPTIONS: Record<AdminOperationTabId, string> = {
   overview: "overviewDescription",
   members: "membersDescription",
+  partners: "partnersDescription",
   inquiries: "inquiriesDescription",
   auditQuotes: "auditQuotesDescription",
+  auditEvaluations: "auditEvaluationsDescription",
   points: "pointsDescription",
   audit: "auditDescription",
 };
@@ -96,11 +100,21 @@ function textValue(
   return current?.text[key]?.trim() || fallback?.text[key] || "";
 }
 
+type AdminOperationsSectionCopy = {
+  title: string;
+  description: string;
+  text: (key: string) => string;
+  item: (itemId: string) => string;
+};
+
 export function createAdminOperationsCopy(content: CmsPageContent) {
+  const sectionCache = new Map<string, AdminOperationsSectionCopy>();
   return {
     section(sectionId: string) {
+      const cached = sectionCache.get(sectionId);
+      if (cached) return cached;
       const { current, fallback } = sectionById(content, sectionId);
-      return {
+      const section = {
         title: current?.title?.trim() || fallback?.title || "",
         description:
           current?.description?.trim() || fallback?.description || "",
@@ -118,6 +132,8 @@ export function createAdminOperationsCopy(content: CmsPageContent) {
           return item?.title ?? itemId;
         },
       };
+      sectionCache.set(sectionId, section);
+      return section;
     },
     message(key: string) {
       return (

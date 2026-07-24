@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { isAllowedCustomerEmail } from "@/lib/test-data/email-classification";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
   }
 
   const email = body.email?.trim().toLowerCase() ?? "";
-  if (!email || !isValidEmail(email)) {
+  if (!email || !isValidEmail(email) || !isAllowedCustomerEmail(email)) {
     return NextResponse.json({ ok: false, error: "invalid_email" }, { status: 400 });
   }
 

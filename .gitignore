@@ -5,6 +5,7 @@
 
 # next.js
 /.next/
+/.next-*/
 /out/
 
 # production
@@ -14,6 +15,9 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
 .dev-*.log
 
 # env
@@ -33,6 +37,11 @@ env.local.transfer
 next-env.d.ts
 .vercel
 .env*.local
+.agents/
+skills-lock.json
+
+# local read-only purge scan artifacts
+/.artifacts/test-data-manifests/
 
 .vercel
 .env*.local

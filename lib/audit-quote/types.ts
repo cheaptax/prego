@@ -1,6 +1,6 @@
 import type { FieldValue, Timestamp } from "firebase-admin/firestore";
 
-export const AUDIT_QUOTE_SCHEMA_VERSION = 2 as const;
+export const AUDIT_QUOTE_SCHEMA_VERSION = 3 as const;
 
 export type AuditQuoteStatus =
   | "received"
@@ -14,14 +14,20 @@ export type AuditQuoteStatus =
   | "invalid";
 
 export type AuditQuoteRequestRecord = {
-  schemaVersion: typeof AUDIT_QUOTE_SCHEMA_VERSION;
+  /** Schema v2 records predate target cooperative and fiscal-year fields. */
+  schemaVersion: 2 | typeof AUDIT_QUOTE_SCHEMA_VERSION;
   requestId: string;
   publicReference: string;
   email: string;
   emailHash: string;
+  /** Trusted Firebase customer UID provisioned or linked by the server. */
+  customerUid?: string;
   /** Optional on schema v1 documents. */
   contactName?: string;
   phone?: string;
+  /** Required for schema v3 records; absent on legacy requests. */
+  targetCooperativeName?: string;
+  fiscalYear?: number;
   status: AuditQuoteStatus;
   quoteCount: number;
   privacyPolicyVersion: string;
@@ -51,6 +57,8 @@ export type SubmitAuditQuoteInput = {
   email: string;
   contactName: string;
   phone: string;
+  targetCooperativeName: string;
+  fiscalYear: number;
   privacyConsent: boolean;
   privacyPolicyVersion: string;
   marketingConsent?: boolean;

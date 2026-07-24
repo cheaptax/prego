@@ -1,0 +1,18 @@
+export const AUDIT_EVALUATION_COLLECTIONS = {
+  cases: "auditEvaluationCases",
+  caseByQuoteRequest: "auditEvaluationCaseByQuoteRequest",
+  accessTokens: "auditEvaluationAccessTokens",
+  sessions: "auditEvaluationSessions",
+  uploadIntents: "auditEvaluationUploadIntents",
+  documents: "auditEvaluationDocuments",
+  parsingQueue: "auditEvaluationParsingQueue",
+  extractionRuns: "auditEvaluationExtractionRuns",
+  corrections: "auditEvaluationCorrections",
+  confirmations: "auditEvaluationConfirmations",
+  standardQuoteDocuments: "auditEvaluationStandardQuoteDocuments",
+  normalizedQuotes: "auditEvaluationNormalizedQuotes",
+  configVersions: "auditEvaluationConfigVersions",
+  reportRuns: "auditEvaluationReportRuns",
+  auditLogs: "auditEvaluationAuditLogs",
+  rateLimits: "auditEvaluationRateLimits",
+} as const;

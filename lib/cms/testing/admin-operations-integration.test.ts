@@ -27,6 +27,14 @@ const root = path.resolve(
 );
 
 describe("admin operations CMS safety contract", () => {
+  it("keeps section copy references stable across React renders", () => {
+    const copy = createAdminOperationsCopy(
+      structuredClone(CMS_PAGE_DEFAULTS["admin.operations"]),
+    );
+    assert.strictEqual(copy.section("partners"), copy.section("partners"));
+    assert.notStrictEqual(copy.section("partners"), copy.section("members"));
+  });
+
   it("keeps internal tab and filter values fixed when CMS labels change", () => {
     const content = structuredClone(CMS_PAGE_DEFAULTS["admin.operations"]);
     const navigation = content.sections.find(
@@ -165,7 +173,15 @@ describe("admin operations CMS safety contract", () => {
     );
     assert.match(page, /loadPublishedCmsPage\("admin\.operations"\)/);
     assert.match(page, /cmsPageMetadata\(bundle\.content, bundle\.assetUrls\)/);
-    assert.match(page, /<AdminDashboard content=\{content\} \/>/);
+    assert.match(page, /getServerFeatureFlags\(\)\.auditEvaluation/);
+    assert.match(
+      page,
+      /auditEvaluationFlags\.enabled && auditEvaluationFlags\.adminEnabled/,
+    );
+    assert.match(
+      page,
+      /auditEvaluationAdminEnabled=\{auditEvaluationAdminEnabled\}/,
+    );
     assert.match(
       preview,
       /<AdminDashboard content=\{content\} previewMode \/>/,

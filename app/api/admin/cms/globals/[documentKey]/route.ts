@@ -10,7 +10,7 @@ import { cmsGlobalContentSchema } from "@/lib/cms/schemas";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
@@ -32,7 +32,7 @@ export async function GET(
   context: { params: Promise<{ documentKey: string }> },
 ) {
   try {
-    await requireAdmin(request);
+    await requireAdminCapability(request, "cms:read");
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(error) },
@@ -65,7 +65,7 @@ export async function PATCH(
 ) {
   let admin;
   try {
-    admin = await requireAdmin(request);
+    admin = await requireAdminCapability(request, "cms:write");
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(error) },

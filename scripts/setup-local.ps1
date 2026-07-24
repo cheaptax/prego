@@ -28,5 +28,5 @@ npm install
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "Start dev server: npm run dev"
-Write-Host "Admin login: admin@gmail.com / admin"
 Write-Host "Admin console: http://localhost:3000/admin"
+Write-Host "Admin Auth bootstrap: see docs/ADMIN_AUTH_MIGRATION.md"

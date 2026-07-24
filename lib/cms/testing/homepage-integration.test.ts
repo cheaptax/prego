@@ -93,6 +93,14 @@ describe("homepage CMS operating defaults", () => {
     assert.equal(header.links.mypage.href, "/mypage");
     assert.equal(footer.links.consult.href, "/consult");
     assert.equal(footer.links.inquiries.href, "/inquiries");
+    assert.equal(footer.links.partnerLogin.label, "제휴사 로그인");
+    assert.equal(footer.links.partnerLogin.href, "/partner/login");
+    assert.equal(footer.links.operatorLogin.label, "운영자 로그인");
+    assert.equal(footer.links.operatorLogin.href, "/admin/login");
+    assert.equal(
+      footer.text.portalLoginNavigationLabel,
+      "제휴사 및 운영자 로그인",
+    );
     assert.equal(support.links.support.href, "/support");
   });
 
@@ -223,7 +231,7 @@ describe("common-area editor lifecycle", () => {
       "app/api/admin/cms/globals/[documentKey]/revisions/[revisionId]/restore/route.ts",
     ]) {
       const source = readFileSync(path.join(root, relativePath), "utf8");
-      assert.match(source, /requireAdmin\(request\)/);
+      assert.match(source, /requireAdminCapability\(request, "cms:(read|write)"\)/);
     }
   });
 

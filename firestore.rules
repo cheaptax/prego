@@ -6,10 +6,55 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isActiveAccount(user) {
+      return (
+        'accountStatus' in user
+        && user.accountStatus == 'active'
+      ) || (
+        !('accountStatus' in user)
+        && user.status == 'active'
+      );
+    }
+
     function isAdmin() {
       return signedIn()
         && 'admin' in request.auth.token
-        && request.auth.token.admin == true;
+        && request.auth.token.admin == true
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == 'admin'
+        && isActiveAccount(
+          get(
+            /databases/$(database)/documents/users/$(request.auth.uid)
+          ).data
+        );
+    }
+
+    function activeUser() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data;
+    }
+
+    function isPartner() {
+      return signedIn()
+        && 'partner' in request.auth.token
+        && request.auth.token.partner == true
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && activeUser().role == 'partner'
+        && isActiveAccount(activeUser())
+        && activeUser().partnerId is string
+        && exists(
+          /databases/$(database)/documents/partners/$(activeUser().partnerId)
+        )
+        && get(
+          /databases/$(database)/documents/partners/$(activeUser().partnerId)
+        ).data.status == 'active';
+    }
+
+    function partnerId() {
+      return activeUser().partnerId;
     }
 
     // Public CMS documents contain rendered content only. All CMS writes are
@@ -65,7 +110,72 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      // Administrative user lists are server/API-only to avoid broad client
+      // enumeration of profile PII. A signed-in user may read only itself.
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create, update, delete: if false;
+    }
+
+    // Demo institution identity and Auth lineage are resolved only through
+    // trusted server APIs. They are never client-writable master data.
+    match /demoCooperativeMaster/{cooperativeId} {
+      allow read, write: if false;
+    }
+
+    match /cooperativeMaster/{cooperativeId} {
+      allow read, write: if false;
+    }
+
+    match /cooperativeMasterConfiguration/{configurationId} {
+      allow read, write: if false;
+    }
+
+    match /testAuthSubjects/{authUid} {
+      allow read, write: if false;
+    }
+
+    match /testDataScenarios/{scenarioId} {
+      allow read, write: if false;
+    }
+
+    match /testDataSeedManifests/{manifestId} {
+      allow read, write: if false;
+    }
+
+    match /legacyTestDataClassifications/{classificationId} {
+      allow read, write: if false;
+    }
+
+    match /legacyTestDataReviewManifests/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /legacyTestDataReviewEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /testDataPurgeManifests/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /testDataPurgeJobs/{jobId} {
+      allow read, write: if false;
+    }
+
+    match /testDataPurgeLocks/{institutionId} {
+      allow read, write: if false;
+    }
+
+    match /testDataPurgeAuditLogs/{auditId} {
+      allow read, write: if false;
+    }
+
+    match /testDataPurgeAdminEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /partners/{partnerId} {
+      allow read: if isAdmin() || (isPartner() && partnerId() == partnerId);
       allow create, update, delete: if false;
     }
 
@@ -80,9 +190,53 @@ service cloud.firestore {
     }
 
     match /consultRequests/{requestId} {
-      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if isAdmin();
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.uid == request.auth.uid)
+        || (isPartner() && resource.data.assignedPartnerId == partnerId());
+      // Creation and administrative mutations use authenticated server APIs.
+      allow create, update, delete: if false;
+    }
+
+    match /partnerAssignments/{assignmentId} {
+      allow read: if isAdmin()
+        || (isPartner()
+          && resource.data.partnerId == partnerId()
+          && resource.data.status != 'revoked');
+      allow create, update, delete: if false;
+    }
+
+    match /partnerAnswerDrafts/{draftId} {
+      allow read: if isAdmin()
+        || (isPartner() && resource.data.partnerId == partnerId());
+      allow create, update, delete: if false;
+    }
+
+    // Operator/partner administration internals are Admin SDK only.
+    match /auditLogs/{logId} {
+      allow read, write: if false;
+    }
+    match /partnerUniqueKeys/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /partnerApplications/{applicationId} {
+      allow read, write: if false;
+    }
+    match /publicRateLimits/{limitId} {
+      allow read, write: if false;
+    }
+
+    match /quoteRequests/{quoteRequestId} {
+      allow read, write: if false;
+    }
+    match /quoteAssignments/{assignmentId} {
+      allow read, write: if false;
+    }
+    match /quotes/{quoteId} {
+      allow read, write: if false;
+    }
+    match /quoteEmailDeliveries/{deliveryId} {
+      allow read, write: if false;
     }
 
     // Audit-quote intake is server/Admin SDK only. Deny all client access.
@@ -99,6 +253,56 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /auditQuoteNotifications/{requestId} {
+      allow read, write: if false;
+    }
+
+    // Audit evaluation records are server/Admin SDK only.
+    match /auditEvaluationCases/{caseId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationCaseByQuoteRequest/{mappingId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationAccessTokens/{tokenHash} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationSessions/{sessionHash} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationUploadIntents/{intentId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationDocuments/{documentId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationParsingQueue/{queueId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationExtractionRuns/{runId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationCorrections/{correctionId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationConfirmations/{confirmationId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationStandardQuoteDocuments/{quoteDocumentId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationNormalizedQuotes/{quoteId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationConfigVersions/{configVersionId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationReportRuns/{reportRunId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationAuditLogs/{auditLogId} {
+      allow read, write: if false;
+    }
+    match /auditEvaluationRateLimits/{rateLimitId} {
       allow read, write: if false;
     }
   }

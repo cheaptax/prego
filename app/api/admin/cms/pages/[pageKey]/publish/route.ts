@@ -14,7 +14,7 @@ import { publishDraftAssetsForPage } from "@/lib/cms/asset-publishing";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
@@ -35,7 +35,7 @@ export async function POST(
 ) {
   let admin;
   try {
-    admin = await requireAdmin(request);
+    admin = await requireAdminCapability(request, "cms:write");
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(error) },

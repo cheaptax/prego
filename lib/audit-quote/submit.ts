@@ -17,10 +17,10 @@ import {
 import {
   fakePublicReference,
   hmacEmailHash,
-  isNonghyupEmail,
   isValidBusinessEmail,
   normalizeEmail,
 } from "@/lib/audit-quote/email";
+import { isAllowedAuditQuoteRequesterEmail } from "@/lib/audit-quote/email-policy";
 import {
   hashIdempotencyKey,
   isValidIdempotencyKey,
@@ -66,6 +66,18 @@ function readCreatedAtMs(value: unknown, fallback: number) {
     return (value as { toMillis: () => number }).toMillis();
   }
   return fallback;
+}
+
+function normalizeTargetCooperativeName(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 300);
+}
+
+function isValidTargetCooperativeName(value: string) {
+  return value.length >= 2 && value.length <= 300;
 }
 
 function nextRateLimit(
@@ -125,7 +137,7 @@ export async function submitAuditQuoteRequest(
   }
 
   const email = normalizeEmail(input.email ?? "");
-  if (!honeypot && !isNonghyupEmail(email)) {
+  if (!honeypot && !isAllowedAuditQuoteRequesterEmail(email)) {
     return { kind: "rejected", error: "invalid_email", status: 400 };
   }
 
@@ -139,6 +151,27 @@ export async function submitAuditQuoteRequest(
     return { kind: "rejected", error: "invalid_phone", status: 400 };
   }
   const phone = formatKoreanMobile(phoneDigits);
+
+  const targetCooperativeName = normalizeTargetCooperativeName(
+    input.targetCooperativeName,
+  );
+  if (!honeypot && !isValidTargetCooperativeName(targetCooperativeName)) {
+    return {
+      kind: "rejected",
+      error: "invalid_target_cooperative",
+      status: 400,
+    };
+  }
+
+  const fiscalYear = Number(input.fiscalYear);
+  if (
+    !honeypot &&
+    (!Number.isSafeInteger(fiscalYear) ||
+      fiscalYear < 2_000 ||
+      fiscalYear > 2_100)
+  ) {
+    return { kind: "rejected", error: "invalid_fiscal_year", status: 400 };
+  }
 
   if (!honeypot && input.privacyConsent !== true) {
     return { kind: "rejected", error: "consent_required", status: 400 };
@@ -288,6 +321,8 @@ export async function submitAuditQuoteRequest(
           emailHash,
           contactName,
           phone,
+          targetCooperativeName,
+          fiscalYear,
           status: "received",
           quoteCount: 0,
           privacyPolicyVersion: config.privacyPolicyVersion,

@@ -4,7 +4,7 @@ import { withoutUndefined } from "@/lib/firebase/clean";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
   validateAnswerPointCost,
   writeAuditLog,
 } from "@/lib/firebase/server";
@@ -34,7 +34,7 @@ function parseAdminTags(value: Payload["adminTags"]) {
 export async function POST(req: Request, { params }: Params) {
   let decoded;
   try {
-    decoded = await requireAdmin(req);
+    decoded = await requireAdminCapability(req, "inquiries:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

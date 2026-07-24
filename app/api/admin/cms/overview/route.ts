@@ -4,7 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await requireAdmin(request);
+    await requireAdminCapability(request, "cms:read");
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(error) },

@@ -15,6 +15,7 @@ import {
   maskEmail,
   normalizeEmail,
 } from "@/lib/audit-quote/email";
+import { isAllowedAuditQuoteRequesterEmail } from "@/lib/audit-quote/email-policy";
 import { guardAuditQuoteRequest } from "@/lib/audit-quote/http";
 import { isValidIdempotencyKey } from "@/lib/audit-quote/idempotency";
 import {
@@ -55,6 +56,8 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     email: "Finance.Team@nonghyup.com",
     contactName: "김농협",
     phone: "010-1234-5678",
+    targetCooperativeName: "프리고농협",
+    fiscalYear: 2026,
     privacyConsent: true,
     privacyPolicyVersion: "2026-07-20",
     campaign: "fy27-audit-quote",
@@ -71,6 +74,29 @@ describe("audit-quote unit", () => {
     assert.equal(isValidBusinessEmail("finance.team+audit@example.com"), true);
     assert.equal(isValidBusinessEmail("not-an-email"), false);
     assert.equal(isValidBusinessEmail("a".repeat(80) + "@ex.com"), false);
+  });
+
+  it("allows only the exact server-side test email exceptions", () => {
+    for (const email of [
+      "cheaptaxworld@gmail.com",
+      "cheaptax@naver.com",
+      "requiem77k@naver.com",
+      "prego.ceo@gmail.com",
+    ]) {
+      assert.equal(isAllowedAuditQuoteRequesterEmail(email), true);
+      assert.equal(
+        isAllowedAuditQuoteRequesterEmail(` ${email.toUpperCase()} `),
+        true,
+      );
+    }
+    assert.equal(
+      isAllowedAuditQuoteRequesterEmail("someone@example.com"),
+      false,
+    );
+    assert.equal(
+      isAllowedAuditQuoteRequesterEmail("prego.ceo+test@gmail.com"),
+      false,
+    );
   });
 
   it("uses HMAC-SHA256 for emailHash", () => {
@@ -155,13 +181,15 @@ describe("audit-quote integration (memory firestore)", () => {
     assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 1);
     const stored = db.list(AUDIT_QUOTE_REQUESTS)[0];
     assert.equal(stored.status, "received");
-    assert.equal(stored.schemaVersion, 2);
+    assert.equal(stored.schemaVersion, 3);
     assert.equal(stored.quoteCount, 0);
     assert.equal(stored.marketingConsent, false);
     assert.equal(stored.email, "finance.team@nonghyup.com");
     assert.equal(stored.emailHash, hmacEmailHash("finance.team@nonghyup.com", pepper));
     assert.equal(stored.contactName, "김농협");
     assert.equal(stored.phone, "010-1234-5678");
+    assert.equal(stored.targetCooperativeName, "프리고농협");
+    assert.equal(stored.fiscalYear, 2026);
     assert.notEqual(stored.idempotencyKeyHash, baseInput().idempotencyKey);
     if (result.kind === "success") {
       assert.equal(stored.publicReference, result.publicReference);

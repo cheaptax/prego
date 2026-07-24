@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import {
+  authErrorCode,
+  authErrorStatus,
   canReadRequest,
-  getUserRecord,
-  verifyBearerToken,
+  requireWritableActiveMember,
   writeAuditLog,
 } from "@/lib/firebase/server";
 import type {
@@ -20,17 +21,20 @@ export const runtime = "nodejs";
 type Params = { params: Promise<{ requestId: string }> };
 
 export async function POST(req: Request, { params }: Params) {
-  let decoded;
+  let memberSession;
   try {
-    decoded = await verifyBearerToken(req);
-  } catch {
-    return NextResponse.json({ ok: false, error: "missing_or_invalid_token" }, { status: 401 });
+    memberSession = await requireWritableActiveMember(req);
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: authErrorCode(error) },
+      { status: authErrorStatus(error) },
+    );
   }
+  const { decoded, profile: user } = memberSession;
 
   const { requestId } = await params;
   const db = adminDb();
-  const user = await getUserRecord(decoded.uid);
-  if (!user?.cooperativeId) {
+  if (!user.cooperativeId) {
     return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
   }
 

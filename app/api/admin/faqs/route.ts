@@ -5,7 +5,7 @@ import { ensureDefaultFaqRecords } from "@/lib/default-faqs";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
   writeAuditLog,
 } from "@/lib/firebase/server";
 import type { FaqRecord } from "@/lib/firebase/schema";
@@ -31,7 +31,7 @@ function normalizeStatus(value: unknown): "published" | "draft" {
 
 export async function GET(req: Request) {
   try {
-    await requireAdmin(req);
+    await requireAdminCapability(req, "faqs:read");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "faqs:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

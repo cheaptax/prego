@@ -3,7 +3,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requirePermission,
   writeAuditLog,
 } from "@/lib/firebase/server";
 import type {
@@ -23,7 +23,7 @@ type Payload = {
 export async function POST(req: Request) {
   let decoded;
   try {
-    decoded = await requireAdmin(req);
+    decoded = (await requirePermission(req, "points:adjust")).decoded;
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

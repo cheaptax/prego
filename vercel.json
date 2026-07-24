@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/audit-evaluations/retention",
+      "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/internal/audit-evaluations/reports/sweep",
+      "schedule": "10 18 * * *"
+    },
+    {
+      "path": "/api/internal/quote-emails/retry",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}

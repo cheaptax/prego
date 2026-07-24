@@ -14,8 +14,10 @@ import {
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { nonghyupMaster } from "@/lib/platform";
+import { useEffect, useRef, useState } from "react";
+import {
+  type CooperativeSearchItem,
+} from "@/lib/cooperatives/demo-cooperative";
 import {
   getFirebaseAuth,
   getFirebaseStorage,
@@ -30,8 +32,9 @@ import {
 } from "@/lib/phone";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
+import { isAllowedCustomerEmail } from "@/lib/test-data/email-classification";
 
-type Cooperative = (typeof nonghyupMaster)[number];
+type Cooperative = CooperativeSearchItem;
 
 type FormState = {
   name: string;
@@ -117,7 +120,7 @@ function safeFileName(name: string) {
 }
 
 function isValidSignupEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return isAllowedCustomerEmail(email);
 }
 
 function getSignupErrorMessage(
@@ -133,6 +136,8 @@ function getSignupErrorMessage(
           return messages.invalidToken;
         case "email_mismatch":
           return messages.emailMismatch;
+        case "unsupported_customer_email":
+          return messages.emailInvalid;
         case "invalid_cooperative_id":
           return messages.invalidCooperative;
         case "invalid_phone":
@@ -273,6 +278,13 @@ export function SignupForm({
   const [emailCheckStatus, setEmailCheckStatus] =
     useState<EmailCheckStatus>("idle");
   const [emailCheckedValue, setEmailCheckedValue] = useState("");
+  const [selectedCooperative, setSelectedCooperative] =
+    useState<Cooperative | null>(null);
+  const [remoteCooperativeSearch, setRemoteCooperativeSearch] = useState<{
+    query: string;
+    results: Cooperative[];
+    failed?: boolean;
+  } | null>(null);
   const businessCardInputRef = useRef<HTMLInputElement>(null);
   const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
@@ -355,25 +367,57 @@ export function SignupForm({
   const cooperativeQueryTrimmed = form.cooperativeQuery.trim();
   const showCooperativeSuggestions = cooperativeQueryTrimmed.length > 0;
 
-  const filteredCooperatives = useMemo(() => {
-    if (!showCooperativeSuggestions) return [];
-    const query = cooperativeQueryTrimmed.toLowerCase();
-    return nonghyupMaster
-      .filter(
-        (item) =>
-          item.cooperative_name.toLowerCase().includes(query) ||
-          `${item.sido} ${item.sigungu}`.toLowerCase().includes(query)
-      )
-      .slice(0, 10);
-  }, [
-    showCooperativeSuggestions,
-    cooperativeQueryTrimmed,
-  ]);
+  useEffect(() => {
+    if (!showCooperativeSuggestions) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/cooperatives/search?q=${encodeURIComponent(cooperativeQueryTrimmed)}`,
+          { signal: controller.signal },
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          results?: Cooperative[];
+        };
+        if (response.ok && payload.ok && Array.isArray(payload.results)) {
+          setRemoteCooperativeSearch({
+            query: cooperativeQueryTrimmed,
+            results: payload.results,
+          });
+        } else {
+          setRemoteCooperativeSearch({
+            query: cooperativeQueryTrimmed,
+            results: [],
+            failed: true,
+          });
+        }
+      } catch (searchError) {
+        if (
+          !(searchError instanceof DOMException) ||
+          searchError.name !== "AbortError"
+        ) {
+          console.error("Cooperative search failed.", searchError);
+          setRemoteCooperativeSearch({
+            query: cooperativeQueryTrimmed,
+            results: [],
+            failed: true,
+          });
+        }
+      }
+    }, 150);
 
-  const selectedCooperative = useMemo(
-    () => nonghyupMaster.find((item) => item.cooperative_id === form.cooperativeId),
-    [form.cooperativeId]
-  );
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [cooperativeQueryTrimmed, showCooperativeSuggestions]);
+
+  const currentCooperativeSearch =
+    remoteCooperativeSearch?.query === cooperativeQueryTrimmed
+      ? remoteCooperativeSearch
+      : null;
+  const filteredCooperatives = currentCooperativeSearch?.results ?? [];
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -662,6 +706,7 @@ export function SignupForm({
   };
 
   const selectCooperative = (item: Cooperative) => {
+    setSelectedCooperative(item);
     setForm((prev) => ({
       ...prev,
       sido: item.sido,
@@ -1183,6 +1228,7 @@ export function SignupForm({
                 onChange={(event) => {
                   update("cooperativeQuery", event.target.value);
                   setForm((prev) => ({ ...prev, cooperativeId: "" }));
+                  setSelectedCooperative(null);
                 }}
                 placeholder={organizationCopy.text.searchPlaceholder}
                 aria-invalid={Boolean(fieldErrors.cooperativeId)}
@@ -1194,7 +1240,15 @@ export function SignupForm({
           </div>
 
           {showCooperativeSuggestions && (
-            filteredCooperatives.length > 0 ? (
+            !currentCooperativeSearch ? (
+              <p className="signup-coop-empty" role="status">
+                {organizationCopy.text.searchLoading}
+              </p>
+            ) : currentCooperativeSearch.failed ? (
+              <p className="signup-coop-empty" role="alert">
+                {organizationCopy.text.searchFailed}
+              </p>
+            ) : filteredCooperatives.length > 0 ? (
               <div
                 className="signup-coop-results"
                 aria-label={organizationCopy.text.resultsAriaLabel}
@@ -1211,7 +1265,12 @@ export function SignupForm({
                     onClick={() => selectCooperative(item)}
                   >
                     <strong>{item.cooperative_name}</strong>
-                    <span>{item.cooperative_type}</span>
+                    <span>
+                      {item.cooperative_type}
+                      {item.isDemoInstitution
+                        ? ` · ${organizationCopy.text.demoBadge}`
+                        : ""}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1228,6 +1287,9 @@ export function SignupForm({
             <p className="auth-selected">
               {organizationCopy.text.selectedPrefix}{" "}
               <strong>{cooperativeDisplay(selectedCooperative)}</strong>
+              {selectedCooperative.isDemoInstitution
+                ? ` (${organizationCopy.text.demoBadge})`
+                : ""}
             </p>
           )}
         </section>

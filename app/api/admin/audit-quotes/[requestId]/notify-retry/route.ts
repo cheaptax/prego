@@ -7,7 +7,7 @@ import {
   addAuditLog,
   authErrorCode,
   authErrorStatus,
-  requireAdmin,
+  requireAdminCapability,
 } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ type Params = { params: Promise<{ requestId: string }> };
 export async function POST(req: Request, { params }: Params) {
   let admin;
   try {
-    admin = await requireAdmin(req);
+    admin = await requireAdminCapability(req, "auditQuotes:write");
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: authErrorCode(err) },

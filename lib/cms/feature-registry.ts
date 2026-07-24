@@ -40,6 +40,7 @@ export type CmsPreviewRenderer =
   | "simple"
   | "memberDashboard"
   | "requestDetail"
+  | "auditEvaluation"
   | "adminConsole"
   | "adminOperations";
 
@@ -103,6 +104,22 @@ const CMS_FEATURE_METADATA: Record<CmsPageKey, CmsFeatureMetadata> = {
       protectedTarget("auth-endpoints", "계정 찾기와 회원 상태 API 연결"),
     ],
   },
+  "auth.partnerLogin": {
+    access: ["guest"],
+    previewRenderer: "login",
+    protectedTargets: [
+      protectedTarget("firebase-auth", "Firebase 로그인과 세션 유지"),
+      protectedTarget("partner-portal-routing", "제휴사 계정 판정과 포털 이동"),
+    ],
+  },
+  "auth.adminLogin": {
+    access: ["guest"],
+    previewRenderer: "login",
+    protectedTargets: [
+      protectedTarget("firebase-auth", "Firebase 로그인과 세션 유지"),
+      protectedTarget("admin-portal-routing", "운영자 계정 판정과 관리자 포털 이동"),
+    ],
+  },
   "auth.signup": {
     access: ["guest"],
     previewRenderer: "signup",
@@ -117,6 +134,16 @@ const CMS_FEATURE_METADATA: Record<CmsPageKey, CmsFeatureMetadata> = {
     previewRenderer: "simple",
     protectedTargets: [
       protectedTarget("approval-status", "회원 승인 상태와 로그인 이동 정책"),
+    ],
+  },
+  "auth.portalAccessDenied": {
+    access: ["guest", "member", "partner", "admin"],
+    previewRenderer: "simple",
+    protectedTargets: [
+      protectedTarget(
+        "portal-routing",
+        "인증된 계정의 canonical 포털과 로그아웃 이동 정책",
+      ),
     ],
   },
   "legal.terms": {
@@ -171,12 +198,63 @@ const CMS_FEATURE_METADATA: Record<CmsPageKey, CmsFeatureMetadata> = {
       protectedTarget("audit-quote-security", "동의 필수 여부, honeypot, rate limit과 중복 방지"),
     ],
   },
+  "event.auditQuoteEvaluate": {
+    access: ["guest", "member"],
+    previewRenderer: "auditEvaluation",
+    protectedTargets: [
+      protectedTarget("evaluation-feature-gate", "고객 진입 기능 플래그의 서버 검증"),
+      protectedTarget("evaluation-access-link", "1회성 링크 hash, 만료, 재발급과 철회"),
+      protectedTarget("evaluation-enumeration", "이메일 존재 여부를 숨기는 동일 응답"),
+    ],
+  },
+  "event.auditQuoteEvaluation": {
+    access: ["guest", "member"],
+    previewRenderer: "auditEvaluation",
+    protectedTargets: [
+      protectedTarget("evaluation-case-acl", "HttpOnly 세션과 caseId 일치 검증"),
+      protectedTarget("evaluation-case-idempotency", "견적요청별 평가 건 단일 생성"),
+      protectedTarget("evaluation-upload-boundary", "업로드 intent, 서버 파일 검증, 격리 경로와 개수 제한"),
+    ],
+  },
+  "event.auditQuoteEvaluationReview": {
+    access: ["guest", "member"],
+    previewRenderer: "auditEvaluation",
+    protectedTargets: [
+      protectedTarget("evaluation-review-acl", "평가 건 세션과 caseId 일치 검증"),
+      protectedTarget("evaluation-correction-lock", "고객 정정 이력과 낙관적 잠금"),
+      protectedTarget("evaluation-final-confirmation", "필수값·무결성·설정 적용기간 서버 재검증"),
+      protectedTarget("evaluation-confirmed-snapshot", "고객 확정 데이터 전용 불변 보고서 입력"),
+    ],
+  },
+  "event.auditQuoteEvaluationReport": {
+    access: ["guest", "member"],
+    previewRenderer: "auditEvaluation",
+    protectedTargets: [
+      protectedTarget("evaluation-report-acl", "평가 건 세션과 보고서 기능 플래그 검증"),
+      protectedTarget("evaluation-report-immutability", "보고서 스냅샷과 과거 버전 보호"),
+    ],
+  },
   "member.mypage": {
     access: ["member"],
     previewRenderer: "memberDashboard",
     protectedTargets: [
       protectedTarget("member-session", "회원 상태·bearer 인증과 개인정보 projection"),
       protectedTarget("member-ledger", "포인트 집계와 동의 변경 payload"),
+    ],
+  },
+  "member.quotes": {
+    access: ["member"],
+    previewRenderer: "simple",
+    protectedTargets: [
+      protectedTarget("quote-download-acl", "견적서 본인 이메일·회원 UID 검증"),
+      protectedTarget("quote-signed-url", "짧은 유효기간 PDF 다운로드 URL 발급"),
+    ],
+  },
+  "member.quoteDetail": {
+    access: ["member"],
+    previewRenderer: "simple",
+    protectedTargets: [
+      protectedTarget("quote-detail-acl", "견적서 상세 접근 권한 검증"),
     ],
   },
   "member.requestDetail": {
@@ -187,11 +265,22 @@ const CMS_FEATURE_METADATA: Record<CmsPageKey, CmsFeatureMetadata> = {
       protectedTarget("answer-transaction", "답변 열람 포인트 차감, 평가와 완료 순서"),
     ],
   },
+  "partner.apply": {
+    access: ["guest", "member", "admin"],
+    previewRenderer: "simple",
+    protectedTargets: [
+      protectedTarget("partner-application-payload", "제휴 신청 저장 키와 필수 동의"),
+      protectedTarget("partner-application-security", "honeypot, 중복 접수와 서버 검증"),
+    ],
+  },
   "partner.portal": {
     access: ["partner"],
     previewRenderer: "simple",
     protectedTargets: [
-      protectedTarget("partner-lockout", "파트너 인증·배정 ACL 구현 전 운영 화면 차단"),
+      protectedTarget("partner-access", "파트너 인증·배정 ACL"),
+      protectedTarget("quote-evaluation-schema", "평가 입력 내부 저장 키와 런타임 검증"),
+      protectedTarget("quote-evaluation-scoring", "견적 정량점수 계산식과 평가기준 버전 고정"),
+      protectedTarget("quote-document-signing", "감사평가용 표준 견적 전자서명과 문서 식별자"),
     ],
   },
   "admin.console": {

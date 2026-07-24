@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { CmsPageEditor } from "@/components/cms-editor/CmsPageEditor";
+import { requirePortalPageSession } from "@/lib/auth/portal-page-guard";
 import { CMS_PAGE_KEYS, type CmsPageKey } from "@/lib/cms/constants";
 
 export const metadata: Metadata = {
@@ -17,6 +18,7 @@ export default async function CmsPageEditorPage({
 }: {
   params: Promise<{ pageKey: string }>;
 }) {
+  await requirePortalPageSession("admin");
   const { pageKey } = await params;
   if (!isCmsPageKey(pageKey)) notFound();
   return <CmsPageEditor pageKey={pageKey} />;

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import {
+  authErrorCode,
+  authErrorStatus,
   canReadRequest,
-  getUserRecord,
-  verifyBearerToken,
+  requireActiveMember,
 } from "@/lib/firebase/server";
 import type {
   AnswerRatingRecord,
@@ -12,67 +13,23 @@ import type {
   ConsultRequestRecord,
   OrganizationRecord,
   PointLedgerRecord,
-  UserRecord,
 } from "@/lib/firebase/schema";
 
 export const runtime = "nodejs";
 
-function buildFallbackUser(decoded: {
-  uid: string;
-  email?: string;
-  name?: string;
-}): UserRecord {
-  const now = new Date().toISOString();
-  return {
-    uid: decoded.uid,
-    name: decoded.name ?? "",
-    phone: "",
-    email: decoded.email ?? "",
-    position: "",
-    duty: "",
-    consents: {
-      terms: false,
-      privacy: false,
-      marketing: false,
-      email: false,
-      sms: false,
-      kakao: false,
-    },
-    role: "member",
-    status: "pending_cooperative_review",
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 export async function GET(req: Request) {
-  let decoded;
+  let user;
   try {
-    decoded = await verifyBearerToken(req);
-  } catch {
+    ({ profile: user } = await requireActiveMember(req));
+  } catch (error) {
     return NextResponse.json(
-      { ok: false, error: "missing_or_invalid_token" },
-      { status: 401 }
+      { ok: false, error: authErrorCode(error) },
+      { status: authErrorStatus(error) },
     );
   }
 
   const db = adminDb();
-  const storedUser = await getUserRecord(decoded.uid);
-  const user: UserRecord =
-    storedUser ??
-    buildFallbackUser({
-      uid: decoded.uid,
-      email: decoded.email,
-      name: decoded.name,
-    });
-  const profileIncomplete = !storedUser;
-
-  if (storedUser && storedUser.status !== "active") {
-    return NextResponse.json(
-      { ok: false, error: "approval_pending", profileIncomplete: false, user },
-      { status: 403 }
-    );
-  }
+  const profileIncomplete = false;
 
   let orgSnapshot;
   let requestSnapshot;

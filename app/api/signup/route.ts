@@ -6,7 +6,24 @@ import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { writeAuditLog } from "@/lib/firebase/server";
 import type { UserRecord } from "@/lib/firebase/schema";
 import { isValidKrMobilePhone, normalizeKrMobilePhone } from "@/lib/phone";
-import { nonghyupMaster } from "@/lib/platform";
+import {
+  DEMO_COOPERATIVE_COLLECTION,
+  isExistingSignupForCooperative,
+  nextDemoSignupStatus,
+  parseTestCooperativeMaster,
+} from "@/lib/cooperatives/demo-cooperative";
+import { resolveSignupCooperative } from "@/lib/cooperatives/server";
+import {
+  buildSignupRootMetadata,
+  buildTestAuthSubjects,
+} from "@/lib/test-data/root-metadata";
+import { PURGE_LOCK_COLLECTION } from "@/lib/test-data/purge-job-types";
+import { isActivePurgeLock } from "@/lib/test-data/purge-lock";
+import {
+  classifyCustomerEmail,
+  hasUnlimitedTestSignup,
+  isAllowedCustomerEmail,
+} from "@/lib/test-data/email-classification";
 
 export const runtime = "nodejs";
 
@@ -114,23 +131,39 @@ export async function POST(req: Request) {
     );
   }
 
-  if (decoded.email?.toLowerCase() !== body.email.trim().toLowerCase()) {
+  const email = body.email.trim().toLowerCase();
+  if (decoded.email?.toLowerCase() !== email) {
     return NextResponse.json({ ok: false, error: "email_mismatch" }, { status: 400 });
+  }
+  if (!isAllowedCustomerEmail(email)) {
+    return NextResponse.json(
+      { ok: false, error: "unsupported_customer_email" },
+      { status: 400 },
+    );
   }
 
   const db = adminDb();
   const now = new Date().toISOString();
   const uid = decoded.uid;
-  const email = body.email.trim();
+  const dataClassification = classifyCustomerEmail(email);
   const requestedCooperativeId = (body.cooperativeId ?? body.nh_org_id)?.trim() ?? "";
-  const selectedCooperative = nonghyupMaster.find(
-    (item) => item.cooperative_id === requestedCooperativeId
+  const selectedCooperative = await resolveSignupCooperative(
+    requestedCooperativeId,
   );
 
   if (!selectedCooperative) {
     return NextResponse.json(
       { ok: false, error: "invalid_cooperative_id" },
       { status: 400 }
+    );
+  }
+  if (
+    selectedCooperative.isDemoInstitution &&
+    dataClassification !== "TEST"
+  ) {
+    return NextResponse.json(
+      { ok: false, error: "invalid_cooperative_id" },
+      { status: 400 },
     );
   }
 
@@ -158,6 +191,8 @@ export async function POST(req: Request) {
     businessCardPath,
     consents: body.consents,
     role: "member",
+    dataClassification:
+      dataClassification === "TEST" ? "TEST" : "PRODUCTION",
     createdAt: now,
     updatedAt: now,
   } satisfies Omit<
@@ -170,15 +205,39 @@ export async function POST(req: Request) {
 
   const orgKey = selectedCooperative.cooperative_id;
   const userRef = db.collection("users").doc(uid);
+  const signupMetadata = buildSignupRootMetadata({
+    cooperative: selectedCooperative,
+    rootEntityId: uid,
+    createdBy: uid,
+    createdAt: now,
+  });
+  const demoMasterRef =
+    selectedCooperative.masterSource === "DEMO_FIRESTORE"
+      ? db
+          .collection(DEMO_COOPERATIVE_COLLECTION)
+          .doc(selectedCooperative.cooperative_id)
+      : null;
 
   let result: SignupResult;
   try {
     result = await db.runTransaction(async (transaction) => {
+      const purgeLockSnapshot = await transaction.get(
+        db.collection(PURGE_LOCK_COLLECTION).doc(orgKey),
+      );
+      if (
+        purgeLockSnapshot.exists &&
+        isActivePurgeLock(purgeLockSnapshot.data())
+      ) {
+        throw new SignupRequestError("institution_purge_in_progress", 409);
+      }
       const userSnapshot = await transaction.get(userRef);
       const existingUser = userSnapshot.exists
         ? (userSnapshot.data() as UserRecord)
         : null;
-      if (existingUser?.cooperativeId === orgKey) {
+      if (
+        existingUser &&
+        isExistingSignupForCooperative(existingUser, orgKey)
+      ) {
         writeAuditLog(transaction, db, {
           actorUid: uid,
           actorEmail: email,
@@ -199,18 +258,59 @@ export async function POST(req: Request) {
       const phoneSnapshot = await transaction.get(
         db.collection("users").where("phone", "==", phone).limit(3)
       );
+      const demoMasterSnapshot = demoMasterRef
+        ? await transaction.get(demoMasterRef)
+        : null;
       const accountCountForPhone = phoneSnapshot.docs.filter((doc) => doc.id !== uid).length;
-      if (accountCountForPhone >= 2) {
+      if (
+        !hasUnlimitedTestSignup({ email, phone }) &&
+        accountCountForPhone >= 2
+      ) {
         throw new SignupRequestError("phone_account_limit_exceeded", 409);
+      }
+      const demoMaster = demoMasterSnapshot
+        ? parseTestCooperativeMaster(
+            demoMasterSnapshot.data(),
+            selectedCooperative.cooperative_id,
+          )
+        : null;
+      if (demoMasterRef && !demoMaster) {
+        throw new SignupRequestError("invalid_cooperative_id", 409);
       }
 
       transaction.set(userRef, withoutUndefined({
         ...baseUserRecord,
+        ...signupMetadata,
         cooperativeId: orgKey,
         nh_org_id: orgKey,
         cooperativeName: selectedCooperative.cooperative_name,
         status: "pending_cooperative_review",
       } satisfies UserRecord));
+
+      if (signupMetadata) {
+        for (const subject of buildTestAuthSubjects({
+          primaryUserUid: uid,
+          phoneAuthUid: phoneDecoded.uid,
+          cooperative: selectedCooperative,
+          createdAt: now,
+        })) {
+          transaction.set(
+            db.collection("testAuthSubjects").doc(subject.authUid),
+            subject,
+          );
+        }
+      }
+
+      if (demoMasterRef && demoMaster) {
+        transaction.update(demoMasterRef, {
+          signupStatus: nextDemoSignupStatus(
+            demoMaster.signupStatus,
+            "SUBMITTED",
+          ),
+          updatedAt: now,
+          updatedBy: "signup-service",
+        });
+      }
 
       writeAuditLog(transaction, db, {
         actorUid: uid,

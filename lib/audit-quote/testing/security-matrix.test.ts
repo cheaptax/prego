@@ -48,6 +48,8 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     email: "matrix.user@nonghyup.com",
     contactName: "김농협",
     phone: "010-1234-5678",
+    targetCooperativeName: "프리고농협",
+    fiscalYear: 2026,
     privacyConsent: true,
     privacyPolicyVersion: "2026-07-20",
     campaign: "fy27-audit-quote",

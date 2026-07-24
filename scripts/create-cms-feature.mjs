@@ -18,6 +18,7 @@ const PREVIEW_RENDERERS = new Set([
   "simple",
   "memberDashboard",
   "requestDetail",
+  "auditEvaluation",
   "adminConsole",
   "adminOperations",
 ]);

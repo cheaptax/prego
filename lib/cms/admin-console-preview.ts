@@ -119,7 +119,8 @@ export const ADMIN_CONSOLE_PREVIEW_OVERVIEW: CmsAdminOverview = {
     {
       id: "footer",
       name: "하단 정보",
-      description: "운영 주체, 안내 문구와 정책 링크를 관리합니다.",
+      description:
+        "운영 주체, 정책과 제휴사·운영자 보조 로그인 링크를 관리합니다.",
       affectedArea: "공개 화면 하단",
       status: "published",
       statusLabel: "게시됨",

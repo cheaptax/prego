@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { withoutUndefined } from "@/lib/firebase/clean";
-import { verifyBearerToken, writeAuditLog } from "@/lib/firebase/server";
+import {
+  authErrorCode,
+  authErrorStatus,
+  requireWritableActiveMember,
+  writeAuditLog,
+} from "@/lib/firebase/server";
 import type { AnswerRatingRecord } from "@/lib/firebase/schema";
 
 export const runtime = "nodejs";
@@ -10,12 +15,16 @@ type Params = { params: Promise<{ requestId: string }> };
 type Payload = { score?: number; helpful?: boolean | string; comment?: string };
 
 export async function POST(req: Request, { params }: Params) {
-  let decoded;
+  let memberSession;
   try {
-    decoded = await verifyBearerToken(req);
-  } catch {
-    return NextResponse.json({ ok: false, error: "missing_or_invalid_token" }, { status: 401 });
+    memberSession = await requireWritableActiveMember(req);
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: authErrorCode(error) },
+      { status: authErrorStatus(error) },
+    );
   }
+  const { decoded } = memberSession;
 
   const { requestId } = await params;
   const body = (await req.json().catch(() => null)) as Payload | null;
