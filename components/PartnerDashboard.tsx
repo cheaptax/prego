@@ -18,6 +18,7 @@ import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
 import { ANSWER_POINT_MAX, ANSWER_POINT_MIN } from "@/lib/answer-points";
 import { formatCurrencyInput, parseCurrencyInput } from "@/lib/currency-input";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
 import { PartnerNhAuditQuoteForm } from "@/components/PartnerNhAuditQuoteForm";
 import { validatePartnerQuoteInput } from "@/lib/quotes/partner-quote-validation";
 import {
@@ -32,10 +33,18 @@ import {
   validateQuoteSupplierProfile,
   type QuoteSupplierProfile,
 } from "@/lib/quotes/supplier-profile";
+import { canPartnerMutateQuoteAssignment } from "@/lib/quotes/nh-audit-quote-server";
+import { PortalSitemap } from "@/components/PortalSitemap";
+import type { PortalSitemapModel } from "@/lib/sitemap/portal-sitemap";
 
 type State = "loading" | "ready" | "denied" | "error";
 type QuoteAction = "draft" | "preview" | "send";
 type QuoteNotice = { tone: "success" | "error" | "warning"; text: string };
+const EMPTY_PARTNER_SITEMAP: PortalSitemapModel = {
+  role: "partner",
+  groups: [],
+  routeCount: 0,
+};
 
 const EMPTY_SUPPLIER_PROFILE: QuoteSupplierProfile = {
   name: "",
@@ -46,8 +55,15 @@ const EMPTY_SUPPLIER_PROFILE: QuoteSupplierProfile = {
   contactPhone: "",
 };
 
-export function PartnerDashboard({ content }: { content: CmsPageContent }) {
+export function PartnerDashboard({
+  content,
+  sitemap = EMPTY_PARTNER_SITEMAP,
+}: {
+  content: CmsPageContent;
+  sitemap?: PortalSitemapModel;
+}) {
   const router = useRouter();
+  const sitemapCopy = getCmsSection(content, "partner.portal", "sitemap");
   const quoteDocumentCopy = getCmsSection(
     content,
     "partner.portal",
@@ -260,6 +276,25 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
   const selectedQuoteRequest = selectedQuoteAssignment
     ? quoteRequestById.get(selectedQuoteAssignment.quoteRequestId)
     : null;
+  const canMutateSelectedQuote = Boolean(
+    partner &&
+      selectedQuoteAssignment &&
+      selectedQuoteRequest &&
+      canPartnerMutateQuoteAssignment({
+        authenticatedPartnerId: partner.id,
+        assignment: selectedQuoteAssignment,
+        quoteRequest: selectedQuoteRequest,
+      }),
+  );
+  const selectedFinalizedQuote = selectedQuoteAssignment
+    ? quotes
+        .filter(
+          (quote) =>
+            quote.quoteAssignmentId === selectedQuoteAssignment.id &&
+            ["finalized", "delivered"].includes(quote.status),
+        )
+        .sort((left, right) => Number(right.version) - Number(left.version))[0]
+    : null;
 
   const submitDraft = async (event: FormEvent<HTMLFormElement>, submit: boolean) => {
     event.preventDefault();
@@ -459,6 +494,15 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
       });
       return;
     }
+    if (!canMutateSelectedQuote && action !== "preview") {
+      setQuoteNotice({
+        tone: "error",
+        text:
+          content.messages.quoteAlreadyFinalized ??
+          "이미 최종확정된 견적입니다. 같은 제휴사의 다른 계정에서도 다시 저장·발송할 수 없습니다.",
+      });
+      return;
+    }
     if (
       action !== "draft" &&
       selectedQuoteRequest?.sourceType === "audit_quote" &&
@@ -473,7 +517,7 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
     }
     const validation = validateCurrentQuote();
     setQuoteFieldErrors(validation.fieldErrors);
-    if (action !== "draft" && !validation.valid) {
+    if (action !== "draft" && canMutateSelectedQuote && !validation.valid) {
       setQuoteNotice({
         tone: "error",
         text: `${content.messages.quoteRequiredSummary ?? "표시된 필수 입력정보를 확인해 주세요."} (${validation.missingLabels.join(", ")})`,
@@ -513,6 +557,14 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
           res.headers.get("x-quote-email-ready") === "true",
         );
         setQuotePreviewUrl(URL.createObjectURL(pdfBlob));
+        if (res.headers.get("x-quote-already-finalized") === "true") {
+          setQuoteNotice({
+            tone: "success",
+            text:
+              content.messages.quoteAlreadyFinalizedPreview ??
+              "이미 최종확정된 견적서입니다. 저장된 PDF를 표시합니다.",
+          });
+        }
         return;
       }
 
@@ -566,7 +618,18 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
         let errorMessage =
           content.messages.quoteSaveFailed ??
           "견적서를 저장하지 못했습니다.";
-        if (data?.error === "nh_audit_request_context_missing") {
+        if (
+          data?.error === "assignment_already_finalized" ||
+          data?.error === "duplicate_quote_submission"
+        ) {
+          errorMessage =
+            content.messages.quoteAlreadyFinalized ??
+            "이미 최종확정된 견적입니다. 같은 제휴사의 다른 계정에서도 다시 저장·발송할 수 없습니다.";
+        } else if (data?.error === "quote_request_closed") {
+          errorMessage =
+            content.messages.quoteRequestClosed ??
+            "이 견적 요청은 마감되어 더 이상 저장·발송할 수 없습니다.";
+        } else if (data?.error === "nh_audit_request_context_missing") {
           errorMessage =
             "대상 농협 또는 사업연도 정보가 없습니다. 운영자에게 견적요청 정보 보완을 요청해 주세요.";
         } else if (data?.error === "nh_audit_submission_invalid") {
@@ -712,6 +775,16 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
             </div>
           </div>
           {message ? <p className="admin-form__hint">{message}</p> : null}
+          <nav className="admin-nav" aria-label={sitemapCopy.title}>
+            <a className="admin-nav__item" href="#partner-sitemap">
+              <span className="admin-nav__label">
+                {sitemapCopy.text.menuLabel}
+              </span>
+              <span className="admin-nav__desc">
+                {sitemapCopy.text.menuDescription}
+              </span>
+            </a>
+          </nav>
           <nav className="admin-nav" aria-label="배정 문의">
             {assignments.map((assignment) => {
               const request = requestById.get(assignment.requestId);
@@ -1253,7 +1326,7 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
                     fiscalYear={selectedQuoteRequest.fiscalYear}
                     values={nhAuditFormValues}
                     errors={quoteFieldErrors}
-                    disabled={quoteAction !== null}
+                    disabled={quoteAction !== null || !canMutateSelectedQuote}
                     heading={quoteEvaluationSection?.title}
                     description={quoteEvaluationSection?.description}
                     copy={quoteEvaluationSection?.text}
@@ -1297,11 +1370,20 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
                     {quoteNotice.text}
                   </p>
                 ) : null}
+                {!canMutateSelectedQuote && selectedQuoteAssignment ? (
+                  <p className="admin-form__hint" role="status">
+                    {selectedFinalizedQuote
+                      ? (content.messages.quoteAlreadyFinalizedHint ??
+                        "이미 최종확정된 견적입니다. 미리보기로 저장된 PDF를 확인할 수 있으며, 같은 제휴사 계정으로는 다시 발송할 수 없습니다.")
+                      : (content.messages.quoteMutationLocked ??
+                        "이 견적 요청은 현재 저장·발송할 수 없는 상태입니다.")}
+                  </p>
+                ) : null}
                 <div className="admin-modal__actions">
                   <button
                     type="submit"
                     className="admin-btn"
-                    disabled={quoteAction !== null}
+                    disabled={quoteAction !== null || !canMutateSelectedQuote}
                   >
                     {quoteAction === "draft"
                       ? content.messages.quoteDraftSaving
@@ -1316,8 +1398,11 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
                     {quoteAction === "preview"
                       ? content.messages.quotePreviewLoading ??
                         "미리보기 생성 중..."
-                      : content.messages.quotePreviewButton ??
-                        "견적서 미리보기 및 전송 확인"}
+                      : !canMutateSelectedQuote
+                        ? (content.messages.quoteViewFinalizedButton ??
+                          "확정 견적서 미리보기")
+                        : content.messages.quotePreviewButton ??
+                          "견적서 미리보기 및 전송 확인"}
                   </button>
                 </div>
               </form>
@@ -1327,6 +1412,22 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
               </p>
             )}
           </section>
+          <div id="partner-sitemap">
+            <PortalSitemap
+              sitemap={sitemap}
+              copy={{
+                title: sitemapCopy.title,
+                description: sitemapCopy.description ?? "",
+                publicGroupTitle: sitemapCopy.text.publicGroupTitle ?? "",
+                roleGroupTitle: sitemapCopy.text.roleGroupTitle ?? "",
+                countPrefix: sitemapCopy.text.countPrefix ?? "",
+                countSuffix: sitemapCopy.text.countSuffix ?? "",
+                automaticUpdateLabel:
+                  sitemapCopy.text.automaticUpdateLabel ?? "",
+                openLabel: sitemapCopy.text.openLabel ?? "",
+              }}
+            />
+          </div>
         </section>
       </div>
       {quotePreviewUrl && selectedQuoteRequest ? (
@@ -1396,22 +1497,24 @@ export function PartnerDashboard({ content }: { content: CmsPageContent }) {
                 <button
                   type="button"
                   className="admin-btn admin-btn--primary"
-                  disabled={
-                    quoteAction === "send"
-                  }
+                  disabled={quoteAction === "send" || !canMutateSelectedQuote}
                   onClick={() => void requestQuote("send")}
                 >
                   {quoteAction === "send"
                     ? content.messages.quoteSending ??
                       "최종확정 및 발송 중..."
-                    : content.messages.quoteSendConfirm ??
-                      "확인 완료 · 최종확정 및 고객 발송"}
+                    : !canMutateSelectedQuote
+                      ? (content.messages.quoteAlreadyFinalizedSendDisabled ??
+                        "이미 최종확정됨")
+                      : content.messages.quoteSendConfirm ??
+                        "확인 완료 · 최종확정 및 고객 발송"}
                 </button>
               </div>
             </div>
           </section>
         </div>
       ) : null}
+      <CmsSupplementalSections pageKey="partner.portal" content={content} />
     </main>
   );
 }

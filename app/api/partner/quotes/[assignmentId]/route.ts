@@ -27,6 +27,7 @@ import { quoteDocumentContentFromCms } from "@/lib/quotes/quote-document-content
 import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 import {
   deleteQuotePdf,
+  readQuotePdfBuffer,
   readStorageFileAsDataUri,
   saveQuotePdf,
 } from "@/lib/quotes/quote-storage";
@@ -60,6 +61,7 @@ import {
   canPartnerMutateQuoteAssignment,
   createNhAuditEvaluationSnapshotV2,
   nextImmutableQuoteVersion,
+  partnerQuoteMutationBlockReason,
 } from "@/lib/quotes/nh-audit-quote-server";
 import { validateQuoteSupplierProfile } from "@/lib/quotes/supplier-profile";
 
@@ -146,14 +148,13 @@ async function buildQuote(
   }
   const quoteRequest = quoteRequestSnapshot.data() as QuoteRequestRecord;
   const partner = partnerSnapshot.data() as PartnerRecord;
-  if (
-    !canPartnerMutateQuoteAssignment({
-      authenticatedPartnerId: partnerId,
-      assignment,
-      quoteRequest,
-    })
-  ) {
-    return { ok: false as const, error: "permission_denied" };
+  const mutationBlock = partnerQuoteMutationBlockReason({
+    authenticatedPartnerId: partnerId,
+    assignment,
+    quoteRequest,
+  });
+  if (mutationBlock) {
+    return { ok: false as const, error: mutationBlock };
   }
   const quoteId =
     status === "draft" ? `${assignmentId}_draft` : `${assignmentId}_v${version}`;
@@ -507,7 +508,16 @@ export async function PUT(req: Request, { params }: Params) {
           ? { supplierProfileErrors: result.supplierProfileErrors }
           : {}),
       },
-      { status: result.error === "permission_denied" ? 403 : 400 },
+      {
+        status:
+          result.error === "permission_denied" ||
+          result.error === "assignment_revoked"
+            ? 403
+            : result.error === "assignment_already_finalized" ||
+                result.error === "quote_request_closed"
+              ? 409
+              : 400,
+      },
     );
   }
   const now = new Date().toISOString();
@@ -542,11 +552,53 @@ export async function PATCH(req: Request, { params }: Params) {
     );
   }
   const { assignmentId } = await params;
-  const previousVersions = await adminDb()
+  const db = adminDb();
+  const assignmentSnapshot = await db
+    .collection("quoteAssignments")
+    .doc(assignmentId)
+    .get();
+  if (!assignmentSnapshot.exists) {
+    return NextResponse.json(
+      { ok: false, error: "assignment_not_found" },
+      { status: 404 },
+    );
+  }
+  const assignment = assignmentSnapshot.data() as QuoteAssignmentRecord;
+  const partnerId = partnerSession.profile.partnerId as string;
+  if (assignment.partnerId !== partnerId) {
+    return NextResponse.json(
+      { ok: false, error: "permission_denied" },
+      { status: 403 },
+    );
+  }
+  const previousVersions = await db
     .collection("quotes")
     .where("quoteAssignmentId", "==", assignmentId)
     .where("status", "in", ["finalized", "delivered"])
     .get();
+  if (["finalized", "submitted"].includes(assignment.status)) {
+    const latest = previousVersions.docs
+      .map((doc) => doc.data() as QuoteRecord)
+      .sort((left, right) => Number(right.version) - Number(left.version))[0];
+    const pdfBuffer = await readQuotePdfBuffer(latest?.pdfPath);
+    if (pdfBuffer) {
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        headers: {
+          "cache-control": "private, no-store",
+          "content-disposition": 'inline; filename="quote-preview.pdf"',
+          "content-type": "application/pdf",
+          "x-quote-email-ready": getTransactionalEmailConfigurationError()
+            ? "false"
+            : "true",
+          "x-quote-already-finalized": "true",
+        },
+      });
+    }
+    return NextResponse.json(
+      { ok: false, error: "assignment_already_finalized" },
+      { status: 409 },
+    );
+  }
   const version = nextImmutableQuoteVersion(
     previousVersions.docs.map((doc) =>
       Number((doc.data() as QuoteRecord).version),
@@ -585,7 +637,16 @@ export async function PATCH(req: Request, { params }: Params) {
           ? { supplierProfileErrors: result.supplierProfileErrors }
           : {}),
       },
-      { status: result.error === "permission_denied" ? 403 : 400 },
+      {
+        status:
+          result.error === "permission_denied" ||
+          result.error === "assignment_revoked"
+            ? 403
+            : result.error === "assignment_already_finalized" ||
+                result.error === "quote_request_closed"
+              ? 409
+              : 400,
+      },
     );
   }
   const logoDataUri = await readStorageFileAsDataUri(
@@ -671,7 +732,16 @@ export async function POST(req: Request, { params }: Params) {
           ? { supplierProfileErrors: result.supplierProfileErrors }
           : {}),
       },
-      { status: result.error === "permission_denied" ? 403 : 400 },
+      {
+        status:
+          result.error === "permission_denied" ||
+          result.error === "assignment_revoked"
+            ? 403
+            : result.error === "assignment_already_finalized" ||
+                result.error === "quote_request_closed"
+              ? 409
+              : 400,
+      },
     );
   }
   const logoDataUri = await readStorageFileAsDataUri(result.partner.logoPath);

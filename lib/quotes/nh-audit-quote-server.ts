@@ -172,11 +172,35 @@ export function canPartnerMutateQuoteAssignment(input: {
   assignment: Pick<QuoteAssignmentRecord, "partnerId" | "status">;
   quoteRequest: Pick<QuoteRequestRecord, "status">;
 }) {
-  return (
-    input.assignment.partnerId === input.authenticatedPartnerId &&
-    ["assigned", "drafting"].includes(input.assignment.status) &&
-    !["closed", "cancelled"].includes(input.quoteRequest.status)
-  );
+  return partnerQuoteMutationBlockReason(input) === null;
+}
+
+export function partnerQuoteMutationBlockReason(input: {
+  authenticatedPartnerId: string;
+  assignment: Pick<QuoteAssignmentRecord, "partnerId" | "status">;
+  quoteRequest: Pick<QuoteRequestRecord, "status">;
+}):
+  | null
+  | "permission_denied"
+  | "assignment_already_finalized"
+  | "assignment_revoked"
+  | "quote_request_closed" {
+  if (input.assignment.partnerId !== input.authenticatedPartnerId) {
+    return "permission_denied";
+  }
+  if (input.assignment.status === "revoked") {
+    return "assignment_revoked";
+  }
+  if (["finalized", "submitted"].includes(input.assignment.status)) {
+    return "assignment_already_finalized";
+  }
+  if (["closed", "cancelled"].includes(input.quoteRequest.status)) {
+    return "quote_request_closed";
+  }
+  if (!["assigned", "drafting"].includes(input.assignment.status)) {
+    return "permission_denied";
+  }
+  return null;
 }
 
 export function nextImmutableQuoteVersion(

@@ -14,6 +14,7 @@ import {
   canPartnerMutateQuoteAssignment,
   createNhAuditEvaluationSnapshotV2,
   nextImmutableQuoteVersion,
+  partnerQuoteMutationBlockReason,
   resolveNhAuditQuoteCompatibility,
 } from "@/lib/quotes/nh-audit-quote-server";
 
@@ -281,6 +282,14 @@ describe("NH audit quote authorization, compatibility and revision policy", () =
       false,
     );
     assert.equal(
+      partnerQuoteMutationBlockReason({
+        authenticatedPartnerId: "partner-b",
+        assignment,
+        quoteRequest: request,
+      }),
+      "permission_denied",
+    );
+    assert.equal(
       canPartnerMutateQuoteAssignment({
         authenticatedPartnerId: "partner-a",
         assignment: { ...assignment, status: "finalized" },
@@ -289,12 +298,28 @@ describe("NH audit quote authorization, compatibility and revision policy", () =
       false,
     );
     assert.equal(
+      partnerQuoteMutationBlockReason({
+        authenticatedPartnerId: "partner-a",
+        assignment: { ...assignment, status: "finalized" },
+        quoteRequest: request,
+      }),
+      "assignment_already_finalized",
+    );
+    assert.equal(
       canPartnerMutateQuoteAssignment({
         authenticatedPartnerId: "partner-a",
         assignment: { ...assignment, status: "revoked" },
         quoteRequest: request,
       }),
       false,
+    );
+    assert.equal(
+      partnerQuoteMutationBlockReason({
+        authenticatedPartnerId: "partner-a",
+        assignment: { ...assignment, status: "revoked" },
+        quoteRequest: request,
+      }),
+      "assignment_revoked",
     );
     assert.equal(
       canPartnerMutateQuoteAssignment({

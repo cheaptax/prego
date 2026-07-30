@@ -30,6 +30,15 @@ export async function deleteQuotePdf(storagePath: string) {
     .delete({ ignoreNotFound: true });
 }
 
+export async function readQuotePdfBuffer(storagePath: string | undefined) {
+  if (!storagePath) return null;
+  const file = adminStorage().bucket().file(storagePath);
+  const [exists] = await file.exists();
+  if (!exists) return null;
+  const [buffer] = await file.download();
+  return buffer;
+}
+
 export async function readStorageFileAsDataUri(
   storagePath: string | undefined,
 ) {

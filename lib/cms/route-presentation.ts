@@ -627,6 +627,23 @@ export const CMS_ROUTE_SECTION_PRESENTATION: Partial<
       legalWarning:
         "실제 파트너 인증과 배정 권한이 구현되기 전에는 운영 정보 화면을 공개할 수 없습니다.",
     },
+    sitemap: {
+      name: "제휴사 사이트맵",
+      titleLabel: "사이트맵 제목",
+      descriptionLabel: "사이트맵 안내",
+      legalWarning:
+        "실제 URL과 제휴사 접근 권한은 App Router와 서버 권한에서 자동 판정됩니다. 표시 문구만 편집할 수 있습니다.",
+      textFields: {
+        menuLabel: field("사이드 메뉴 이름"),
+        menuDescription: field("사이드 메뉴 설명"),
+        publicGroupTitle: field("공개 서비스 그룹 제목"),
+        roleGroupTitle: field("제휴사 전용 그룹 제목"),
+        countPrefix: field("페이지 수 앞 문구"),
+        countSuffix: field("페이지 수 뒤 문구"),
+        automaticUpdateLabel: field("자동 갱신 안내"),
+        openLabel: field("페이지 열기 버튼"),
+      },
+    },
     quoteEvaluation: {
       name: "회계감사 견적 평가",
       eyebrowLabel: "상단 작은 문구",
@@ -1010,6 +1027,21 @@ export const CMS_ROUTE_SECTION_PRESENTATION: Partial<
         description: "메뉴에서 확인할 수 있는 내용",
       },
     },
+    sitemap: {
+      name: "고객 사이트맵",
+      titleLabel: "사이트맵 제목",
+      descriptionLabel: "사이트맵 안내",
+      legalWarning:
+        "실제 URL과 고객 접근 권한은 App Router와 서버 권한에서 자동 판정됩니다. 표시 문구만 편집할 수 있습니다.",
+      textFields: {
+        publicGroupTitle: field("공개 서비스 그룹 제목"),
+        roleGroupTitle: field("고객 전용 그룹 제목"),
+        countPrefix: field("페이지 수 앞 문구"),
+        countSuffix: field("페이지 수 뒤 문구"),
+        automaticUpdateLabel: field("자동 갱신 안내"),
+        openLabel: field("페이지 열기 버튼"),
+      },
+    },
     overview: {
       name: "이용 현황 요약",
       titleLabel: "영역 제목",
@@ -1341,6 +1373,7 @@ export const CMS_ROUTE_SECTION_PRESENTATION: Partial<
         auditEvaluationsDescription: field("감사평가 운영 설명"),
         pointsDescription: field("포인트 관리 설명"),
         auditDescription: field("운영 기록 설명"),
+        sitemapDescription: field("사이트맵 설명"),
         navigationAriaLabel: field("메뉴 접근성 이름"),
         brandName: field("서비스 이름"),
         brandSubtitle: field("운영 화면 이름"),
@@ -1354,6 +1387,21 @@ export const CMS_ROUTE_SECTION_PRESENTATION: Partial<
         closeAriaLabel: field("알림 닫기 접근성 이름"),
       },
       itemFields: { title: "메뉴 표시 이름" },
+    },
+    sitemap: {
+      name: "관리자 사이트맵",
+      titleLabel: "사이트맵 제목",
+      descriptionLabel: "사이트맵 안내",
+      legalWarning:
+        "실제 URL과 접근 권한은 App Router와 서버 권한에서 자동 판정됩니다. 표시 문구만 편집할 수 있습니다.",
+      textFields: {
+        publicGroupTitle: field("공개 서비스 그룹 제목"),
+        roleGroupTitle: field("관리자 전용 그룹 제목"),
+        countPrefix: field("페이지 수 앞 문구"),
+        countSuffix: field("페이지 수 뒤 문구"),
+        automaticUpdateLabel: field("자동 갱신 안내"),
+        openLabel: field("페이지 열기 버튼"),
+      },
     },
     overview: {
       name: "운영 대시보드",
@@ -2040,6 +2088,13 @@ export const CMS_ROUTE_MESSAGE_PRESENTATION: Partial<
     evaluationRegistrationFailed: field("감사평가 견적 등록 실패 안내"),
     evaluationFallbackWarning: field("게시 평가기준 없음 안내"),
     quoteSaveFailed: field("견적 저장 실패 안내"),
+    quoteAlreadyFinalized: field("이미 최종확정된 견적 안내"),
+    quoteAlreadyFinalizedHint: field("최종확정 견적 입력 잠금 안내"),
+    quoteAlreadyFinalizedPreview: field("최종확정 견적 PDF 미리보기 안내"),
+    quoteAlreadyFinalizedSendDisabled: field("최종확정 발송 버튼 비활성 문구"),
+    quoteMutationLocked: field("견적 저장 불가 상태 안내"),
+    quoteRequestClosed: field("견적 요청 마감 안내"),
+    quoteViewFinalizedButton: field("확정 견적서 미리보기 버튼"),
     quoteDraftSaved: field("견적 초안 저장 성공 안내"),
     quoteFinalized: field("견적 확정·발송 안내"),
     quoteRequiredSummary: field("견적 필수정보 누락 안내"),

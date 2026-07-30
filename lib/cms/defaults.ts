@@ -24,6 +24,7 @@ type SectionInput = Omit<
   CmsSection,
   | "visible"
   | "locked"
+  | "deleted"
   | "headingLevel"
   | "text"
   | "items"
@@ -33,6 +34,7 @@ type SectionInput = Omit<
 > & {
   visible?: boolean;
   locked?: boolean;
+  deleted?: boolean;
   headingLevel?: CmsSection["headingLevel"];
   text?: CmsSection["text"];
   items?: CmsSection["items"];
@@ -58,6 +60,7 @@ const action = (
 const section = (input: SectionInput): CmsSection => ({
   visible: true,
   locked: false,
+  deleted: false,
   headingLevel: 2,
   text: {},
   items: [],
@@ -543,6 +546,15 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           visible: true,
           deleted: false,
         })),
+      }),
+      section({
+        id: "promoFloat",
+        eyebrow: "기간 한정",
+        title: "2027년도 외부회계감사 견적 신청하기",
+        description: "안내를 눌러 바로 신청할 수 있습니다.",
+        actions: [
+          action("open", "견적 신청하기", "/events/audit-quote"),
+        ],
       }),
     ],
     {
@@ -1299,8 +1311,9 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           targetCooperativeHelp:
             "회계감사 견적을 받을 농협의 정식 명칭을 입력해 주세요.",
           fiscalYearLabel: "감사 대상 사업연도",
-          fiscalYearPlaceholder: "예: 2026",
-          fiscalYearHelp: "회계감사 대상 사업연도 4자리를 입력해 주세요.",
+          fiscalYearPlaceholder: "2027",
+          fiscalYearHelp:
+            "농협법 개정에 따라 2026년말 기준 자산총액 500억원 이상 농협은 2027년도의 재무제표에 대한 외부회계감사를 수감해야 합니다.(*)",
           emailLabel: "농협 이메일",
           emailPlaceholder: "example@nonghyup.com",
           emailHelp: "",
@@ -1391,7 +1404,18 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         text: {
           ariaLabel: "운영 안내",
           operatorName: "주식회사 프리고",
+          regulationNote: "(*) 농업협동조합법 시행령 입법예고 기준.",
         },
+        items: [
+          item(
+            "annualAudit",
+            "자산총액 3,000억원 이상: 매년 외부회계감사",
+          ),
+          item(
+            "biennialAudit",
+            "자산총액 500억원 이상 3,000억원 미만: 2년마다 외부회계감사",
+          ),
+        ],
         locked: true,
       }),
     ],
@@ -1413,9 +1437,8 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       targetCooperativeRequired: "대상 농협명을 입력해 주세요.",
       targetCooperativeInvalid:
         "대상 농협명을 2자 이상 300자 이하로 입력해 주세요.",
-      fiscalYearRequired: "감사 대상 사업연도를 입력해 주세요.",
-      fiscalYearInvalid:
-        "사업연도는 2000년부터 2100년 사이의 4자리 숫자로 입력해 주세요.",
+      fiscalYearRequired: "감사 대상 사업연도가 준비되지 않았습니다.",
+      fiscalYearInvalid: "이번 접수는 2027년도만 가능합니다.",
       emailRequired: "농협 이메일을 입력해 주세요.",
       emailInvalid: "농협 이메일(@nonghyup.com)만 신청할 수 있어요.",
       nameRequired: "담당자 이름을 입력해 주세요.",
@@ -1906,8 +1929,24 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           item("inquiries", "문의 내역", "내가 등록한 문의와 답변"),
           item("points", "포인트", "농협 지갑 포인트 사용 내역"),
           item("profile", "내 정보", "내 소속과 계정 정보"),
+          item("sitemap", "사이트맵", "고객이 이용할 수 있는 전체 페이지"),
         ],
         locked: true,
+      }),
+      section({
+        id: "sitemap",
+        title: "고객 사이트맵",
+        description:
+          "현재 고객 계정으로 이용할 수 있는 마이페이지와 공개 서비스를 확인합니다.",
+        locked: true,
+        text: {
+          publicGroupTitle: "공개 서비스",
+          roleGroupTitle: "고객 전용 페이지",
+          countPrefix: "현재 ",
+          countSuffix: "개 페이지",
+          automaticUpdateLabel: "배포 경로 자동 동기화",
+          openLabel: "페이지 열기",
+        },
       }),
       section({
         id: "overview",
@@ -2324,6 +2363,23 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         locked: true,
       }),
       section({
+        id: "sitemap",
+        title: "제휴사 사이트맵",
+        description:
+          "현재 제휴사 계정으로 이용할 수 있는 업무 화면과 공개 서비스를 확인합니다.",
+        locked: true,
+        text: {
+          menuLabel: "사이트맵",
+          menuDescription: "접근 가능한 전체 페이지",
+          publicGroupTitle: "공개 서비스",
+          roleGroupTitle: "제휴사 전용 페이지",
+          countPrefix: "현재 ",
+          countSuffix: "개 페이지",
+          automaticUpdateLabel: "배포 경로 자동 동기화",
+          openLabel: "페이지 열기",
+        },
+      }),
+      section({
         id: "quoteEvaluation",
         eyebrow: "Audit quote evaluation",
         title: "회계감사 견적 평가정보",
@@ -2485,6 +2541,18 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       evaluationFallbackWarning:
         "게시된 운영 평가기준이 없어 기본 기준을 표시하고 있습니다. 운영자에게 평가기준 게시 상태를 확인해 주세요.",
       quoteSaveFailed: "견적서를 저장하지 못했습니다.",
+      quoteAlreadyFinalized:
+        "이미 최종확정된 견적입니다. 같은 제휴사의 다른 계정에서도 다시 저장·발송할 수 없습니다.",
+      quoteAlreadyFinalizedHint:
+        "이미 최종확정된 견적입니다. 미리보기로 저장된 PDF를 확인할 수 있으며, 같은 제휴사 계정으로는 다시 발송할 수 없습니다.",
+      quoteAlreadyFinalizedPreview:
+        "이미 최종확정된 견적서입니다. 저장된 PDF를 표시합니다.",
+      quoteAlreadyFinalizedSendDisabled: "이미 최종확정됨",
+      quoteMutationLocked:
+        "이 견적 요청은 현재 저장·발송할 수 없는 상태입니다.",
+      quoteRequestClosed:
+        "이 견적 요청은 마감되어 더 이상 저장·발송할 수 없습니다.",
+      quoteViewFinalizedButton: "확정 견적서 미리보기",
       quoteDraftSaved: "견적서 초안을 저장했습니다.",
       quoteFinalized:
         "견적서를 최종확정하고 고객에게 이메일로 발송했습니다.",
@@ -2862,6 +2930,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
             "감사평가 건·기준·보고서와 처리 이력 운영",
           pointsDescription: "농협 지갑과 포인트 정산",
           auditDescription: "주요 변경 이력",
+          sitemapDescription: "접근 가능한 관리자·공개 페이지 안내",
           navigationAriaLabel: "관리자 콘솔 내비게이션",
           brandName: "농협지원센터",
           brandSubtitle: "회원·상담 운영",
@@ -2887,7 +2956,23 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           item("auditEvaluations", "감사평가 운영"),
           item("points", "포인트 관리"),
           item("audit", "운영 작업 기록"),
+          item("sitemap", "사이트맵"),
         ],
+      }),
+      section({
+        id: "sitemap",
+        title: "관리자 사이트맵",
+        description:
+          "현재 관리자 계정으로 접근할 수 있는 운영 화면과 공개 서비스를 확인합니다.",
+        locked: true,
+        text: {
+          publicGroupTitle: "공개 서비스",
+          roleGroupTitle: "관리자 전용 페이지",
+          countPrefix: "현재 ",
+          countSuffix: "개 페이지",
+          automaticUpdateLabel: "배포 경로 자동 동기화",
+          openLabel: "페이지 열기",
+        },
       }),
       section({
         id: "overview",
@@ -4676,8 +4761,20 @@ export const CMS_PROTECTED_PAGE_ITEM_IDS: Partial<
 export const CMS_PROTECTED_PAGE_ACTION_IDS: Partial<
   Record<CmsPageKey, Record<string, readonly string[]>>
 > = {
+  home: {
+    promoFloat: ["open"],
+  },
   "auth.signup": {
     consents: ["terms", "privacy"],
+  },
+};
+
+/** Removed from published drafts during normalize so temporary CTAs can move. */
+export const CMS_REMOVED_PAGE_ACTION_IDS: Partial<
+  Record<CmsPageKey, Record<string, readonly string[]>>
+> = {
+  home: {
+    hero: ["auditQuote"],
   },
 };
 
@@ -4831,7 +4928,7 @@ export function validatePageIdentity(
       const section = content.sections.find(
         (candidate) => candidate.id === sectionId,
       );
-      return !section?.visible || !section.locked;
+      return !section?.visible || !section.locked || section.deleted;
     },
   );
   if (invalidRequiredSection) {
