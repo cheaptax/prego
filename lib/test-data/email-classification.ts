@@ -11,6 +11,8 @@ export const TEST_CUSTOMER_EMAILS = [
   "cheaptax@naver.com",
   "requiem77k@naver.com",
   "prego.ceo@gmail.com",
+  "bsmta1277@gmail.com",
+  "bsmta@naver.com",
 ] as const;
 
 export const UNLIMITED_TEST_PHONE = "01063877780";

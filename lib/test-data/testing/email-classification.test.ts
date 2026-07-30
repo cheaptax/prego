@@ -15,8 +15,8 @@ describe("customer email data classification", () => {
     assert.equal(classifyCustomerEmail("user@nonghyup.com.example"), "UNSUPPORTED");
   });
 
-  it("allows exactly the four approved test addresses", () => {
-    assert.equal(TEST_CUSTOMER_EMAILS.length, 4);
+  it("allows exactly the approved test addresses", () => {
+    assert.equal(TEST_CUSTOMER_EMAILS.length, 6);
     for (const email of TEST_CUSTOMER_EMAILS) {
       assert.equal(classifyCustomerEmail(email), "TEST");
       assert.equal(isAllowedCustomerEmail(` ${email.toUpperCase()} `), true);

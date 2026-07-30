@@ -82,6 +82,8 @@ describe("audit-quote unit", () => {
       "cheaptax@naver.com",
       "requiem77k@naver.com",
       "prego.ceo@gmail.com",
+      "bsmta1277@gmail.com",
+      "bsmta@naver.com",
     ]) {
       assert.equal(isAllowedAuditQuoteRequesterEmail(email), true);
       assert.equal(
