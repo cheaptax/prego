@@ -58,6 +58,22 @@ async function chart(symbol: string, start: string, end: string, period: "D" | "
   return data.output2 ?? [];
 }
 
+function highest(rows: KisRow[]) {
+  return rows.reduce<KisRow | null>((best, row) => Number(row.stck_hgpr ?? 0) > Number(best?.stck_hgpr ?? 0) ? row : best, null);
+}
+
+async function dailyRowsForYear(symbol: string, year: string) {
+  const ranges = [
+    [`${year}0101`, `${year}0331`],
+    [`${year}0401`, `${year}0630`],
+    [`${year}0701`, `${year}0930`],
+    [`${year}1001`, `${year}1231`],
+  ] as const;
+  const rows: KisRow[] = [];
+  for (const [start, end] of ranges) rows.push(...await chart(symbol, start, end, "D"));
+  return [...new Map(rows.map((row) => [row.stck_bsop_date ?? "", row])).values()].filter((row) => row.stck_bsop_date);
+}
+
 export async function fetchKisQuote(symbol: string): Promise<MarketQuoteRecord> {
   const priceData = await request("/uapi/domestic-stock/v1/quotations/inquire-price", "FHKST01010100", {
     FID_COND_MRKT_DIV_CODE: "J",
@@ -66,16 +82,13 @@ export async function fetchKisQuote(symbol: string): Promise<MarketQuoteRecord> 
   const currentPrice = Number(priceData.output?.stck_prpr ?? 0);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) throw new Error("kis_invalid_current_price");
 
-  const now = new Date();
-  const end = compactDate(now);
+  const end = compactDate(new Date());
   const annual = await chart(symbol, "19800101", end, "Y");
-  const annualPeak = annual.reduce<KisRow | null>((best, row) => Number(row.stck_hgpr ?? 0) > Number(best?.stck_hgpr ?? 0) ? row : best, null);
-  let peakRows = annual;
-  if (annualPeak?.stck_bsop_date?.length === 8) {
-    const year = annualPeak.stck_bsop_date.slice(0, 4);
-    peakRows = await chart(symbol, `${year}0101`, `${year}1231`, "D");
-  }
-  const peak = peakRows.reduce<KisRow | null>((best, row) => Number(row.stck_hgpr ?? 0) > Number(best?.stck_hgpr ?? 0) ? row : best, null);
+  const annualPeak = highest(annual);
+  const peakRows = annualPeak?.stck_bsop_date?.length === 8
+    ? await dailyRowsForYear(symbol, annualPeak.stck_bsop_date.slice(0, 4))
+    : annual;
+  const peak = highest(peakRows);
   const peakPrice = Number(peak?.stck_hgpr ?? 0);
   const peakDate = peak?.stck_bsop_date;
   return {
