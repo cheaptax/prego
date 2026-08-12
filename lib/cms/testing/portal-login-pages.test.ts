@@ -86,6 +86,14 @@ describe("portal login page rendering contract", () => {
     const partner = CMS_PAGE_DEFAULTS["auth.partnerLogin"];
     const admin = CMS_PAGE_DEFAULTS["auth.adminLogin"];
     assert.match(JSON.stringify(customer), /농협지원센터 로그인/);
+    assert.match(
+      JSON.stringify(customer),
+      /농협 이메일\(@nonghyup\.com\) 또는 승인된 테스트 계정/,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(customer),
+      /가입한 농협 이메일 계정으로 로그인해 주세요/,
+    );
     assert.doesNotMatch(JSON.stringify(customer), /내부 운영자 전용/);
     assert.match(JSON.stringify(partner), /제휴사 로그인/);
     assert.match(JSON.stringify(partner), /등록된 제휴사 운영자 계정/);

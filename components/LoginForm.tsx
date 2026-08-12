@@ -21,6 +21,7 @@ import {
 import type { CmsPageKey } from "@/lib/cms/constants";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
+import { isAllowedCustomerEmail } from "@/lib/test-data/email-classification";
 
 export function LoginForm({
   content,
@@ -73,9 +74,16 @@ export function LoginForm({
     if (!email.trim()) return setError(messages.emailRequired);
     if (!password) return setError(messages.passwordRequired);
 
+    const normalizedEmail = email.trim().toLowerCase();
+    if (
+      expectedPortal === "customer" &&
+      !isAllowedCustomerEmail(normalizedEmail)
+    ) {
+      return setError(formCopy.text.hint || messages.invalidCredentials);
+    }
+
     submittingRef.current = true;
     setStatus("submitting");
-    const normalizedEmail = email.trim().toLowerCase();
 
     try {
       const result = await loginWithEmailAndPassword({
@@ -252,7 +260,13 @@ export function LoginForm({
         ) : null}
       </div>
 
-      {error && (
+      <button className="login-form__submit" type="submit" disabled={status === "submitting"}>
+        {status === "submitting"
+          ? formCopy.text.submittingLabel
+          : formCopy.text.submitLabel}
+      </button>
+
+      {error ? (
         <p className="login-form__error" role="alert">
           {error}
           {portalRedirect && (
@@ -262,17 +276,11 @@ export function LoginForm({
             </>
           )}
         </p>
+      ) : (
+        <p className="login-form__hint" role="note">
+          {formCopy.text.hint}
+        </p>
       )}
-
-      <button className="login-form__submit" type="submit" disabled={status === "submitting"}>
-        {status === "submitting"
-          ? formCopy.text.submittingLabel
-          : formCopy.text.submitLabel}
-      </button>
-
-      <p className="login-form__hint">
-        {formCopy.text.hint}
-      </p>
 
       <div className="login-recovery">
         <div

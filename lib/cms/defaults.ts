@@ -579,7 +579,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       href: "/signup",
     },
     showEmailLookup: true,
-    hint: "가입한 농협 이메일 계정으로 로그인해 주세요.",
+    hint: "농협 이메일(@nonghyup.com) 또는 승인된 테스트 계정으로 로그인해 주세요.",
     accountUnavailable:
       "현재 이 계정으로 로그인할 수 없습니다. 계정 상태를 확인하거나 고객지원에 문의해 주세요.",
   }),
