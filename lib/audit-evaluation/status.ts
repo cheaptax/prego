@@ -7,7 +7,7 @@ const TRANSITIONS: Readonly<
   Record<AuditEvaluationCaseStatus, readonly AuditEvaluationCaseStatus[]>
 > = {
   DRAFT: ["ACCESS_PENDING", "DELETED"],
-  ACCESS_PENDING: ["UPLOADING", "EXPIRED", "DELETED"],
+  ACCESS_PENDING: ["UPLOADING", "READY", "EXPIRED", "DELETED"],
   UPLOADING: [
     "PARSING",
     "NEEDS_REVIEW",

@@ -19,7 +19,13 @@ export async function loadPartnerAccounts(
     .get();
   return snapshot.docs
     .map((doc) => doc.data() as UserRecord)
-    .filter((user) => user.role === "partner")
+    .filter(
+      (user) =>
+        user.role === "partner" ||
+        (user.multiRoleTestAccount === true &&
+          Boolean(user.partnerId) &&
+          (user.enabledPortals?.includes("partner") ?? false)),
+    )
     .sort((left, right) =>
       (right.updatedAt ?? right.createdAt ?? "").localeCompare(
         left.updatedAt ?? left.createdAt ?? "",
@@ -78,11 +84,14 @@ export async function syncPartnerAccountAccess(
           partner.status,
           getAccountStatus(account),
         );
-        await adminAuth().updateUser(account.uid, { disabled: !enabled });
+        if (!account.multiRoleTestAccount) {
+          await adminAuth().updateUser(account.uid, { disabled: !enabled });
+        }
         await adminAuth().setCustomUserClaims(account.uid, {
           ...(authUser.customClaims ?? {}),
           partner: enabled,
           partnerId: partner.id,
+          ...(account.multiRoleTestAccount ? { multiRole: true } : {}),
         });
         return { uid: account.uid, ok: true as const };
       } catch {

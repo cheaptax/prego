@@ -197,6 +197,7 @@ export async function PATCH(
     await adminAuth().setCustomUserClaims(uid, {
       ...(authUser.customClaims ?? {}),
       admin: nextStatus === "active",
+      ...(current.multiRoleTestAccount ? { multiRole: true } : {}),
     });
   }
 

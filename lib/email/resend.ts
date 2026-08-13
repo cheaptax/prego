@@ -25,7 +25,7 @@ export function getEmailFromAddress() {
   const from = (
     process.env.RESEND_FROM_EMAIL?.trim() ||
     process.env.NH_SUPPORT_FROM_EMAIL?.trim() ||
-    "농협지원센터 <no-reply@nonghyup-support.local>"
+    "PREGO <no-reply@nonghyup-support.local>"
   );
   if (/[\r\n]/.test(from) || !from.includes("@")) {
     throw new Error("invalid_email_from_address");
@@ -37,6 +37,71 @@ export function getEmailFromAddress() {
     throw new Error("production_email_from_not_configured");
   }
   return from;
+}
+
+/**
+ * Resend rejects or mangles RFC 2047 (`=?UTF-8?B?...?=`) and raw Korean in the
+ * From display name (Anymail: `?U` / punctuation triggers API or inbox mojibake).
+ * Keep an ASCII-only friendly name for the Resend `from` field.
+ */
+export function sanitizeResendDisplayName(value: string) {
+  const override = process.env.RESEND_FROM_DISPLAY_NAME?.trim();
+  if (
+    override &&
+    !/[^\x20-\x7E]/u.test(override) &&
+    !/=\?/u.test(override)
+  ) {
+    return override.replace(/\s+/gu, " ").trim();
+  }
+
+  // Strip MIME encoded-words, non-ASCII, and leftover mojibake markers (`?`)
+  // that appear when Korean was already corrupted in env / transit.
+  const ascii = value
+    .replace(/=\?[\w-]+\?[BQbq]\?[A-Za-z0-9+\/=_-]*\?=/gu, " ")
+    .replace(/[^\x20-\x7E]/gu, " ")
+    .replace(/["\\<>?]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return ascii || "PREGO";
+}
+
+/** @deprecated Prefer sanitizeResendDisplayName — kept for tests/callers. */
+export function encodeRfc2047Phrase(value: string) {
+  // Intentionally unused for Resend From. Kept as a pure helper for other headers.
+  const name = value.trim();
+  if (!name) return "";
+  if (/^=\?[\w-]+\?[BQbq]\?/u.test(name)) return name;
+  if (!/[^\x20-\x7E]/u.test(name)) {
+    return /[\s]/.test(name) ? name : name;
+  }
+  const encoded = Buffer.from(name, "utf8").toString("base64");
+  return `=?UTF-8?B?${encoded}?=`;
+}
+
+export function formatEmailFromHeader(from: string) {
+  const trimmed = from.trim();
+  const match = trimmed.match(/^(.*)<([^<>]+)>\s*$/u);
+  if (!match) {
+    if (/[^\x20-\x7E]/u.test(trimmed) || /=\?/u.test(trimmed)) {
+      throw new Error("invalid_email_from_address");
+    }
+    return trimmed;
+  }
+  const email = match[2].trim();
+  if (!email.includes("@") || /[^\x20-\x7E]/u.test(email)) {
+    throw new Error("invalid_email_from_address");
+  }
+  const rawName = match[1]
+    .trim()
+    .replace(/^"(.*)"$/u, "$1")
+    .replace(/\\"/g, '"');
+  if (!rawName) return email;
+  const displayName = sanitizeResendDisplayName(rawName);
+  // Never quote: Resend also mangles quoted From display names.
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._+-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/u.test(displayName)) {
+    return `PREGO <${email}>`;
+  }
+  return `${displayName} <${email}>`;
 }
 
 export function getTransactionalEmailConfigurationError():
@@ -86,6 +151,15 @@ export function getAppBaseUrl() {
   return url.toString().replace(/\/+$/, "");
 }
 
+export function getCustomerFacingAppBaseUrl(
+  env: Record<string, string | undefined> = process.env,
+) {
+  if (env.NODE_ENV !== "production" && env.VERCEL !== "1") {
+    return "http://localhost:3000";
+  }
+  return getAppBaseUrl();
+}
+
 export async function sendTransactionalEmail(input: SendEmailInput) {
   if (
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.to) ||
@@ -109,7 +183,7 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
 
   const result = await client.emails.send(
     {
-      from: getEmailFromAddress(),
+      from: formatEmailFromHeader(getEmailFromAddress()),
       to: input.to,
       subject: input.subject,
       html: input.html,

@@ -16,7 +16,13 @@ import {
   type AccountType,
   type AuthenticatedAccountContext,
   type AuthenticatedAccountRole,
+  type PortalType,
 } from "@/lib/auth/portal";
+import {
+  isMultiRoleTestEmail,
+  isMultiRoleTestProfile,
+  normalizeEnabledPortals,
+} from "@/lib/test-data/multi-role-test-accounts";
 
 export type FirebaseAccountIdentity = {
   uid: string;
@@ -24,6 +30,7 @@ export type FirebaseAccountIdentity = {
   admin?: unknown;
   partner?: unknown;
   partnerId?: unknown;
+  multiRole?: unknown;
 };
 
 export type AccountContextResolutionErrorCode =
@@ -118,11 +125,36 @@ function assertClaimProfileConsistency(
 ) {
   const hasAdminClaim = identity.admin === true;
   const hasPartnerClaim = identity.partner === true;
+  const multiRole =
+    identity.multiRole === true || isMultiRoleTestProfile(profile);
 
-  if (hasAdminClaim && hasPartnerClaim) {
+  if (hasAdminClaim && hasPartnerClaim && !multiRole) {
     throw new AccountContextResolutionError(
       "account_configuration_error",
     );
+  }
+
+  if (multiRole) {
+    if (!isMultiRoleTestEmail(profile.email)) {
+      throw new AccountContextResolutionError(
+        "account_configuration_error",
+      );
+    }
+    if (hasAdminClaim && profile.role !== "admin") {
+      throw new AccountContextResolutionError(
+        "account_configuration_error",
+      );
+    }
+    if (
+      hasPartnerClaim &&
+      profile.role !== "partner" &&
+      profile.role !== "admin"
+    ) {
+      throw new AccountContextResolutionError(
+        "account_configuration_error",
+      );
+    }
+    return;
   }
 
   if (
@@ -135,19 +167,13 @@ function assertClaimProfileConsistency(
     );
   }
 
-  if (
-    profile.role !== "admin" &&
-    hasAdminClaim
-  ) {
+  if (profile.role !== "admin" && hasAdminClaim) {
     throw new AccountContextResolutionError(
       "account_configuration_error",
     );
   }
 
-  if (
-    profile.role !== "partner" &&
-    hasPartnerClaim
-  ) {
+  if (profile.role !== "partner" && hasPartnerClaim) {
     throw new AccountContextResolutionError(
       "account_configuration_error",
     );
@@ -167,6 +193,23 @@ function accountTypeForRole(role: UserRecord["role"]): AccountType {
 
 function isUserRole(value: unknown): value is UserRecord["role"] {
   return value === "member" || value === "partner" || value === "admin";
+}
+
+function resolveEnabledPortals(profile: UserRecord): PortalType[] | undefined {
+  if (!isMultiRoleTestProfile(profile)) return undefined;
+  const configured = normalizeEnabledPortals(profile.enabledPortals);
+  if (configured && configured.length > 0) return configured;
+  const portals: PortalType[] = [];
+  if (profile.role === "admin") portals.push("admin");
+  if (profile.role === "partner" || profile.partnerId) portals.push("partner");
+  if (
+    profile.role === "member" ||
+    profile.cooperativeId ||
+    profile.status === "temporary_quote_member"
+  ) {
+    portals.push("customer");
+  }
+  return portals.length > 0 ? portals : ["admin", "customer"];
 }
 
 export function resolveAccountContextFromRecords({
@@ -204,6 +247,8 @@ export function resolveAccountContextFromRecords({
     );
   }
 
+  const enabledPortals = resolveEnabledPortals(profile);
+  const multiRoleTestAccount = Boolean(enabledPortals);
   const accountType = accountTypeForRole(profile.role);
   let role: AuthenticatedAccountRole =
     profile.role === "admin" ? getAdminRole(profile) : profile.role;
@@ -212,8 +257,11 @@ export function resolveAccountContextFromRecords({
       ? mapCustomerStatus(profile.status)
       : mapAdminStatus(getAccountStatus(profile));
   let partnerId: string | undefined;
+  const partnerPortalEnabled =
+    profile.role === "partner" ||
+    Boolean(enabledPortals?.includes("partner"));
 
-  if (profile.role === "partner") {
+  if (partnerPortalEnabled) {
     partnerId = profile.partnerId?.trim();
     if (!partnerId || !partner || partner.id !== partnerId) {
       throw new AccountContextResolutionError("partner_not_found");
@@ -227,12 +275,20 @@ export function resolveAccountContextFromRecords({
         "account_configuration_error",
       );
     }
-    status = moreRestrictiveStatus(
-      status,
-      mapPartnerStatus(partner.status),
-    );
-    role = "partner";
+    if (!multiRoleTestAccount) {
+      status = moreRestrictiveStatus(
+        status,
+        mapPartnerStatus(partner.status),
+      );
+    }
+    if (profile.role === "partner") {
+      role = "partner";
+    }
   }
+
+  const customerPortalEnabled =
+    accountType === "CUSTOMER" ||
+    Boolean(enabledPortals?.includes("customer"));
 
   return {
     uid: identity.uid,
@@ -240,7 +296,7 @@ export function resolveAccountContextFromRecords({
     accountType,
     role,
     status,
-    ...(profile.role === "member"
+    ...(customerPortalEnabled
       ? {
           customerAccessLevel:
             profile.status === "temporary_quote_member"
@@ -252,5 +308,11 @@ export function resolveAccountContextFromRecords({
     permissions:
       profile.role === "admin" ? getEffectivePermissions(profile) : [],
     defaultPortal: getDefaultPortal(accountType),
+    ...(multiRoleTestAccount
+      ? {
+          multiRoleTestAccount: true,
+          enabledPortals,
+        }
+      : {}),
   };
 }

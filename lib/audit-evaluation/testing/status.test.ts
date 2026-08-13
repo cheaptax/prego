@@ -18,6 +18,10 @@ describe("audit-evaluation status transitions", () => {
       true,
     );
     assert.equal(
+      canTransitionAuditEvaluationStatus("ACCESS_PENDING", "READY"),
+      true,
+    );
+    assert.equal(
       canTransitionAuditEvaluationStatus("UPLOADING", "READY"),
       true,
     );

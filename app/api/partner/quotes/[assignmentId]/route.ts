@@ -1,18 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { AUDIT_QUOTE_REQUESTS } from "@/lib/audit-quote/collections";
 import { adminDb } from "@/lib/firebase/admin";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import {
   authErrorCode,
   authErrorStatus,
   requirePartner,
-  writeAuditLog,
 } from "@/lib/firebase/server";
 import type {
   PartnerRecord,
   QuoteAssignmentRecord,
-  QuoteEmailDeliveryRecord,
   QuoteRecord,
   QuoteRequestRecord,
 } from "@/lib/firebase/schema";
@@ -21,21 +17,22 @@ import {
   normalizeQuoteLineItems,
 } from "@/lib/quotes/quote-calculation";
 import { parseCurrencyInput } from "@/lib/currency-input";
-import { sanitizeNhAuditPartnerFormDraft } from "@/lib/quotes/nh-audit-quote-form";
+import {
+  extractNhAuditEvaluationDefaults,
+} from "@/lib/quotes/nh-audit-evaluation-defaults";
+import {
+  sanitizeNhAuditPartnerFormDraft,
+} from "@/lib/quotes/nh-audit-quote-form";
 import { renderQuotePdf } from "@/lib/quotes/quote-pdf";
 import { quoteDocumentContentFromCms } from "@/lib/quotes/quote-document-content";
 import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 import {
-  deleteQuotePdf,
   readQuotePdfBuffer,
   readStorageFileAsDataUri,
-  saveQuotePdf,
 } from "@/lib/quotes/quote-storage";
 import {
   getTransactionalEmailConfigurationError,
-  sendTransactionalEmail,
 } from "@/lib/email/resend";
-import { buildCustomerQuoteEmail } from "@/lib/quotes/customer-quote-email";
 import { loadActivePartnerEvaluationConfig } from "@/lib/audit-evaluation/active-partner-config";
 import {
   normalizePartnerEvaluationAnswers,
@@ -47,23 +44,15 @@ import type {
   NormalizedAuditQuoteField,
   TrustedStandardQuotePayload,
 } from "@/lib/audit-evaluation/types";
-import { isAuditEvaluationCapabilityEnabled } from "@/lib/audit-evaluation/feature-flags";
-import {
-  createQuoteDocumentIdentity,
-  getQuoteDocumentSigningSecret,
-  serializeEmbeddedQuoteDocumentIdentity,
-} from "@/lib/audit-evaluation/standard-quote-identity";
-import { StandardQuoteDocumentService } from "@/lib/audit-evaluation/standard-quote-service";
-import { FirestoreStandardQuoteDocumentRepository } from "@/lib/audit-evaluation/standard-quote-repository";
-import { embedAuditQuoteIdentityMarker } from "@/lib/quotes/audit-quote-document";
 import {
   buildTrustedNhAuditSubmissionV2,
-  canPartnerMutateQuoteAssignment,
   createNhAuditEvaluationSnapshotV2,
   nextImmutableQuoteVersion,
+  partnerQuoteFinalizeBlockReason,
   partnerQuoteMutationBlockReason,
 } from "@/lib/quotes/nh-audit-quote-server";
 import { validateQuoteSupplierProfile } from "@/lib/quotes/supplier-profile";
+import { finalizePartnerQuoteDelivery } from "@/lib/quotes/finalize-partner-quote-delivery";
 
 export const runtime = "nodejs";
 const MAX_QUOTE_PAYLOAD_BYTES = 256 * 1024;
@@ -84,6 +73,13 @@ type Payload = {
     version?: number;
   };
   auditEvaluationAnswers?: unknown;
+};
+
+export type PartnerQuoteBuildPayload = Payload;
+
+export type PartnerQuoteBuildSession = {
+  profile: { partnerId?: string };
+  decoded: { uid: string; email?: string };
 };
 
 type QuoteRequiredField =
@@ -119,9 +115,9 @@ function nhAuditValidationMessage(path: PropertyKey | undefined) {
   return messages[String(path ?? "")] ?? "입력값을 다시 확인해 주세요.";
 }
 
-async function buildQuote(
+export async function buildQuote(
   assignmentId: string,
-  partnerSession: Awaited<ReturnType<typeof requirePartner>>,
+  partnerSession: PartnerQuoteBuildSession,
   payload: Payload,
   status: QuoteRecord["status"],
   version: number,
@@ -148,11 +144,18 @@ async function buildQuote(
   }
   const quoteRequest = quoteRequestSnapshot.data() as QuoteRequestRecord;
   const partner = partnerSnapshot.data() as PartnerRecord;
-  const mutationBlock = partnerQuoteMutationBlockReason({
-    authenticatedPartnerId: partnerId,
-    assignment,
-    quoteRequest,
-  });
+  const mutationBlock =
+    status === "draft"
+      ? partnerQuoteMutationBlockReason({
+          authenticatedPartnerId: partnerId,
+          assignment,
+          quoteRequest,
+        })
+      : partnerQuoteFinalizeBlockReason({
+          authenticatedPartnerId: partnerId,
+          assignment,
+          quoteRequest,
+        });
   if (mutationBlock) {
     return { ok: false as const, error: mutationBlock };
   }
@@ -521,6 +524,9 @@ export async function PUT(req: Request, { params }: Params) {
     );
   }
   const now = new Date().toISOString();
+  const evaluationDefaults = result.quote.nhAuditDraft
+    ? extractNhAuditEvaluationDefaults(result.quote.nhAuditDraft)
+    : null;
   await adminDb().runTransaction(async (transaction) => {
     transaction.set(adminDb().collection("quotes").doc(result.quote.id), result.quote);
     transaction.set(
@@ -528,10 +534,21 @@ export async function PUT(req: Request, { params }: Params) {
       { status: "drafting", updatedAt: now } satisfies Partial<QuoteAssignmentRecord>,
       { merge: true },
     );
+    if (evaluationDefaults) {
+      transaction.set(
+        adminDb().collection("partners").doc(partnerSession.profile.partnerId as string),
+        {
+          nhAuditEvaluationDefaults: evaluationDefaults,
+          updatedAt: now,
+        } satisfies Partial<PartnerRecord>,
+        { merge: true },
+      );
+    }
   });
   return NextResponse.json({
     ok: true,
     quote: result.quote,
+    nhAuditEvaluationDefaults: evaluationDefaults,
     validation: {
       missingQuoteFields: result.missingQuoteFields,
       missingRequiredFields: result.missingRequiredFields,
@@ -692,7 +709,7 @@ export async function POST(req: Request, { params }: Params) {
   const previousVersions = await db
     .collection("quotes")
     .where("quoteAssignmentId", "==", assignmentId)
-    .where("status", "in", ["finalized", "delivered"])
+    .where("status", "in", ["finalized", "delivered", "void"])
     .get();
   const version = nextImmutableQuoteVersion(
     previousVersions.docs.map((doc) =>
@@ -744,298 +761,30 @@ export async function POST(req: Request, { params }: Params) {
       },
     );
   }
-  const logoDataUri = await readStorageFileAsDataUri(result.partner.logoPath);
-  const sealDataUri = await readStorageFileAsDataUri(result.partner.sealPath);
-  const quoteDocumentContent = quoteDocumentContentFromCms(
-    (await loadPublishedCmsPage("partner.portal")).content,
-  );
-  let pdfBuffer = await renderQuotePdf({
-    quote: result.quote,
-    quoteRequest: result.quoteRequest,
-    logoDataUri,
-    sealDataUri,
-    documentContent: quoteDocumentContent,
+  const delivered = await finalizePartnerQuoteDelivery({
+    db,
+    assignmentId,
+    built: result,
+    previousVersions: previousVersions.docs.map((doc) => {
+      const data = doc.data() as QuoteRecord;
+      return { ...data, id: data.id || doc.id };
+    }),
+    actor: {
+      uid: partnerSession.decoded.uid,
+      email: partnerSession.decoded.email,
+      mode: "partner",
+    },
   });
-  let quoteWithStandardDocument = result.quote;
-  if (
-    result.quoteRequest.sourceType === "audit_quote" &&
-    result.quote.auditEvaluation?.trustedPayload &&
-    result.quote.auditEvaluation.configSource === "published" &&
-    isAuditEvaluationCapabilityEnabled("enabled")
-  ) {
-    try {
-      const signingSecret = getQuoteDocumentSigningSecret();
-      const quoteDocumentId = `qd_${createHash("sha256")
-        .update(result.quote.id, "utf8")
-        .digest("base64url")
-        .slice(0, 24)}`;
-      const identity = createQuoteDocumentIdentity(
-        {
-          quoteDocumentId,
-          quoteRequestId: result.quoteRequest.sourceId,
-          fiscalYear: result.quote.auditEvaluation.fiscalYear,
-          templateVersion: {
-            id: "partner.audit-quote",
-            version: 1,
-          },
-          normalizedPayload: result.quote.auditEvaluation.trustedPayload,
-        },
-        signingSecret,
-      );
-      const marker = serializeEmbeddedQuoteDocumentIdentity(identity);
-      pdfBuffer = embedAuditQuoteIdentityMarker(pdfBuffer, marker);
-      const repository = new FirestoreStandardQuoteDocumentRepository();
-      const existing = await repository.get(identity.quoteDocumentId);
-      if (
-        existing &&
-        (existing.status !== "ACTIVE" ||
-          existing.quoteRequestId !== result.quoteRequest.sourceId ||
-          existing.payloadChecksum !== identity.payloadChecksum ||
-          existing.integrityToken !== identity.integrityToken)
-      ) {
-        throw new Error("standard_quote_identity_conflict");
-      }
-      const registered = existing
-        ? { record: existing }
-        : await new StandardQuoteDocumentService(
-            repository,
-            signingSecret,
-          ).registerStandardQuoteDocument({
-          quoteDocumentId: identity.quoteDocumentId,
-          quoteRequestId: result.quoteRequest.sourceId,
-          fiscalYear: result.quote.auditEvaluation.fiscalYear,
-          templateVersion: identity.templateVersion,
-          documentFormat: "PDF",
-          normalizedPayload: result.quote.auditEvaluation.trustedPayload,
-          originalDocumentBytes: pdfBuffer,
-          registeredAt: new Date().toISOString(),
-          registeredBy: {
-            type: "SYSTEM",
-            service: "partner-quote-finalization",
-          },
-        });
-      quoteWithStandardDocument = {
-        ...result.quote,
-        auditEvaluation: {
-          ...result.quote.auditEvaluation,
-          standardQuoteDocumentId: registered.record.quoteDocumentId,
-        },
-      };
-    } catch {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "audit_evaluation_registration_failed",
-        },
-        { status: 503 },
-      );
-    }
-  }
-  const pdfPath = await saveQuotePdf({
-    quoteId: quoteWithStandardDocument.id,
-    version: quoteWithStandardDocument.version,
-    buffer: pdfBuffer,
-    storageKey: randomUUID(),
-  });
-  const now = new Date().toISOString();
-  const pdfFileName = `${result.quote.partnerName}-견적서-v${version}.pdf`
-    .replace(/[\\/:*?"<>|#%{}^~[\]`]/g, "-")
-    .slice(0, 120);
-  const finalizedQuote: QuoteRecord = {
-    ...quoteWithStandardDocument,
-    pdfPath,
-    pdfFileName,
-    updatedAt: now,
-  };
-  const deliveryId = `${finalizedQuote.id}_customer`;
-  let delivery: QuoteEmailDeliveryRecord = {
-    id: deliveryId,
-    quoteId: finalizedQuote.id,
-    quoteRequestId: finalizedQuote.quoteRequestId,
-    recipientEmail: finalizedQuote.customerEmail,
-    status: "pending",
-    provider: "local",
-    attemptCount: 0,
-    createdAt: now,
-    updatedAt: now,
-  };
-  let deliveryResult: {
-    status: "sent" | "failed";
-    error?: "email_not_configured" | "email_send_failed";
-  } = { status: "failed", error: "email_send_failed" };
-
-  let commitResult: "committed" | "duplicate" | "permission_denied";
-  try {
-    commitResult = await db.runTransaction(async (transaction) => {
-      const quoteRef = db.collection("quotes").doc(finalizedQuote.id);
-      const assignmentRef = db
-        .collection("quoteAssignments")
-        .doc(assignmentId);
-      const quoteRequestRef = db
-        .collection("quoteRequests")
-        .doc(finalizedQuote.quoteRequestId);
-      const [existingQuote, currentAssignment, currentQuoteRequest] =
-        await Promise.all([
-          transaction.get(quoteRef),
-          transaction.get(assignmentRef),
-          transaction.get(quoteRequestRef),
-        ]);
-      if (existingQuote.exists) return "duplicate" as const;
-      if (!currentAssignment.exists || !currentQuoteRequest.exists) {
-        return "permission_denied" as const;
-      }
-      if (
-        !canPartnerMutateQuoteAssignment({
-          authenticatedPartnerId: result.quote.partnerId,
-          assignment:
-            currentAssignment.data() as QuoteAssignmentRecord,
-          quoteRequest:
-            currentQuoteRequest.data() as QuoteRequestRecord,
-        })
-      ) {
-        return "permission_denied" as const;
-      }
-
-      transaction.set(quoteRef, finalizedQuote);
-      transaction.set(
-        assignmentRef,
-        {
-          status: "finalized",
-          updatedAt: now,
-        } satisfies Partial<QuoteAssignmentRecord>,
-        { merge: true },
-      );
-      transaction.set(
-        quoteRequestRef,
-        {
-          status: "quoted",
-          submittedQuoteCount: previousVersions.size + 1,
-          updatedAt: now,
-        } satisfies Partial<QuoteRequestRecord>,
-        { merge: true },
-      );
-      transaction.set(
-        db.collection("quoteEmailDeliveries").doc(deliveryId),
-        delivery,
-      );
-      writeAuditLog(transaction, db, {
-        actorUid: partnerSession.decoded.uid,
-        actorEmail: partnerSession.decoded.email,
-        action: "quote.finalized",
-        targetType: "quote",
-        targetId: finalizedQuote.id,
-        metadata: {
-          quoteRequestId: finalizedQuote.quoteRequestId,
-          totalAmount: finalizedQuote.totalAmount,
-        },
-        createdAt: now,
-      });
-      return "committed" as const;
-    });
-  } catch {
-    await deleteQuotePdf(pdfPath).catch(() => undefined);
+  if (!delivered.ok) {
     return NextResponse.json(
-      { ok: false, error: "quote_persistence_failed" },
-      { status: 500 },
+      { ok: false, error: delivered.error },
+      { status: delivered.status },
     );
   }
-  if (commitResult !== "committed") {
-    await deleteQuotePdf(pdfPath).catch(() => undefined);
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          commitResult === "duplicate"
-            ? "duplicate_quote_submission"
-            : "permission_denied",
-      },
-      { status: commitResult === "duplicate" ? 409 : 403 },
-    );
-  }
-
-  try {
-    const emailContent = await buildCustomerQuoteEmail({
-      db,
-      quote: finalizedQuote,
-      copy: quoteDocumentContent.copy,
-    });
-    const sent = await sendTransactionalEmail({
-      to: finalizedQuote.customerEmail,
-      ...emailContent,
-      attachments: [{ filename: pdfFileName, content: pdfBuffer }],
-      idempotencyKey: `quote/${finalizedQuote.id}/customer`,
-    });
-    if (sent.provider === "local") {
-      throw new Error("resend_not_configured");
-    }
-    delivery = {
-      ...delivery,
-      status: "sent",
-      provider: sent.provider,
-      providerMessageId: sent.id,
-      attemptCount: 1,
-      sentAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await db.collection("quoteEmailDeliveries").doc(deliveryId).set(delivery, { merge: true });
-    await db.collection("quotes").doc(finalizedQuote.id).set(
-      {
-        status: "delivered",
-        deliveredAt: delivery.sentAt,
-        updatedAt: delivery.updatedAt,
-      } satisfies Partial<QuoteRecord>,
-      { merge: true },
-    );
-    if (result.quoteRequest.sourceType === "audit_quote") {
-      await db
-        .collection(AUDIT_QUOTE_REQUESTS)
-        .doc(result.quoteRequest.sourceId)
-        .set(
-          {
-            status: "delivered",
-            quoteCount: Math.max(
-              Number(result.quoteRequest.expectedQuoteCount ?? 0),
-              Number(result.quoteRequest.submittedQuoteCount ?? 0) + 1,
-              1,
-            ),
-            updatedAt: delivery.updatedAt,
-          },
-          { merge: true },
-        );
-    }
-    deliveryResult = { status: "sent" };
-  } catch (error) {
-    const rawMessage =
-      error instanceof Error ? error.message : "send_failed";
-    const message = [
-      "resend_not_configured",
-      "production_email_from_not_configured",
-    ].includes(rawMessage)
-      ? rawMessage
-      : "email_send_failed";
-    await db.collection("quoteEmailDeliveries").doc(deliveryId).set(
-      {
-        status: "failed",
-        attemptCount: 1,
-        lastError: message,
-        updatedAt: new Date().toISOString(),
-      } satisfies Partial<QuoteEmailDeliveryRecord>,
-      { merge: true },
-    );
-    deliveryResult = {
-      status: "failed",
-      error: [
-        "resend_not_configured",
-        "production_email_from_not_configured",
-      ].includes(message)
-        ? "email_not_configured"
-        : "email_send_failed",
-    };
-  }
-
   return NextResponse.json({
     ok: true,
-    quote: finalizedQuote,
-    delivery: deliveryResult,
+    quote: delivered.quote,
+    delivery: delivered.delivery,
   });
 }
+

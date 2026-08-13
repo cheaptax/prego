@@ -24,12 +24,23 @@ export type CustomerDataClassification =
   | "TEST"
   | "UNSUPPORTED";
 
+function gmailAllowlistBase(email: string) {
+  const [local, domain] = email.split("@");
+  if (!local || (domain !== "gmail.com" && domain !== "googlemail.com")) {
+    return email;
+  }
+  const baseLocal = local.split("+")[0] ?? local;
+  if (!baseLocal) return email;
+  return `${baseLocal}@gmail.com`;
+}
+
 export function classifyCustomerEmail(
   raw: string,
 ): CustomerDataClassification {
   const email = normalizeEmail(raw);
   if (!isValidBusinessEmail(email)) return "UNSUPPORTED";
   if (TEST_CUSTOMER_EMAIL_SET.has(email)) return "TEST";
+  if (TEST_CUSTOMER_EMAIL_SET.has(gmailAllowlistBase(email))) return "TEST";
   return isNonghyupEmail(email) ? "PRODUCTION" : "UNSUPPORTED";
 }
 

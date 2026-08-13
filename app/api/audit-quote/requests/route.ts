@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { getAuditQuoteConfig } from "@/lib/audit-quote/config";
 import { guardAuditQuoteRequest } from "@/lib/audit-quote/http";
 import { notifyAuditQuoteReceived } from "@/lib/audit-quote/notify";
+import { notifyCustomerAuditQuoteRequestReceived } from "@/lib/audit-quote/customer-request-email";
+import { notifyOpsAuditQuoteRequestReceived } from "@/lib/audit-quote/ops-alert";
 import { submitAuditQuoteRequest } from "@/lib/audit-quote/submit";
 import {
   extractReferrerHost,
   getClientIpHash,
+  isHoneypotTriggered,
   verifyBotProtection,
 } from "@/lib/audit-quote/security";
 import type {
@@ -14,6 +17,8 @@ import type {
   AuditQuoteSuccessBody,
 } from "@/lib/audit-quote/types";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { isValidKrMobilePhone, normalizeKrMobilePhone } from "@/lib/phone";
+import { verifyAuditQuotePhoneVerificationToken } from "@/lib/audit-quote/phone-token";
 import {
   ensureQuoteRequest,
   quoteRequestIdFor,
@@ -26,6 +31,8 @@ type Payload = {
   email?: string;
   name?: string;
   phone?: string;
+  phoneVerificationIdToken?: string;
+  targetCooperativeId?: string;
   targetCooperativeName?: string;
   fiscalYear?: number;
   privacyConsent?: boolean;
@@ -79,9 +86,30 @@ export async function POST(req: Request) {
     return jsonError(botProtection.error, 403);
   }
 
+  const honeypot = isHoneypotTriggered(body.companyWebsite);
+  const normalizedPhone = normalizeKrMobilePhone(body.phone ?? "");
+  if (!honeypot) {
+    if (!isValidKrMobilePhone(normalizedPhone)) {
+      return jsonError("invalid_phone", 400);
+    }
+    if (!body.phoneVerificationIdToken?.trim()) {
+      return jsonError("missing_phone_verification", 400);
+    }
+    const verified = await verifyAuditQuotePhoneVerificationToken({
+      token: body.phoneVerificationIdToken,
+      phone: normalizedPhone,
+      pepper: config.hashPepper || "audit-quote-fallback",
+      verifyFirebaseIdToken: (token) => adminAuth().verifyIdToken(token),
+    });
+    if (!verified.ok) {
+      return jsonError(verified.error, verified.status);
+    }
+  }
+
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() ?? "";
 
   try {
+    let temporaryMemberInitialPassword: string | null = null;
     const result = await submitAuditQuoteRequest(
       adminDb(),
       config,
@@ -89,6 +117,7 @@ export async function POST(req: Request) {
         email: body.email ?? "",
         contactName: body.name ?? "",
         phone: body.phone ?? "",
+        targetCooperativeId: body.targetCooperativeId ?? "",
         targetCooperativeName: body.targetCooperativeName ?? "",
         fiscalYear: body.fiscalYear ?? Number.NaN,
         privacyConsent: body.privacyConsent === true,
@@ -123,7 +152,7 @@ export async function POST(req: Request) {
           sourceType: "audit_quote",
           source,
         });
-        await provisionTemporaryQuoteMember({
+        const temporaryMember = await provisionTemporaryQuoteMember({
           db,
           auth: adminAuth(),
           requestId: result.requestId,
@@ -135,6 +164,7 @@ export async function POST(req: Request) {
           phone: source.phone ?? "",
           marketingConsent: source.marketingConsent === true,
         });
+        temporaryMemberInitialPassword = temporaryMember.initialPassword;
       }
     }
     if (result.kind === "success" && result.created) {
@@ -146,6 +176,29 @@ export async function POST(req: Request) {
         campaign: body.source?.campaign?.trim() || config.allowedCampaigns[0] || "fy27-audit-quote",
       }).catch((error: unknown) => {
         console.error("[audit-quote] notify_unhandled", {
+          requestId: result.requestId,
+          error: error instanceof Error ? error.message : "notify_failed",
+        });
+      });
+      void notifyCustomerAuditQuoteRequestReceived({
+        requestId: result.requestId,
+        publicReference: result.publicReference,
+        email: result.email,
+        contactName: body.name,
+        targetCooperativeName: body.targetCooperativeName,
+        fiscalYear: body.fiscalYear,
+        initialPassword: temporaryMemberInitialPassword,
+      }).catch((error: unknown) => {
+        console.error("[audit-quote] customer_request_email_unhandled", {
+          requestId: result.requestId,
+          error: error instanceof Error ? error.message : "notify_failed",
+        });
+      });
+      void notifyOpsAuditQuoteRequestReceived({
+        requestId: result.requestId,
+        publicReference: result.publicReference,
+      }).catch((error: unknown) => {
+        console.error("[audit-quote] ops_alert_unhandled", {
           requestId: result.requestId,
           error: error instanceof Error ? error.message : "notify_failed",
         });

@@ -1,4 +1,10 @@
-import { isSafeCmsHref, cmsPageContentSchema, type CmsPageContent, type CmsSectionStyle } from "@/lib/cms/schemas";
+import {
+  isSafeCmsHref,
+  cmsPageContentSchema,
+  type CmsPageContent,
+  type CmsSection,
+  type CmsSectionStyle,
+} from "@/lib/cms/schemas";
 import type { CmsPageKey } from "@/lib/cms/constants";
 import {
   CMS_PAGE_DEFAULTS,
@@ -88,6 +94,35 @@ export function createDefaultSectionStyle(): CmsSectionStyle {
   };
 }
 
+export function createBlankCmsSection(title = "새 영역"): CmsSection {
+  return {
+    id: `section_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    visible: true,
+    locked: false,
+    deleted: false,
+    headingLevel: 2,
+    eyebrow: "",
+    title,
+    description: "이 영역에 표시할 안내 문구를 입력해 주세요.",
+    text: {},
+    items: [],
+    actions: [],
+    groups: [],
+    style: createDefaultSectionStyle(),
+  };
+}
+
+export function duplicateCmsSection(section: CmsSection): CmsSection {
+  return {
+    ...structuredClone(section),
+    id: `section_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    locked: false,
+    deleted: false,
+    visible: true,
+    title: `${section.title} 복사본`,
+  };
+}
+
 function luminance(hex: string) {
   const channels = [1, 3, 5].map((offset) => {
     const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
@@ -159,7 +194,12 @@ export function validatePageContentForPublish(
       const section = input.sections.find(
         (candidate) => candidate.id === sectionId,
       );
-      if (!section || !section.visible || !section.locked) {
+      if (
+        !section ||
+        section.deleted ||
+        !section.visible ||
+        !section.locked
+      ) {
         issues.push({
           id: issueId("required-page-section", sectionId),
           severity: "error",
@@ -171,8 +211,19 @@ export function validatePageContentForPublish(
     }
   }
 
+  const activeSections = input.sections.filter((section) => !section.deleted);
+  if (activeSections.length === 0) {
+    issues.push({
+      id: "active-section-required",
+      severity: "error",
+      code: "required_section",
+      message: "화면에 표시할 영역을 하나 이상 남겨 주세요.",
+    });
+  }
+
   let previousHeadingLevel = 1;
   for (const [sectionIndex, section] of input.sections.entries()) {
+    if (section.deleted) continue;
     if (section.locked && !section.visible) {
       issues.push({
         id: issueId("required-section", section.id),
@@ -578,8 +629,10 @@ export function validatePageContentForPublish(
     for (const [itemIndex, itemId] of [
       "overview",
       "inquiries",
+      "quotes",
       "points",
       "profile",
+      "sitemap",
     ].entries()) {
       const protectedTab = navigation?.items.find(
         (candidate) => candidate.id === itemId,
@@ -729,13 +782,16 @@ export function normalizePageContentForPublish(
   const parsed = cmsPageContentSchema.parse(input);
   return {
     ...parsed,
-    sections: parsed.sections.map((section) => ({
-      ...section,
-      items: section.items.filter((item) => !item.deleted),
-      groups: section.groups.map((group) => ({
-        ...group,
-        items: group.items.filter((item) => !item.deleted),
+    sections: parsed.sections
+      .filter((section) => !section.deleted)
+      .map((section) => ({
+        ...section,
+        deleted: false,
+        items: section.items.filter((item) => !item.deleted),
+        groups: section.groups.map((group) => ({
+          ...group,
+          items: group.items.filter((item) => !item.deleted),
+        })),
       })),
-    })),
   };
 }

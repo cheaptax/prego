@@ -1,8 +1,12 @@
 import { FaqBoard } from "@/components/FaqBoard";
 import { InquiryBoard } from "@/components/InquiryBoard";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getCmsSection } from "@/lib/cms/runtime";
-import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
-import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+import type { CmsPageContent } from "@/lib/cms/schemas";
 
 type BoardPageKey = "public.inquiries" | "public.faq";
 
@@ -18,34 +22,17 @@ export function BoardPageRenderer({
   pageKey: BoardPageKey;
   content: CmsPageContent;
   mainId?: string | null;
-  editing?: boolean;
   previewMode?: boolean;
-  selectedSectionId?: string;
-  onSelectSection?: (sectionId: string) => void;
-}) {
+} & CmsSectionEditingOptions) {
   const hero = getCmsSection(content, pageKey, "hero");
-
-  function sectionProps(section: CmsSection, className: string) {
-    const root = cmsSectionRootProps(section, className);
-    return {
-      ...root,
-      className: [
-        root.className,
-        editing ? "cms-home-edit-section" : "",
-        selectedSectionId === section.id ? "is-selected" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      tabIndex: editing ? 0 : undefined,
-      onClick: editing ? () => onSelectSection?.(section.id) : undefined,
-      onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
-    };
-  }
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
 
   const highlight = hero.text.highlight;
   return (
     <main id={mainId ?? undefined} className="inquiries-page">
-      <section {...sectionProps(hero, "inquiries-hero")}>
+      <section
+        {...cmsEditableSectionProps(hero, "inquiries-hero", editingOptions)}
+      >
         <span className="kicker">{hero.eyebrow}</span>
         <h1 className="inquiries-hero__title">
           {hero.title.split(/\n+/).map((line, index) => {
@@ -67,27 +54,22 @@ export function BoardPageRenderer({
         </h1>
         <p>{hero.description}</p>
       </section>
-      <div
-        className={
-          editing && selectedSectionId !== "hero"
-            ? "cms-home-edit-section is-selected"
-            : undefined
-        }
-        onClick={
-          editing
-            ? () =>
-                onSelectSection?.(
-                  selectedSectionId === "list" ? "list" : "filters",
-                )
-            : undefined
-        }
-      >
-        {pageKey === "public.inquiries" ? (
-          <InquiryBoard content={content} previewMode={previewMode} />
-        ) : (
-          <FaqBoard content={content} />
-        )}
-      </div>
+      {pageKey === "public.inquiries" ? (
+        <InquiryBoard
+          content={content}
+          previewMode={previewMode}
+          {...editingOptions}
+        />
+      ) : (
+        <FaqBoard content={content} {...editingOptions} />
+      )}
+      <CmsSupplementalSections
+        pageKey={pageKey}
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </main>
   );
 }

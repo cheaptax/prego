@@ -91,6 +91,7 @@ const quoteResultSchema = z
     weightedPriceScore: exactScoreSchema.nullable(),
     overallScore: exactScoreSchema.nullable(),
     rank: z.number().int().positive().nullable(),
+    lowPriceEngagementRisk: z.boolean().optional(),
   })
   .strict();
 
@@ -125,6 +126,11 @@ export const nhAuditReportEvaluationSnapshotSchema = z
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
     usesDefaultWeights: z.boolean(),
+    safePriceMinWon: z
+      .string()
+      .regex(/^(0|[1-9][0-9]*)$/)
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -170,9 +176,11 @@ export function buildNhAuditReportEvaluationSnapshot(input: {
   quotes: readonly QuoteRecord[];
   weights: unknown;
   now: string;
+  safePriceMinWon?: string | null;
 }): NhAuditReportEvaluationSnapshot {
   const weights = nhAuditCustomerWeightsV2Schema.parse(input.weights);
   const quoteById = new Map(input.quotes.map((quote) => [quote.id, quote]));
+  const safePriceMinWon = input.safePriceMinWon ?? null;
   const candidates = input.quotes.map((quote) =>
     prepareNhAuditCandidateV2({
       candidateId: quote.id,
@@ -189,9 +197,15 @@ export function buildNhAuditReportEvaluationSnapshot(input: {
   const evaluated = evaluateNhAuditQuoteCandidatesV2(
     candidates,
     weights,
+    { safePriceMinWon },
   );
   const quoteResults = evaluated.map((result) =>
-    resultSnapshot(result, quoteById.get(result.candidateId), weights)
+    resultSnapshot(
+      result,
+      quoteById.get(result.candidateId),
+      weights,
+      safePriceMinWon,
+    ),
   );
   const includedQuoteIds = quoteResults
     .filter((result) => result.eligibilityStatus === "ELIGIBLE")
@@ -225,6 +239,49 @@ export function buildNhAuditReportEvaluationSnapshot(input: {
       weights,
       createDefaultNhAuditCustomerWeightsV2(),
     ),
+    safePriceMinWon,
+  });
+}
+
+/**
+ * 배점만 같으면 재사용하던 기존 비교는, 견적 금액이 바뀌어도
+ * 보고서를 다시 만들지 않았다. 순위·금액이 달라지면 재생성한다.
+ */
+export function nhAuditSnapshotNeedsRegeneration(
+  existing: NhAuditReportEvaluationSnapshot | undefined,
+  next: NhAuditReportEvaluationSnapshot,
+) {
+  if (!existing) return true;
+  return (
+    snapshotRegenerationKey(existing) !== snapshotRegenerationKey(next)
+  );
+}
+
+function snapshotRegenerationKey(snapshot: NhAuditReportEvaluationSnapshot) {
+  const quotes = [...snapshot.quoteResults]
+    .map((result) => ({
+      quoteId: result.quoteId,
+      eligibilityStatus: result.eligibilityStatus,
+      auditFeeWon: result.auditFeeWon ?? null,
+      expectedTotalBurdenWon: result.expectedTotalBurdenWon,
+      overallScore: result.overallScore,
+      rank: result.rank,
+      qualityInputs: result.criteria.map((criterion) => [
+        criterion.criterionId,
+        criterion.inputValue,
+      ]),
+    }))
+    .sort((left, right) => left.quoteId.localeCompare(right.quoteId));
+  const excluded = [...snapshot.excludedQuotes]
+    .map((item) => ({
+      quoteId: item.quoteId,
+      eligibilityStatus: item.eligibilityStatus,
+    }))
+    .sort((left, right) => left.quoteId.localeCompare(right.quoteId));
+  return JSON.stringify({
+    weights: snapshot.weights,
+    quotes,
+    excluded,
   });
 }
 
@@ -261,6 +318,7 @@ export function nhAuditReportPreviewFromSnapshot(
         ),
       })),
       rank: result.rank,
+      lowPriceEngagementRisk: result.lowPriceEngagementRisk === true,
       qualityScoreOneDecimal: formatOptionalScore(result.qualityScore),
       priceBaseScoreOneDecimal: formatOptionalScore(
         result.priceBaseScore,
@@ -280,6 +338,7 @@ function resultSnapshot(
   result: NhAuditQuoteEvaluationResultV2,
   quote: QuoteRecord | undefined,
   weights: NhAuditCustomerWeightsV2,
+  safePriceMinWon: string | null,
 ): NhAuditReportQuoteResultSnapshot {
   const components =
     result.quality && result.priceBaseScore
@@ -289,6 +348,11 @@ function resultSnapshot(
           weights,
         )
       : null;
+  const auditFeeWon = result.cost?.auditFeeWon ?? null;
+  const belowSafePrice =
+    Boolean(safePriceMinWon) &&
+    auditFeeWon !== null &&
+    BigInt(auditFeeWon) < BigInt(safePriceMinWon);
   return {
     quoteId: result.candidateId,
     accountingFirmName:
@@ -301,7 +365,7 @@ function resultSnapshot(
     eligibilityStatus: result.eligibilityStatus,
     reasonCodes: [...result.reasonCodes],
     missingFields: [...result.missingFields],
-    auditFeeWon: result.cost?.auditFeeWon ?? null,
+    auditFeeWon,
     expectedExpenseWon:
       result.cost?.normalizedExpectedExpenseWon ?? null,
     supplyAmountWon: result.cost?.supplyAmountWon ?? null,
@@ -322,6 +386,7 @@ function resultSnapshot(
     weightedPriceScore: components?.weightedPriceScore ?? null,
     overallScore: components?.overallScore ?? null,
     rank: result.rank,
+    ...(belowSafePrice ? { lowPriceEngagementRisk: true } : {}),
   };
 }
 

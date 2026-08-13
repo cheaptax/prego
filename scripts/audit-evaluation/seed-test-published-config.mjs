@@ -78,14 +78,14 @@ const draft = {
     },
     {
       id: "fee",
-      name: "보수 분석",
+      name: "감사보수 분석",
       order: 6,
       enabled: true,
       type: "FEE_ANALYSIS",
     },
     {
       id: "firm",
-      name: "법인별 검토",
+      name: "부적격·우려 견적 내역",
       order: 7,
       enabled: true,
       type: "FIRM_REVIEW",

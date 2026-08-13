@@ -58,6 +58,8 @@ const PHASE_BY_COLLECTION: Record<string, PurgeJobPhase> = {
   auditQuoteEmailDedup: "DELETING_AUDIT_INTAKE",
   auditQuoteRateLimits: "DELETING_AUDIT_INTAKE",
   auditQuoteRequests: "DELETING_AUDIT_INTAKE",
+  phoneVerificationChallenges: "DELETING_AUDIT_INTAKE",
+  phoneVerificationRateLimits: "DELETING_AUDIT_INTAKE",
 
   auditLogs: "DELETING_ACTIVITY",
   pointLedger: "DELETING_POINTS",

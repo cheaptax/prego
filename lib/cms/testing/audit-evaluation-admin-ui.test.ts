@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   ADMIN_OPERATION_TAB_IDS,
+  ADMIN_OPERATION_TAB_SECTION_IDS,
   createAdminOperationsCopy,
 } from "@/lib/cms/admin-operations-content";
 import { CMS_PAGE_DEFAULTS } from "@/lib/cms/defaults";
@@ -60,6 +61,10 @@ describe("audit evaluation admin UI contract", () => {
     assert.equal(
       copy.tabs.find((tab) => tab.key === "auditEvaluations")?.label,
       "감사평가 운영",
+    );
+    assert.equal(
+      ADMIN_OPERATION_TAB_SECTION_IDS.auditEvaluations,
+      "auditEvaluationAdmin",
     );
   });
 

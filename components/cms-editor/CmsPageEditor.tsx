@@ -23,6 +23,8 @@ import { CmsEditorSidebar } from "@/components/cms-editor/CmsEditorSidebar";
 import type { CmsPageKey } from "@/lib/cms/constants";
 import type { CmsPublicGlobals } from "@/lib/cms/public-content";
 import {
+  createBlankCmsSection,
+  duplicateCmsSection,
   validatePageContentForPublish,
   type CmsEditorValidationIssue,
 } from "@/lib/cms/editor-validation";
@@ -31,6 +33,7 @@ import type {
   CmsPageEditorData,
 } from "@/lib/cms/page-editor-types";
 import { cmsPageContentSchema, type CmsPageContent, type CmsSection } from "@/lib/cms/schemas";
+import { canSoftDeleteCmsSection } from "@/lib/cms/section-lifecycle";
 import {
   getFirebaseAuth,
   getFirebaseStorage,
@@ -45,6 +48,7 @@ const AUDIT_QUOTE_PREVIEW_CONFIG = {
   channel: "event_page",
   pagePath: "/events/audit-quote",
   privacyPolicyHref: "/signup",
+  fixedFiscalYear: 2027,
   guaranteeMinQuotes: false,
   showPointsBenefit: false,
   pointsBenefitBaseLabel: null,
@@ -531,6 +535,9 @@ export function CmsPageEditor({ pageKey }: { pageKey: CmsPageKey }) {
   const [showPreview, setShowPreview] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showPublish, setShowPublish] = useState(false);
+  const [pendingDeleteSectionId, setPendingDeleteSectionId] = useState<
+    string | null
+  >(null);
   const contentRef = useRef<CmsPageContent | null>(null);
   const draftVersionRef = useRef(0);
   const lastSavedRef = useRef<CmsPageContent | null>(null);
@@ -827,6 +834,91 @@ export function CmsPageEditor({ pageKey }: { pageKey: CmsPageKey }) {
       const [moved] = sections.splice(from, 1);
       sections.splice(to, 0, moved);
       applyContent({ ...current, sections });
+    },
+    [applyContent],
+  );
+
+  const addSection = useCallback(() => {
+    const current = contentRef.current;
+    if (!current || current.sections.length >= 50) {
+      setNotice("화면 영역은 최대 50개까지 추가할 수 있습니다.");
+      return;
+    }
+    const nextSection = createBlankCmsSection();
+    applyContent({
+      ...current,
+      sections: [...current.sections, nextSection],
+    });
+    setSelection(nextSection.id);
+    setNarrowPane("settings");
+    setNotice("새 영역을 추가했습니다. 문구와 디자인을 입력한 뒤 게시해 주세요.");
+  }, [applyContent]);
+
+  const duplicateSection = useCallback(
+    (sectionId: string) => {
+      const current = contentRef.current;
+      if (!current || current.sections.length >= 50) {
+        setNotice("화면 영역은 최대 50개까지 추가할 수 있습니다.");
+        return;
+      }
+      const sourceIndex = current.sections.findIndex(
+        (section) => section.id === sectionId,
+      );
+      if (sourceIndex < 0) return;
+      const nextSection = duplicateCmsSection(current.sections[sourceIndex]);
+      const sections = [...current.sections];
+      sections.splice(sourceIndex + 1, 0, nextSection);
+      applyContent({ ...current, sections });
+      setSelection(nextSection.id);
+      setNarrowPane("settings");
+      setNotice("영역을 복제했습니다. 필요한 문구를 수정한 뒤 게시해 주세요.");
+    },
+    [applyContent],
+  );
+
+  const softDeleteSection = useCallback(
+    (sectionId: string) => {
+      const current = contentRef.current;
+      if (!current || !canSoftDeleteCmsSection(current, sectionId)) {
+        setNotice("필수 영역이거나 마지막 남은 영역은 삭제할 수 없습니다.");
+        return;
+      }
+      applyContent({
+        ...current,
+        sections: current.sections.map((section) =>
+          section.id === sectionId
+            ? { ...section, deleted: true, visible: false }
+            : section,
+        ),
+      });
+      const nextSelection =
+        current.sections.find(
+          (section) => section.id !== sectionId && !section.deleted,
+        )?.id ?? "page";
+      setSelection(nextSelection);
+      setPendingDeleteSectionId(null);
+      setNotice(
+        "영역을 삭제하고 초안에 보관했습니다. 게시 전에 복원할 수 있습니다.",
+      );
+    },
+    [applyContent],
+  );
+
+  const restoreSection = useCallback(
+    (sectionId: string) => {
+      const current = contentRef.current;
+      if (!current) return;
+      applyContent({
+        ...current,
+        sections: current.sections.map((section) =>
+          section.id === sectionId
+            ? { ...section, deleted: false, visible: true }
+            : section,
+        ),
+      });
+      setSelection(sectionId);
+      setNarrowPane("settings");
+      setNotice("삭제한 영역을 복원했습니다.");
     },
     [applyContent],
   );
@@ -1150,6 +1242,10 @@ export function CmsPageEditor({ pageKey }: { pageKey: CmsPageKey }) {
               setNarrowPane("settings");
             }}
             onReorderSections={reorderSections}
+            onAddSection={addSection}
+            onDuplicateSection={duplicateSection}
+            onRequestDeleteSection={setPendingDeleteSectionId}
+            onRestoreSection={restoreSection}
           />
         </div>
         <section
@@ -1279,6 +1375,52 @@ export function CmsPageEditor({ pageKey }: { pageKey: CmsPageKey }) {
           onConfirm={publish}
           onClose={() => setShowPublish(false)}
         />
+      ) : null}
+      {pendingDeleteSectionId ? (
+        <CmsEditorDialog
+          className="cms-editor-dialog--small"
+          labelledBy="cms-section-delete-title"
+          onClose={() => setPendingDeleteSectionId(null)}
+        >
+          <header>
+            <div>
+              <span>화면 영역 삭제</span>
+              <h2 id="cms-section-delete-title">
+                {content.sections.find(
+                  (section) => section.id === pendingDeleteSectionId,
+                )?.title || "선택한 영역"}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPendingDeleteSectionId(null)}
+              aria-label="삭제 확인 닫기"
+            >
+              ×
+            </button>
+          </header>
+          <div className="cms-editor-dialog-copy">
+            <p>
+              게시하면 이 영역이 고객 화면에서 사라집니다. 삭제 후에도 게시
+              전에는 초안에서 복원할 수 있습니다.
+            </p>
+          </div>
+          <footer>
+            <button
+              type="button"
+              onClick={() => setPendingDeleteSectionId(null)}
+            >
+              취소
+            </button>
+            <button
+              className="is-danger"
+              type="button"
+              onClick={() => softDeleteSection(pendingDeleteSectionId)}
+            >
+              영역 삭제하고 보관
+            </button>
+          </footer>
+        </CmsEditorDialog>
       ) : null}
     </main>
   );

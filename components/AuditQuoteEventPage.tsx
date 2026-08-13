@@ -1,5 +1,12 @@
 "use client";
 
+import { FirebaseError } from "firebase/app";
+import {
+  PhoneAuthProvider,
+  RecaptchaVerifier,
+  signInWithCredential,
+  type Auth,
+} from "firebase/auth";
 import Link from "next/link";
 import {
   useEffect,
@@ -16,7 +23,7 @@ import {
 } from "@/lib/audit-quote/client-payload";
 import {
   IdempotencyKeySession,
-  formatPhoneInput,
+  findExactCooperativeMatch,
   validateAuditQuoteEmail,
   validateAuditQuoteFiscalYear,
   validateAuditQuoteName,
@@ -24,7 +31,17 @@ import {
   validateAuditQuoteTargetCooperative,
 } from "@/lib/audit-quote/client-form";
 import type { PublicAuditQuoteConfig } from "@/lib/audit-quote/public-types";
+import type { CooperativeSearchItem } from "@/lib/cooperatives/demo-cooperative";
+import { getFirebaseAuth } from "@/lib/firebase/client";
+import {
+  formatKrMobilePhoneInput,
+  isValidKrMobilePhone,
+  normalizeKrMobilePhone,
+  toKrMobilePhoneE164,
+} from "@/lib/phone";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
 import { normalizeAuditQuoteCmsContent } from "@/lib/cms/audit-quote-content";
+import { cmsSectionSelectionProps } from "@/lib/cms/editable-section";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
 
@@ -39,9 +56,44 @@ type Props = {
 };
 
 type FormStatus = "idle" | "submitting" | "success" | "error";
+type PhoneVerificationStatus =
+  | "idle"
+  | "sending"
+  | "sent"
+  | "confirmed"
+  | "verified";
+type PhoneVerificationProvider = "solapi" | "firebase";
+
+const PHONE_VERIFICATION_TTL_MS = 10 * 60 * 1000;
 
 function visibleItems(section: CmsSection) {
   return section.items.filter((item) => item.visible && !item.deleted);
+}
+
+function renderFootnoteReference(text: string, href?: string) {
+  const markerMatch = text.match(/^(.*?)(\(\*\))(.*)$/u);
+  if (!markerMatch) return text;
+  const [, before, marker, after] = markerMatch;
+  const mark = href ? (
+    <a
+      className="aq-ref-mark"
+      href={`#${href}`}
+      aria-label="관련 주석 보기"
+    >
+      {marker}
+    </a>
+  ) : (
+    <span className="aq-ref-mark" aria-hidden="true">
+      {marker}
+    </span>
+  );
+  return (
+    <>
+      {before}
+      {mark}
+      {after}
+    </>
+  );
 }
 
 function eventSectionClasses(section: CmsSection, baseClassName: string) {
@@ -79,8 +131,15 @@ export function AuditQuoteEventPage({
     [content],
   );
   const messages = normalizedContent.messages;
-  const [targetCooperativeName, setTargetCooperativeName] = useState("");
-  const [fiscalYear, setFiscalYear] = useState("");
+  const [targetCooperativeQuery, setTargetCooperativeQuery] = useState("");
+  const [selectedCooperative, setSelectedCooperative] =
+    useState<CooperativeSearchItem | null>(null);
+  const [cooperativeSearch, setCooperativeSearch] = useState<{
+    query: string;
+    results: CooperativeSearchItem[];
+    failed?: boolean;
+  } | null>(null);
+  const fiscalYear = String(config.fixedFiscalYear);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -93,13 +152,26 @@ export function AuditQuoteEventPage({
     email?: string;
     name?: string;
     phone?: string;
+    phoneVerificationCode?: string;
     consent?: string;
   }>({});
   const [formError, setFormError] = useState("");
   const [status, setStatus] = useState<FormStatus>("idle");
   const [publicReference, setPublicReference] = useState("");
+  const [phoneVerificationId, setPhoneVerificationId] = useState("");
+  const [phoneVerificationPhone, setPhoneVerificationPhone] = useState("");
+  const [phoneVerificationCode, setPhoneVerificationCode] = useState("");
+  const [phoneVerificationStatus, setPhoneVerificationStatus] =
+    useState<PhoneVerificationStatus>("idle");
+  const [phoneVerificationExpiresAt, setPhoneVerificationExpiresAt] =
+    useState<number | null>(null);
+  const [phoneVerificationProvider, setPhoneVerificationProvider] =
+    useState<PhoneVerificationProvider | null>(null);
+  const [phoneVerificationLocalDelivery, setPhoneVerificationLocalDelivery] =
+    useState(false);
 
   const idempotency = useRef(new IdempotencyKeySession());
+  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
   const targetCooperativeRef = useRef<HTMLInputElement | null>(null);
   const fiscalYearRef = useRef<HTMLInputElement | null>(null);
   const emailRef = useRef<HTMLInputElement | null>(null);
@@ -109,6 +181,10 @@ export function AuditQuoteEventPage({
   const errorRef = useRef<HTMLParagraphElement | null>(null);
   const fieldId = useId();
   const statusId = useId();
+
+  function message(key: string, fallback: string) {
+    return normalizedContent.messages[key] || fallback;
+  }
 
   useEffect(() => {
     trackAuditQuoteEvent("audit_quote_page_view", {
@@ -126,12 +202,49 @@ export function AuditQuoteEventPage({
     }
   }, [config.campaign, config.channel, config.pagePath, config.enabled]);
 
+  useEffect(() => {
+    return () => {
+      const verifier = recaptchaVerifierRef.current;
+      recaptchaVerifierRef.current = null;
+      try {
+        verifier?.clear();
+      } catch {
+        // Recaptcha may already be torn down.
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (phoneVerificationStatus !== "confirmed" || !phoneVerificationExpiresAt) {
+      return;
+    }
+    const remainingMs = phoneVerificationExpiresAt - Date.now();
+    const expire = () => {
+      resetPhoneVerification();
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: message(
+          "phoneVerificationExpired",
+          "휴대폰 인증이 만료되었습니다. 인증번호를 다시 받아 주세요.",
+        ),
+      }));
+    };
+    if (remainingMs <= 0) {
+      expire();
+      return;
+    }
+    const timerId = window.setTimeout(expire, remainingMs);
+    return () => window.clearTimeout(timerId);
+  }, [phoneVerificationExpiresAt, phoneVerificationStatus]);
+
   function resetForNewSubmission() {
-    setTargetCooperativeName("");
-    setFiscalYear("");
+    setTargetCooperativeQuery("");
+    setSelectedCooperative(null);
+    setCooperativeSearch(null);
     setEmail("");
     setName("");
     setPhone("");
+    resetPhoneVerification();
     setPrivacyConsent(false);
     setMarketingConsent(false);
     setHoneypot("");
@@ -143,6 +256,357 @@ export function AuditQuoteEventPage({
     window.setTimeout(() => targetCooperativeRef.current?.focus(), 0);
   }
 
+  function resetPhoneVerification() {
+    const verifier = recaptchaVerifierRef.current;
+    recaptchaVerifierRef.current = null;
+    try {
+      verifier?.clear();
+    } catch {
+      // Recaptcha may already be torn down.
+    }
+    setPhoneVerificationId("");
+    setPhoneVerificationPhone("");
+    setPhoneVerificationCode("");
+    setPhoneVerificationStatus("idle");
+    setPhoneVerificationExpiresAt(null);
+    setPhoneVerificationProvider(null);
+    setPhoneVerificationLocalDelivery(false);
+  }
+
+  function getRecaptchaVerifier(auth: Auth) {
+    if (!recaptchaVerifierRef.current) {
+      recaptchaVerifierRef.current = new RecaptchaVerifier(
+        auth,
+        "audit-quote-phone-recaptcha",
+        {
+          size: "invisible",
+          "expired-callback": () => {
+            recaptchaVerifierRef.current = null;
+            setPhoneVerificationId("");
+            setPhoneVerificationPhone("");
+            setPhoneVerificationCode("");
+            setPhoneVerificationStatus("idle");
+            setPhoneVerificationExpiresAt(null);
+            setPhoneVerificationProvider(null);
+          },
+        },
+      );
+    }
+    return recaptchaVerifierRef.current;
+  }
+
+  function getPhoneVerificationErrorMessage(codeOrError: string | unknown) {
+    const code =
+      typeof codeOrError === "string"
+        ? codeOrError
+        : codeOrError instanceof FirebaseError
+          ? codeOrError.code
+          : "sms_send_failed";
+    switch (code) {
+      case "invalid_phone":
+      case "auth/invalid-phone-number":
+        return messages.phoneInvalid;
+      case "invalid_phone_verification":
+      case "auth/invalid-verification-code":
+        return message("phoneCodeInvalid", "인증번호가 올바르지 않습니다.");
+      case "phone_verification_expired":
+      case "auth/code-expired":
+        return message(
+          "phoneCodeExpired",
+          "인증번호가 만료되었습니다. 인증번호를 다시 받아 주세요.",
+        );
+      case "rate_limited":
+      case "auth/too-many-requests":
+        return message(
+          "phoneTooMany",
+          "인증 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+        );
+      case "sms_not_configured":
+      case "sms_send_failed":
+      case "auth/quota-exceeded":
+      case "auth/captcha-check-failed":
+      case "auth/missing-app-credential":
+      case "auth/invalid-app-credential":
+      case "auth/argument-error":
+        return message(
+          "phoneGenericError",
+          "휴대폰 문자 인증을 잠시 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        );
+      case "auth/unauthorized-domain":
+        return message(
+          "phoneUnauthorizedDomain",
+          "현재 접속한 주소가 휴대폰 인증 허용 도메인에 등록되지 않았습니다. 관리자에게 문의해 주세요.",
+        );
+      default:
+        return message(
+          "phoneGenericError",
+          "휴대폰 문자 인증 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+        );
+    }
+  }
+
+  async function sendPhoneVerificationCodeViaFirebase(normalizedPhone: string) {
+    const phoneNumber = toKrMobilePhoneE164(normalizedPhone);
+    if (!phoneNumber) {
+      resetPhoneVerification();
+      setFieldErrors((prev) => ({ ...prev, phone: messages.phoneInvalid }));
+      return;
+    }
+    const auth = getFirebaseAuth();
+    auth.languageCode = "ko";
+    auth.settings.appVerificationDisabledForTesting = false;
+    const phoneProvider = new PhoneAuthProvider(auth);
+    const verificationId = await phoneProvider.verifyPhoneNumber(
+      phoneNumber,
+      getRecaptchaVerifier(auth),
+    );
+    setPhoneVerificationProvider("firebase");
+    setPhoneVerificationId(verificationId);
+    setPhoneVerificationPhone(normalizedPhone);
+    setPhoneVerificationCode("");
+    setPhoneVerificationStatus("sent");
+    setPhoneVerificationExpiresAt(null);
+    setPhoneVerificationLocalDelivery(false);
+  }
+
+  async function sendPhoneVerificationCode() {
+    if (previewMode) return;
+    const normalizedPhone = normalizeKrMobilePhone(phone);
+    if (!isValidKrMobilePhone(normalizedPhone)) {
+      setFieldErrors((prev) => ({ ...prev, phone: messages.phoneInvalid }));
+      return;
+    }
+    setFormError("");
+    setPhoneVerificationStatus("sending");
+    setFieldErrors((prev) => ({
+      ...prev,
+      phone: undefined,
+      phoneVerificationCode: undefined,
+    }));
+    try {
+      const response = await fetch("/api/phone-verification/send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          phone: normalizedPhone,
+          purpose: "audit_quote",
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+        localCode?: string;
+      } | null;
+      if (response.ok && data?.ok) {
+        const localCode =
+          typeof data.localCode === "string" && /^\d{6}$/.test(data.localCode)
+            ? data.localCode
+            : "";
+        setPhoneVerificationProvider("solapi");
+        setPhoneVerificationId("sent");
+        setPhoneVerificationPhone(normalizedPhone);
+        setPhoneVerificationCode(localCode);
+        setPhoneVerificationStatus("sent");
+        setPhoneVerificationExpiresAt(null);
+        setPhoneVerificationLocalDelivery(Boolean(localCode));
+        return;
+      }
+      if (data?.error !== "sms_not_configured") {
+        resetPhoneVerification();
+        setFieldErrors((prev) => ({
+          ...prev,
+          phoneVerificationCode: getPhoneVerificationErrorMessage(
+            data?.error ?? "sms_send_failed",
+          ),
+        }));
+        return;
+      }
+    } catch {
+      resetPhoneVerification();
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: getPhoneVerificationErrorMessage("sms_send_failed"),
+      }));
+      return;
+    }
+
+    try {
+      await sendPhoneVerificationCodeViaFirebase(normalizedPhone);
+    } catch (error) {
+      resetPhoneVerification();
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: getPhoneVerificationErrorMessage(error),
+      }));
+    }
+  }
+
+  async function confirmPhoneVerificationCode() {
+    if (previewMode) return;
+    const trimmed = phoneVerificationCode.trim();
+    if (!phoneVerificationId) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: message(
+          "phoneReceiveFirst",
+          "먼저 '인증번호 받기'로 인증번호를 받아 주세요.",
+        ),
+      }));
+      return;
+    }
+    if (trimmed.length !== 6) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: message(
+          "phoneCodeSixDigits",
+          "문자로 받은 6자리 인증번호를 입력해 주세요.",
+        ),
+      }));
+      return;
+    }
+    setFieldErrors((prev) => ({
+      ...prev,
+      phoneVerificationCode: undefined,
+    }));
+    if (phoneVerificationProvider === "firebase") {
+      setPhoneVerificationStatus("confirmed");
+      setPhoneVerificationExpiresAt(Date.now() + PHONE_VERIFICATION_TTL_MS);
+      return;
+    }
+    try {
+      const response = await fetch("/api/phone-verification/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          phone: phoneVerificationPhone || normalizeKrMobilePhone(phone),
+          purpose: "audit_quote",
+          code: trimmed,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        token?: string;
+        error?: string;
+      } | null;
+      if (!response.ok || !data?.ok || !data.token) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          phoneVerificationCode: getPhoneVerificationErrorMessage(
+            data?.error ?? "invalid_phone_verification",
+          ),
+        }));
+        return;
+      }
+      setPhoneVerificationId(data.token);
+      setPhoneVerificationStatus("confirmed");
+      setPhoneVerificationExpiresAt(Date.now() + PHONE_VERIFICATION_TTL_MS);
+    } catch {
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: getPhoneVerificationErrorMessage("sms_send_failed"),
+      }));
+    }
+  }
+
+  const cooperativeQueryTrimmed = targetCooperativeQuery.trim();
+  const showCooperativeSuggestions =
+    cooperativeQueryTrimmed.length > 0 &&
+    selectedCooperative?.cooperative_name !== cooperativeQueryTrimmed;
+
+  useEffect(() => {
+    if (!showCooperativeSuggestions) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/cooperatives/search?q=${encodeURIComponent(cooperativeQueryTrimmed)}`,
+          { signal: controller.signal },
+        );
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          results?: CooperativeSearchItem[];
+        };
+        if (response.ok && payload.ok && Array.isArray(payload.results)) {
+          const exactMatch = findExactCooperativeMatch(
+            cooperativeQueryTrimmed,
+            payload.results,
+          );
+          if (exactMatch) {
+            applySelectedCooperative(exactMatch);
+            return;
+          }
+          setCooperativeSearch({
+            query: cooperativeQueryTrimmed,
+            results: payload.results,
+          });
+        } else {
+          setCooperativeSearch({
+            query: cooperativeQueryTrimmed,
+            results: [],
+            failed: true,
+          });
+        }
+      } catch (searchError) {
+        if (
+          !(searchError instanceof DOMException) ||
+          searchError.name !== "AbortError"
+        ) {
+          setCooperativeSearch({
+            query: cooperativeQueryTrimmed,
+            results: [],
+            failed: true,
+          });
+        }
+      }
+    }, 150);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [cooperativeQueryTrimmed, showCooperativeSuggestions]);
+
+  const currentCooperativeSearch =
+    cooperativeSearch?.query === cooperativeQueryTrimmed
+      ? cooperativeSearch
+      : null;
+  const filteredCooperatives = currentCooperativeSearch?.results ?? [];
+
+  async function resolveSelectedCooperative() {
+    if (selectedCooperative) return selectedCooperative;
+    const fromVisibleResults = findExactCooperativeMatch(
+      targetCooperativeQuery,
+      filteredCooperatives,
+    );
+    if (fromVisibleResults) return fromVisibleResults;
+    const query = targetCooperativeQuery.trim();
+    if (!query) return null;
+    try {
+      const response = await fetch(
+        `/api/cooperatives/search?q=${encodeURIComponent(query)}`,
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        results?: CooperativeSearchItem[];
+      };
+      if (response.ok && payload.ok && Array.isArray(payload.results)) {
+        return findExactCooperativeMatch(query, payload.results);
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  function applySelectedCooperative(item: CooperativeSearchItem) {
+    setSelectedCooperative(item);
+    setTargetCooperativeQuery(item.cooperative_name);
+    setCooperativeSearch(null);
+    setFieldErrors((prev) => ({
+      ...prev,
+      targetCooperativeName: undefined,
+    }));
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (previewMode) return;
@@ -150,15 +614,20 @@ export function AuditQuoteEventPage({
 
     setFormError("");
 
-    const targetCooperativeResult =
-      validateAuditQuoteTargetCooperative(targetCooperativeName);
+    const resolvedCooperative = await resolveSelectedCooperative();
+    if (resolvedCooperative && !selectedCooperative) {
+      applySelectedCooperative(resolvedCooperative);
+    }
+    const targetCooperativeResult = resolvedCooperative
+      ? validateAuditQuoteTargetCooperative(resolvedCooperative.cooperative_name)
+      : { ok: false as const, error: "required" };
     const fiscalYearResult = validateAuditQuoteFiscalYear(fiscalYear);
     const emailResult = validateAuditQuoteEmail(email);
     const nameResult = validateAuditQuoteName(name);
     const phoneResult = validateAuditQuotePhone(phone);
     const nextErrors: typeof fieldErrors = {};
-    if (!targetCooperativeResult.ok) {
-      nextErrors.targetCooperativeName = targetCooperativeName.trim()
+    if (!resolvedCooperative || !targetCooperativeResult.ok) {
+      nextErrors.targetCooperativeName = resolvedCooperative
         ? messages.targetCooperativeInvalid
         : messages.targetCooperativeRequired;
     }
@@ -182,31 +651,63 @@ export function AuditQuoteEventPage({
         ? messages.phoneInvalid
         : messages.phoneRequired;
     }
+    const normalizedPhone = normalizeKrMobilePhone(phone);
+    if (phoneResult.ok) {
+      if (!phoneVerificationId || phoneVerificationPhone !== normalizedPhone) {
+        nextErrors.phoneVerificationCode = message(
+          "phoneVerificationRequired",
+          "휴대폰 문자 인증을 먼저 진행해 주세요.",
+        );
+      } else if (!phoneVerificationCode.trim()) {
+        nextErrors.phoneVerificationCode = message(
+          "phoneCodeRequired",
+          "문자로 받은 인증번호를 입력해 주세요.",
+        );
+      } else if (phoneVerificationStatus !== "confirmed") {
+        nextErrors.phoneVerificationCode = message(
+          "phoneConfirmRequired",
+          "휴대폰 인증 확인을 완료해 주세요.",
+        );
+      } else if (
+        !phoneVerificationExpiresAt ||
+        Date.now() >= phoneVerificationExpiresAt
+      ) {
+        nextErrors.phoneVerificationCode = message(
+          "phoneVerificationExpired",
+          "휴대폰 인증이 만료되었습니다. 인증번호를 다시 받아 주세요.",
+        );
+      }
+    }
     if (!privacyConsent) {
       nextErrors.consent = messages.consentRequired;
     }
     setFieldErrors(nextErrors);
 
     if (
+      !resolvedCooperative ||
       !targetCooperativeResult.ok ||
       !fiscalYearResult.ok ||
       !emailResult.ok ||
       !nameResult.ok ||
       !phoneResult.ok ||
+      Boolean(nextErrors.phoneVerificationCode) ||
       !privacyConsent
     ) {
       setStatus("error");
-      const focusTarget = !targetCooperativeResult.ok
-        ? targetCooperativeRef
-        : !fiscalYearResult.ok
-          ? fiscalYearRef
-          : !emailResult.ok
-            ? emailRef
-            : !nameResult.ok
-              ? nameRef
-              : !phoneResult.ok
-                ? phoneRef
-                : null;
+      const focusTarget =
+        !resolvedCooperative || !targetCooperativeResult.ok
+          ? targetCooperativeRef
+          : !fiscalYearResult.ok
+            ? fiscalYearRef
+            : !emailResult.ok
+              ? emailRef
+              : !nameResult.ok
+                ? nameRef
+                : !phoneResult.ok
+                  ? phoneRef
+                  : nextErrors.phoneVerificationCode
+                    ? phoneRef
+                    : null;
       window.setTimeout(() => focusTarget?.current?.focus(), 0);
       return;
     }
@@ -220,6 +721,49 @@ export function AuditQuoteEventPage({
     });
 
     try {
+      if (phoneVerificationStatus !== "confirmed" || !phoneVerificationId) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          phoneVerificationCode: message(
+            "phoneVerificationRequired",
+            "휴대폰 문자 인증을 먼저 진행해 주세요.",
+          ),
+        }));
+        setStatus("error");
+        window.setTimeout(() => phoneRef.current?.focus(), 0);
+        return;
+      }
+      let phoneVerificationIdToken = phoneVerificationId;
+      if (
+        phoneVerificationProvider === "firebase" ||
+        !phoneVerificationId.startsWith("pv1.")
+      ) {
+        try {
+          const auth = getFirebaseAuth();
+          const phoneCredential = PhoneAuthProvider.credential(
+            phoneVerificationId,
+            phoneVerificationCode.trim(),
+          );
+          const phoneUserCredential = await signInWithCredential(
+            auth,
+            phoneCredential,
+          );
+          phoneVerificationIdToken = await phoneUserCredential.user.getIdToken(
+            true,
+          );
+        } catch (phoneError) {
+          resetPhoneVerification();
+          setFieldErrors((prev) => ({
+            ...prev,
+            phoneVerificationCode:
+              getPhoneVerificationErrorMessage(phoneError),
+          }));
+          setStatus("error");
+          window.setTimeout(() => phoneRef.current?.focus(), 0);
+          return;
+        }
+      }
+      setPhoneVerificationStatus("verified");
       const res = await fetch(AUDIT_QUOTE_REQUEST_ENDPOINT, {
         method: "POST",
         headers: {
@@ -232,6 +776,8 @@ export function AuditQuoteEventPage({
               email: emailResult.email,
               name: nameResult.name,
               phone: phoneResult.phone,
+              phoneVerificationIdToken,
+              targetCooperativeId: resolvedCooperative.cooperative_id,
               targetCooperativeName:
                 targetCooperativeResult.targetCooperativeName,
               fiscalYear: fiscalYearResult.fiscalYear,
@@ -251,6 +797,20 @@ export function AuditQuoteEventPage({
 
       if (!res.ok || !data?.ok || !data.publicReference) {
         const code = data?.error ?? "submit_failed";
+        if (
+          code === "invalid_phone_verification" ||
+          code === "phone_verification_expired" ||
+          code === "missing_phone_verification"
+        ) {
+          resetPhoneVerification();
+          setFieldErrors((prev) => ({
+            ...prev,
+            phoneVerificationCode: message(
+              "phoneVerificationRetry",
+              "휴대폰 인증을 다시 진행해 주세요.",
+            ),
+          }));
+        }
         trackAuditQuoteEvent("audit_quote_submit_error", {
           campaign: config.campaign,
           channel: config.channel,
@@ -268,21 +828,38 @@ export function AuditQuoteEventPage({
               ? messages.nameInvalid
               : code === "invalid_phone"
                 ? messages.phoneInvalid
-                : code === "consent_required"
-                  ? messages.consentRequired
-                  : code === "privacy_version_mismatch"
-                    ? messages.privacyVersionMismatch
-                    : code === "event_disabled"
-                      ? messages.eventDisabled
-                      : code === "rate_limited"
-                        ? messages.rateLimited
-                        : [
+                : code === "missing_phone_verification"
+                  ? message(
+                      "phoneVerificationRequired",
+                      "휴대폰 문자 인증을 먼저 진행해 주세요.",
+                    )
+                  : code === "invalid_phone_verification"
+                    ? message(
+                        "invalidPhoneVerification",
+                        "휴대폰 인증 정보가 올바르지 않습니다.",
+                      )
+                    : code === "phone_verification_expired"
+                      ? message(
+                          "phoneVerificationExpired",
+                          "휴대폰 인증이 만료되었습니다. 인증번호를 다시 받아 주세요.",
+                        )
+                      : code === "phone_quote_limit_exceeded"
+                        ? "해당 휴대폰 번호로는 견적요청을 최대 5번까지만 할 수 있습니다."
+                        : code === "consent_required"
+                          ? messages.consentRequired
+                          : code === "privacy_version_mismatch"
+                            ? messages.privacyVersionMismatch
+                            : code === "event_disabled"
+                              ? messages.eventDisabled
+                              : code === "rate_limited"
+                                ? messages.rateLimited
+                                : [
                               "origin_not_allowed",
                               "unsupported_media_type",
                               "payload_too_large",
                             ].includes(code)
-                          ? messages.requestRejected
-                          : messages.genericError,
+                                  ? messages.requestRejected
+                                  : messages.genericError,
         );
         setStatus("error");
         window.setTimeout(() => errorRef.current?.focus(), 0);
@@ -299,6 +876,14 @@ export function AuditQuoteEventPage({
       idempotency.current.clearAfterSuccess();
       window.setTimeout(() => successRef.current?.focus(), 0);
     } catch {
+      resetPhoneVerification();
+      setFieldErrors((prev) => ({
+        ...prev,
+        phoneVerificationCode: message(
+          "phoneVerificationRetry",
+          "휴대폰 인증을 다시 진행해 주세요.",
+        ),
+      }));
       trackAuditQuoteEvent("audit_quote_submit_error", {
         campaign: config.campaign,
         channel: config.channel,
@@ -315,22 +900,16 @@ export function AuditQuoteEventPage({
     const root = eventSectionClasses(section, baseClassName);
     return {
       ...root,
-      className: [
-        root.className,
-        editing ? "cms-home-edit-section" : "",
-        editing && selectedSectionId === section.id ? "is-selected" : "",
-        editing && !section.visible ? "is-hidden" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      tabIndex: editing ? 0 : undefined,
-      "data-cms-section-id": editing ? section.id : undefined,
-      onClick: editing ? () => onSelectSection?.(section.id) : undefined,
-      onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
+      ...cmsSectionSelectionProps(section, root.className, {
+        editing,
+        selectedSectionId,
+        onSelectSection,
+      }),
     };
   }
 
   function renderSection(section: CmsSection) {
+    if (section.deleted && !editing) return null;
     if (!section.visible && !editing) return null;
 
     if (section.id === "hero") {
@@ -475,17 +1054,18 @@ export function AuditQuoteEventPage({
                   ref={targetCooperativeRef}
                   id={`${fieldId}-target-cooperative`}
                   type="text"
-                  name="targetCooperativeName"
-                  autoComplete="organization"
+                  name="targetCooperativeQuery"
+                  autoComplete="off"
                   placeholder={section.text.targetCooperativePlaceholder}
-                  value={targetCooperativeName}
+                  value={targetCooperativeQuery}
                   aria-invalid={Boolean(fieldErrors.targetCooperativeName)}
                   aria-describedby={
                     targetCooperativeDescriptions || undefined
                   }
                   disabled={status === "submitting"}
                   onChange={(event) => {
-                    setTargetCooperativeName(event.target.value);
+                    setTargetCooperativeQuery(event.target.value);
+                    setSelectedCooperative(null);
                     if (fieldErrors.targetCooperativeName) {
                       setFieldErrors((prev) => ({
                         ...prev,
@@ -493,8 +1073,63 @@ export function AuditQuoteEventPage({
                       }));
                     }
                   }}
+                  onBlur={() => {
+                    if (selectedCooperative) return;
+                    const exactMatch = findExactCooperativeMatch(
+                      targetCooperativeQuery,
+                      filteredCooperatives,
+                    );
+                    if (exactMatch) applySelectedCooperative(exactMatch);
+                  }}
                 />
-                {section.text.targetCooperativeHelp ? (
+                {showCooperativeSuggestions ? (
+                  !currentCooperativeSearch ? (
+                    <p className="aq-field__help" role="status">
+                      농협을 검색하는 중…
+                    </p>
+                  ) : currentCooperativeSearch.failed ? (
+                    <p className="aq-error" role="alert">
+                      농협 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.
+                    </p>
+                  ) : filteredCooperatives.length > 0 ? (
+                    <div
+                      className="aq-coop-results"
+                      role="listbox"
+                      aria-label="농협 검색 결과"
+                    >
+                      {filteredCooperatives.map((item) => (
+                        <button
+                          type="button"
+                          key={item.cooperative_id}
+                          className={
+                            item.cooperative_id ===
+                            selectedCooperative?.cooperative_id
+                              ? "is-selected"
+                              : undefined
+                          }
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => applySelectedCooperative(item)}
+                        >
+                          <strong>{item.cooperative_name}</strong>
+                          <span>
+                            {item.cooperative_type}
+                            {item.isDemoInstitution ? " · 테스트" : ""}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="aq-field__help" role="status">
+                      &ldquo;{cooperativeQueryTrimmed}&rdquo;(으)로 검색된 농협이
+                      없습니다. 마스터 목록에 있는 농협명으로 다시 검색해 주세요.
+                    </p>
+                  )
+                ) : null}
+                {selectedCooperative ? (
+                  <p className="aq-field__help">
+                    선택됨: <strong>{selectedCooperative.cooperative_name}</strong>
+                  </p>
+                ) : section.text.targetCooperativeHelp ? (
                   <p
                     id={`${fieldId}-target-cooperative-help`}
                     className="aq-field__help"
@@ -524,27 +1159,23 @@ export function AuditQuoteEventPage({
                   name="fiscalYear"
                   inputMode="numeric"
                   maxLength={4}
-                  placeholder={section.text.fiscalYearPlaceholder}
+                  placeholder={section.text.fiscalYearPlaceholder || fiscalYear}
                   value={fiscalYear}
+                  readOnly
+                  aria-readonly="true"
                   aria-invalid={Boolean(fieldErrors.fiscalYear)}
                   aria-describedby={fiscalYearDescriptions || undefined}
                   disabled={status === "submitting"}
-                  onChange={(event) => {
-                    setFiscalYear(event.target.value.replace(/\D/gu, ""));
-                    if (fieldErrors.fiscalYear) {
-                      setFieldErrors((prev) => ({
-                        ...prev,
-                        fiscalYear: undefined,
-                      }));
-                    }
-                  }}
                 />
                 {section.text.fiscalYearHelp ? (
                   <p
                     id={`${fieldId}-fiscal-year-help`}
                     className="aq-field__help"
                   >
-                    {section.text.fiscalYearHelp}
+                    {renderFootnoteReference(
+                      section.text.fiscalYearHelp,
+                      "aq-regulation-footnote",
+                    )}
                   </p>
                 ) : null}
                 {fieldErrors.fiscalYear ? (
@@ -658,11 +1289,23 @@ export function AuditQuoteEventPage({
                   aria-describedby={phoneDescriptions || undefined}
                   disabled={status === "submitting"}
                   onChange={(event) => {
-                    setPhone(formatPhoneInput(event.target.value));
+                    const nextPhone = formatKrMobilePhoneInput(
+                      event.target.value,
+                    );
+                    const nextNormalizedPhone =
+                      normalizeKrMobilePhone(nextPhone);
+                    setPhone(nextPhone);
+                    if (
+                      phoneVerificationPhone &&
+                      phoneVerificationPhone !== nextNormalizedPhone
+                    ) {
+                      resetPhoneVerification();
+                    }
                     if (fieldErrors.phone) {
                       setFieldErrors((prev) => ({
                         ...prev,
                         phone: undefined,
+                        phoneVerificationCode: undefined,
                       }));
                     }
                   }}
@@ -681,6 +1324,91 @@ export function AuditQuoteEventPage({
                     {fieldErrors.phone}
                   </p>
                 ) : null}
+                <div className="auth-phone-verification">
+                  {phoneVerificationStatus === "confirmed" ||
+                  phoneVerificationStatus === "verified" ? (
+                    <p className="auth-field__success" role="status">
+                      인증이 완료되었습니다. 인증은 30분간 유지됩니다.
+                    </p>
+                  ) : phoneVerificationId ? (
+                    <div className="auth-phone-codeinput">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={phoneVerificationCode}
+                        onChange={(event) => {
+                          setPhoneVerificationCode(
+                            event.target.value.replace(/\D/gu, "").slice(0, 6),
+                          );
+                          if (fieldErrors.phoneVerificationCode) {
+                            setFieldErrors((prev) => ({
+                              ...prev,
+                              phoneVerificationCode: undefined,
+                            }));
+                          }
+                        }}
+                        placeholder="인증번호 6자리"
+                        disabled={status === "submitting"}
+                        aria-invalid={Boolean(fieldErrors.phoneVerificationCode)}
+                      />
+                      <button
+                        type="button"
+                        className="aq-phone-send aq-phone-send--confirm"
+                        onClick={() => void confirmPhoneVerificationCode()}
+                        disabled={
+                          status === "submitting" ||
+                          !phoneVerificationId ||
+                          phoneVerificationCode.trim().length !== 6
+                        }
+                      >
+                        인증 확인
+                      </button>
+                    </div>
+                  ) : null}
+                  {phoneVerificationStatus !== "confirmed" &&
+                    phoneVerificationStatus !== "verified" && (
+                      <button
+                        type="button"
+                        className="aq-phone-send"
+                        onClick={() => void sendPhoneVerificationCode()}
+                        disabled={
+                          status === "submitting" ||
+                          phoneVerificationStatus === "sending"
+                        }
+                      >
+                        {phoneVerificationStatus === "sending"
+                          ? "발송 중..."
+                          : phoneVerificationId &&
+                              phoneVerificationPhone ===
+                                normalizeKrMobilePhone(phone)
+                            ? "인증번호 재발송"
+                            : "인증번호 받기"}
+                      </button>
+                    )}
+                  {phoneVerificationStatus === "idle" ? (
+                    <span className="auth-field__hint">
+                      {section.text.phoneVerifyHelp ||
+                        "농협 담당자님의 휴대폰 문자 인증후 견적 요청이 가능합니다."}
+                    </span>
+                  ) : null}
+                  {phoneVerificationStatus === "sent" ? (
+                    <span className="auth-field__hint">
+                      {phoneVerificationLocalDelivery
+                        ? "로컬 환경에서는 문자를 보내지 않고 인증번호를 자동 입력합니다. 인증 확인을 눌러 주세요."
+                        : "문자로 받은 6자리 인증번호를 입력해 주세요."}
+                    </span>
+                  ) : null}
+                  {fieldErrors.phoneVerificationCode ? (
+                    <p className="aq-error" role="alert">
+                      {fieldErrors.phoneVerificationCode}
+                    </p>
+                  ) : null}
+                  <span
+                    id="audit-quote-phone-recaptcha"
+                    className="auth-phone-recaptcha"
+                  />
+                </div>
               </div>
 
               <div className="aq-honeypot" aria-hidden="true">
@@ -839,6 +1567,7 @@ export function AuditQuoteEventPage({
     }
 
     if (section.id === "legalNotice") {
+      const regulationItems = visibleItems(section);
       return (
         <section
           key={section.id}
@@ -849,6 +1578,25 @@ export function AuditQuoteEventPage({
             본 서비스는 <strong>{section.text.operatorName}</strong>
             {section.description}
           </p>
+          {section.text.regulationNote || regulationItems.length > 0 ? (
+            <div
+              className="aq-footnote__notes"
+              id="aq-regulation-footnote"
+            >
+              {section.text.regulationNote ? (
+                <p className="aq-footnote__notes-title">
+                  {renderFootnoteReference(section.text.regulationNote)}
+                </p>
+              ) : null}
+              {regulationItems.length > 0 ? (
+                <ul>
+                  {regulationItems.map((item) => (
+                    <li key={item.id}>{item.title}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       );
     }
@@ -866,6 +1614,13 @@ export function AuditQuoteEventPage({
             : formError}
       </p>
       {normalizedContent.sections.map(renderSection)}
+      <CmsSupplementalSections
+        pageKey="event.auditQuote"
+        content={normalizedContent}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </main>
   );
 }

@@ -15,6 +15,7 @@ import { PartnerApplicationForm } from "@/components/PartnerApplicationForm";
 import { CmsPageRenderer, type CmsPreviewDevice } from "@/components/cms-editor/CmsPageRenderer";
 import { isPortalLoginPageKey } from "@/lib/auth/login-page";
 import type { CmsPageKey } from "@/lib/cms/constants";
+import { cmsEditableSectionProps } from "@/lib/cms/editable-section";
 import { getCmsFeatureDefinition } from "@/lib/cms/feature-registry";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
@@ -56,23 +57,16 @@ export function CmsActualPagePreview({
     );
   }
   if (renderer === "signup") {
-    return (
-      <SignupPageRenderer
-        content={content}
-        mainId={null}
-        previewMode
-      />
-    );
+    return <SignupPageRenderer {...shared} />;
   }
   if (renderer === "memberDashboard") {
-    return <MyPageDashboard content={content} previewMode />;
+    return <MyPageDashboard {...shared} />;
   }
   if (renderer === "requestDetail") {
     return (
       <RequestDetailPage
         requestId="preview-request"
-        content={content}
-        previewMode
+        {...shared}
       />
     );
   }
@@ -88,10 +82,10 @@ export function CmsActualPagePreview({
     );
   }
   if (renderer === "adminOperations") {
-    return <AdminDashboard content={content} previewMode />;
+    return <AdminDashboard {...shared} />;
   }
   if (renderer === "adminConsole") {
-    return <CmsAdminConsole content={content} previewMode />;
+    return <CmsAdminConsole {...shared} />;
   }
   if (
     pageKey === "member.quotes" ||
@@ -99,23 +93,24 @@ export function CmsActualPagePreview({
   ) {
     return (
       <CustomerQuotesPage
-        content={content}
         pageKey={pageKey}
         quoteId={pageKey === "member.quoteDetail" ? "preview-quote" : undefined}
         conversionCopy={{ title: "", description: "", actionLabel: "" }}
-        previewMode
+        {...shared}
       />
     );
   }
   if (pageKey === "partner.apply") {
-    return <PartnerApplicationForm content={content} previewMode />;
+    return <PartnerApplicationForm {...shared} />;
   }
   if (pageKey === "partner.portal") {
     return (
-      <PartnerQuoteDocumentPreview
+      <PartnerPortalPreview
         content={content}
-        selected={selectedSectionId === "quoteDocument"}
-        onSelect={() => onSelectSection?.("quoteDocument")}
+        device={device}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
       />
     );
   }
@@ -161,14 +156,56 @@ export function CmsActualPagePreview({
   );
 }
 
-function PartnerQuoteDocumentPreview({
+function PartnerPortalPreview({
   content,
-  selected,
-  onSelect,
+  device,
+  editing,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
-  selected: boolean;
-  onSelect(): void;
+  device: CmsPreviewDevice;
+  editing: boolean;
+  selectedSectionId?: string;
+  onSelectSection?: (sectionId: string) => void;
+}) {
+  return (
+    <div className="cms-partner-portal-preview">
+      {content.sections.map((section) => {
+        if (section.deleted && !editing) return null;
+        return section.id === "quoteDocument" ? (
+          <PartnerQuoteDocumentPreview
+            content={content}
+            editing={editing}
+            selectedSectionId={selectedSectionId}
+            onSelectSection={onSelectSection}
+            key={section.id}
+          />
+        ) : (
+          <CmsPageRenderer
+            content={{ ...content, sections: [section], messages: {} }}
+            device={device}
+            editing={editing}
+            selectedSectionId={selectedSectionId}
+            onSelectSection={onSelectSection}
+            key={section.id}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function PartnerQuoteDocumentPreview({
+  content,
+  editing,
+  selectedSectionId,
+  onSelectSection,
+}: {
+  content: CmsPageContent;
+  editing: boolean;
+  selectedSectionId?: string;
+  onSelectSection?: (sectionId: string) => void;
 }) {
   const section = getCmsSection(
     content,
@@ -185,38 +222,100 @@ function PartnerQuoteDocumentPreview({
     <main className="page-shell">
       <section className="section">
         <article
-          className={`admin-card cms-home-edit-section${
-            selected ? " is-selected" : ""
-          }`}
-          tabIndex={0}
-          onClick={onSelect}
-          onFocus={onSelect}
+          {...cmsEditableSectionProps(section, "admin-card quote-document-preview", {
+            editing,
+            selectedSectionId,
+            onSelectSection,
+          })}
         >
           <p className="eyebrow">{section.eyebrow}</p>
-          <h1>{title}</h1>
-          <p>
-            {text.quoteNumberLabel}: 2027-12345678 /{" "}
-            {text.documentVersionLabel}: 1
-          </p>
-          <hr />
-          <h2>{text.recipientSectionTitle}</h2>
-          <p>가나다농협 김담당 담당자님</p>
-          <p>{text.recipientEmailLabel}: sample@nonghyup.com</p>
-          <h2>{text.supplierSectionTitle}</h2>
-          <p><strong>프리고회계법인</strong></p>
-          <p>{text.businessNumberLabel}: 123-45-67890</p>
-          <p>{text.addressLabel}: 서울특별시 중구 세종대로 1</p>
-          <p>{text.supplierContactLabel}: 김담당</p>
-          <p>{text.contactLabel}: 02-1234-5678 / quote@example.com</p>
-          <h2>{text.quoteIntro}</h2>
+          <div className="quote-document-preview__brand">
+            <div>
+              <p className="quote-document-preview__kind">
+                {text.documentKindLabel}
+              </p>
+              <h1>{title}</h1>
+            </div>
+            <dl className="quote-document-preview__meta">
+              <div>
+                <dt>{text.issueDateLabel}</dt>
+                <dd>2026.07.24</dd>
+              </div>
+              <div>
+                <dt>{text.quoteNumberLabel}</dt>
+                <dd>2027-12345678</dd>
+              </div>
+              <div>
+                <dt>{text.customerRefLabel}</dt>
+                <dd>가나다농협</dd>
+              </div>
+              <div>
+                <dt>{text.validUntilLabel}</dt>
+                <dd>발행일로부터 30일</dd>
+              </div>
+            </dl>
+          </div>
+          <section>
+            <h2>{text.recipientSectionTitle}</h2>
+            <p>
+              {text.customerRefLabel}: 가나다농협 김담당 담당자님
+            </p>
+            <p>
+              {text.recipientEmailLabel}: sample@nonghyup.com
+            </p>
+          </section>
+          <section>
+            <h2>{text.credentialsTitle || text.supplierSectionTitle}</h2>
+            <p>
+              <strong>프리고회계법인</strong>
+            </p>
+            <p>{text.businessNumberLabel}: 123-45-67890</p>
+            <p>{text.addressLabel}: 서울특별시 중구 세종대로 1</p>
+            <p>{text.supplierContactLabel}: 김담당</p>
+            <p>{text.contactLabel}: 02-1234-5678 / quote@example.com</p>
+            <p>{text.engagementPartnerLabel}: 홍길동</p>
+            <p>
+              {text.cpaCountLabel}: 12{text.peopleSuffix}
+            </p>
+          </section>
+          <p>{text.quoteIntro}</p>
           <p>
             {text.itemHeader} · {text.quantityHeader} ·{" "}
             {text.unitPriceHeader} · {text.supplyAmountHeader}
           </p>
           <p>
-            <strong>{text.totalLabel}: 11,000,000{text.currencySuffix}</strong>
+            <strong>
+              {text.totalLabel}: 11,000,000{text.currencySuffix}
+            </strong>
           </p>
-          <footer>{text.footerStatement}</footer>
+          <section>
+            <h2>{text.comparisonQrTitle}</h2>
+            <p>{text.comparisonQrHelp}</p>
+          </section>
+          <section>
+            <h2>{text.evaluationFactsTitle}</h2>
+            <p>{text.evaluationFactsHelp}</p>
+            <p>
+              {text.revenueLabel}: 1,000,000,000{text.currencySuffix}
+            </p>
+            <p>
+              {text.localAuditCountLabel}: 8{text.countSuffix}
+            </p>
+            <p>
+              {text.auditedTypesLabel}: {text.cooperativeTypeLocalAgri}
+            </p>
+            <p>
+              {text.taxExperienceLabel}: {text.yesLabel}
+            </p>
+            <p>
+              {text.subsidyExperienceLabel}: {text.noLabel}
+            </p>
+          </section>
+          <footer>
+            {text.footerStatement}
+            <br />
+            {text.thankYouStatement}
+          </footer>
         </article>
       </section>
     </main>

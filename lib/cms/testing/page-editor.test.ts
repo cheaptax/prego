@@ -9,6 +9,10 @@ import {
   normalizePageContentForPublish,
   validatePageContentForPublish,
 } from "@/lib/cms/editor-validation";
+import {
+  cmsEditableSectionProps,
+  cmsSectionSelectionProps,
+} from "@/lib/cms/editable-section";
 import { loadCmsPageEditorData } from "@/lib/cms/page-editor-data";
 import { activeCmsMediaAssetIds } from "@/lib/cms/media";
 import { matchesCmsFileSignature } from "@/lib/cms/file-signature";
@@ -71,6 +75,70 @@ describe("CMS page editor schema and checks", () => {
       }).success,
       false,
     );
+  });
+
+  it("gives every section one shared, keyboard-accessible preview selection contract", () => {
+    const section = structuredClone(CMS_PAGE_DEFAULTS["partner.apply"].sections[0]);
+    let selected = "";
+    let propagationStopped = false;
+    const props = cmsEditableSectionProps(section, "partner-hero", {
+      editing: true,
+      selectedSectionId: section.id,
+      onSelectSection: (sectionId) => {
+        selected = sectionId;
+      },
+    });
+
+    assert.equal(props["data-cms-section-id"], section.id);
+    assert.equal(props["data-cms-editable-section"], "true");
+    assert.match(props.className ?? "", /cms-public-section/);
+    assert.match(props.className ?? "", /cms-home-edit-section/);
+    assert.match(props.className ?? "", /is-selected/);
+    assert.equal(props.tabIndex, 0);
+
+    const click = props.onClick as
+      | ((event: { stopPropagation(): void }) => void)
+      | undefined;
+    click?.({
+      stopPropagation() {
+        propagationStopped = true;
+      },
+    });
+    assert.equal(selected, section.id);
+    assert.equal(propagationStopped, true);
+
+    selected = "";
+    let keyboardPrevented = false;
+    const keyDown = props.onKeyDown as
+      | ((event: {
+          target: object;
+          currentTarget: object;
+          key: string;
+          preventDefault(): void;
+          stopPropagation(): void;
+        }) => void)
+      | undefined;
+    const keyboardTarget = {};
+    keyDown?.({
+      target: keyboardTarget,
+      currentTarget: keyboardTarget,
+      key: "Enter",
+      preventDefault() {
+        keyboardPrevented = true;
+      },
+      stopPropagation() {},
+    });
+    assert.equal(selected, section.id);
+    assert.equal(keyboardPrevented, true);
+
+    const wrapperProps = cmsSectionSelectionProps(
+      section,
+      "renderer-wrapper",
+      { editing: true },
+    );
+    assert.match(wrapperProps.className ?? "", /renderer-wrapper/);
+    assert.doesNotMatch(wrapperProps.className ?? "", /cms-public-section/);
+    assert.equal(wrapperProps["data-cms-editable-section"], "true");
   });
 
   it("separates internal and external links", () => {
@@ -224,6 +292,40 @@ describe("CMS page editor security and usability contract", () => {
     assert.doesNotMatch(
       source,
       />\s*(JSON|HTML|CSS|schemaVersion|Firestore|API endpoint)\s*</i,
+    );
+  });
+
+  it("exposes unified alignment and applies it in route-specific renderers", () => {
+    const settings = readFileSync(
+      path.join(root, "components/cms-editor/CmsEditorSettings.tsx"),
+      "utf8",
+    );
+    const styles = readFileSync(path.join(root, "app/globals.css"), "utf8");
+    const partnerApplication = readFileSync(
+      path.join(root, "components/PartnerApplicationForm.tsx"),
+      "utf8",
+    );
+
+    assert.match(settings, /콘텐츠 전체 정렬/);
+    assert.match(
+      settings,
+      /title: \{ \.\.\.section\.style\.title, alignment \}/,
+    );
+    assert.match(
+      settings,
+      /body: \{ \.\.\.section\.style\.body, alignment \}/,
+    );
+    assert.match(
+      styles,
+      /\.cms-public-section\.cms-has-title-align :where\(h1, h2, h3, h4\)/,
+    );
+    assert.match(
+      styles,
+      /\.cms-public-section\.cms-has-body-align :where\(p, li, dt, dd, label, small\)/,
+    );
+    assert.match(
+      partnerApplication,
+      /"section hero-section hero-section--compact"/,
     );
   });
 });

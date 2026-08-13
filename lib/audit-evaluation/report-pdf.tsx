@@ -13,6 +13,9 @@ import {
 
 import {
   auditEvaluationReportViewModelSchema,
+  isAuditCountEmphasis,
+  isEmphasizedReportColumn,
+  isNowrapReportColumn,
   type AuditEvaluationReportBlockViewModel,
   type AuditEvaluationReportSectionViewModel,
   type AuditEvaluationReportViewModel,
@@ -21,7 +24,7 @@ import {
 } from "@/lib/audit-evaluation/report-view-model";
 
 export const REPORT_PDF_RENDERER_ID = "audit-evaluation-report-pdf";
-export const REPORT_PDF_RENDERER_VERSION = 2 as const;
+export const REPORT_PDF_RENDERER_VERSION = 7 as const;
 
 const FONT_FAMILY = "NH-Pretendard-Report";
 const PRETENDARD_PACKAGE_ROOT = path.join(
@@ -41,9 +44,12 @@ const staticFont = (fileName: string) =>
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 const EMPTY_MESSAGE = "표시할 항목 없음";
 const CONTINUED = "(계속)";
-const TEXT_LINE_BUDGET = 30;
-const KEY_VALUE_LINE_BUDGET = 30;
-const TABLE_LINE_BUDGET = 30;
+const TEXT_LINE_BUDGET = 36;
+const KEY_VALUE_LINE_BUDGET = 36;
+/** A4 본문 기준 표 본문 행 예산(섹션 제목·표 제목·헤더 제외). 과도한 조기 분할 방지 */
+const TABLE_LINE_BUDGET = 42;
+/** 한 페이지에 여러 블록을 묶을 때 쓰는 총 라인 예산 */
+const PAGE_PACK_LINE_BUDGET = 54;
 const TEXT_CHARS_PER_LINE = 54;
 const TABLE_CELL_FRAGMENT_CHARS = 180;
 
@@ -153,9 +159,9 @@ const styles = StyleSheet.create({
     fontSize: 8.5,
     lineHeight: 1.42,
     paddingTop: 58,
-    paddingRight: 42,
+    paddingRight: 28,
     paddingBottom: 52,
-    paddingLeft: 42,
+    paddingLeft: 28,
   },
   coverPage: {
     paddingTop: 74,
@@ -163,8 +169,8 @@ const styles = StyleSheet.create({
   header: {
     position: "absolute",
     top: 24,
-    left: 42,
-    right: 42,
+    left: 28,
+    right: 28,
     height: 22,
     borderBottomWidth: 1,
     borderBottomColor: "#1b5e3b",
@@ -199,8 +205,8 @@ const styles = StyleSheet.create({
   footer: {
     position: "absolute",
     bottom: 20,
-    left: 42,
-    right: 42,
+    left: 28,
+    right: 28,
     height: 20,
     borderTopWidth: 0.75,
     borderTopColor: "#65746b",
@@ -294,6 +300,7 @@ const styles = StyleSheet.create({
   },
   block: {
     width: "100%",
+    marginBottom: 14,
   },
   blockTitleRow: {
     marginBottom: 8,
@@ -323,6 +330,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.6,
     borderBottomColor: "#9ca8a1",
   },
+  keyValueRowFirst: {
+    borderTopWidth: 0.6,
+    borderTopColor: "#9ca8a1",
+  },
   keyValueLabel: {
     width: "28%",
     backgroundColor: "#e9f0ec",
@@ -340,6 +351,14 @@ const styles = StyleSheet.create({
     paddingRight: 7,
     paddingBottom: 6,
     paddingLeft: 7,
+  },
+  keyValueLabelHighlight: {
+    backgroundColor: "#f6e7b8",
+    color: "#513b00",
+  },
+  keyValueValueHighlight: {
+    color: "#513b00",
+    fontWeight: 700,
   },
   table: {
     borderTopWidth: 0.8,
@@ -390,6 +409,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff4d6",
     color: "#513b00",
     fontWeight: 700,
+  },
+  tableAuditCountCell: {
+    fontWeight: 700,
+  },
+  tableNowrapCell: {
+    flexGrow: 1.55,
+    minWidth: 86,
   },
   bulletRow: {
     flexDirection: "row",
@@ -451,7 +477,17 @@ function estimatedBlockLines(block: PageBlock) {
     );
   }
   if (block.kind === "TABLE") {
-    return 5 + block.rows.length * 2;
+    return 3 + block.rows.reduce(
+      (sum, row) =>
+        sum +
+        Math.max(
+          1,
+          ...row.cells.map((cell) =>
+            estimatedLines(cell || " ", tableCharsPerCell(block.columns.length)),
+          ),
+        ),
+      0,
+    );
   }
   const items = block.kind === "BULLETS" ? block.items : block.paragraphs;
   return 4 + items.reduce(
@@ -563,20 +599,22 @@ function paginateTextItems(
 }
 
 function columnGroups(columnCount: number): number[][] {
-  if (columnCount <= 4) {
-    return [Array.from({ length: columnCount }, (_, index) => index)];
-  }
-  const groups: number[][] = [];
-  for (let index = 1; index < columnCount; index += 3) {
-    groups.push([
-      0,
-      ...Array.from(
-        { length: Math.min(3, columnCount - index) },
-        (_, offset) => index + offset,
-      ),
-    ]);
-  }
-  return groups;
+  // 열 묶음(가로 분할)을 사용하지 않는다. 넓은 표는 글자 크기 축소와
+  // 뷰모델 단계의 논리 표 분리로 가독성을 확보한다.
+  return [Array.from({ length: columnCount }, (_, index) => index)];
+}
+
+function tableCompactLevel(columnCount: number): "normal" | "medium" | "dense" {
+  if (columnCount <= 4) return "normal";
+  if (columnCount <= 6) return "medium";
+  return "dense";
+}
+
+function tableCharsPerCell(columnCount: number): number {
+  // A4 본문폭 기준 추정 문자 수 — 열 묶음 없이 한 표에 맞출 때 과도한 세로 분할 방지
+  if (columnCount <= 4) return Math.max(14, Math.floor(72 / columnCount));
+  if (columnCount <= 6) return Math.max(10, Math.floor(84 / columnCount));
+  return Math.max(8, Math.floor(96 / columnCount));
 }
 
 function expandTableRows(rows: string[][]): TableRow[] {
@@ -597,55 +635,57 @@ function expandTableRows(rows: string[][]): TableRow[] {
   });
 }
 
+function isFirmGroupStart(row: TableRow): boolean {
+  const first = (row.cells[0] ?? "").trim();
+  return first.length > 0 && !first.startsWith(CONTINUED);
+}
+
+/** 회계법인명(좌측 열) 기준으로 연속 행을 묶는다. 빈칸·(계속)은 이전 법인에 속한다. */
+function groupTableRowsByFirm(rows: TableRow[]): TableRow[][] {
+  const groups: TableRow[][] = [];
+  for (const row of rows) {
+    if (isFirmGroupStart(row) || groups.length === 0) {
+      groups.push([row]);
+    } else {
+      groups[groups.length - 1]!.push(row);
+    }
+  }
+  return groups;
+}
+
+function tableRowLineCost(cells: string[], charsPerCell: number): number {
+  return Math.max(
+    1,
+    ...cells.map((cell) => estimatedLines(cell || " ", charsPerCell)),
+  );
+}
+
 function paginateTable(block: ReportTableBlockViewModel): TablePageBlock[] {
   const groups = columnGroups(block.columns.length);
   const expandedRows = expandTableRows(block.rows);
   const pages: TablePageBlock[] = [];
+  const charsPerCell = tableCharsPerCell(block.columns.length);
 
   groups.forEach((group, columnGroupIndex) => {
     const columns = group.map((index) => block.columns[index]);
     const headerLines = Math.max(
-      ...columns.map((column) =>
-        estimatedLines(column, Math.max(12, Math.floor(66 / columns.length)))
-      ),
+      1,
+      ...columns.map((column) => estimatedLines(column, charsPerCell)),
     );
-    const availableLines = Math.max(20, TABLE_LINE_BUDGET - headerLines);
+    const availableLines = Math.max(18, TABLE_LINE_BUDGET - headerLines);
+    const firmGroups = groupTableRowsByFirm(
+      expandedRows.map((row) => ({
+        ...row,
+        cells: group.map((index) => row.cells[index] ?? ""),
+      })),
+    );
+
     let current: TableRow[] = [];
     let usedLines = 0;
     let groupPageIndex = 0;
 
-    for (const row of expandedRows) {
-      const projected = group.map((index) => row.cells[index]);
-      const charsPerCell = Math.max(
-        12,
-        Math.floor(66 / projected.length),
-      );
-      const cost = Math.max(
-        ...projected.map((cell) => estimatedLines(cell, charsPerCell)),
-      ) + 1;
-      if (current.length > 0 && usedLines + cost > availableLines) {
-        pages.push({
-          kind: "TABLE",
-          id: block.id,
-          title: block.title,
-          continued: columnGroupIndex > 0 || groupPageIndex > 0,
-          columns,
-          rows: current,
-          columnGroupIndex,
-          columnGroupCount: groups.length,
-        });
-        groupPageIndex += 1;
-        current = [];
-        usedLines = 0;
-      }
-      current.push({
-        ...row,
-        cells: projected,
-      });
-      usedLines += cost;
-    }
-
-    if (current.length > 0 || expandedRows.length === 0) {
+    const flush = () => {
+      if (current.length === 0) return;
       pages.push({
         kind: "TABLE",
         id: block.id,
@@ -653,6 +693,59 @@ function paginateTable(block: ReportTableBlockViewModel): TablePageBlock[] {
         continued: columnGroupIndex > 0 || groupPageIndex > 0,
         columns,
         rows: current,
+        columnGroupIndex,
+        columnGroupCount: groups.length,
+      });
+      groupPageIndex += 1;
+      current = [];
+      usedLines = 0;
+    };
+
+    const appendRow = (row: TableRow) => {
+      const cost = tableRowLineCost(row.cells, charsPerCell);
+      if (current.length > 0 && usedLines + cost > availableLines) {
+        flush();
+      }
+      current.push(row);
+      usedLines += cost;
+    };
+
+    for (const firmGroup of firmGroups) {
+      const firmCost = firmGroup.reduce(
+        (sum, row) => sum + tableRowLineCost(row.cells, charsPerCell),
+        0,
+      );
+
+      if (current.length > 0 && usedLines + firmCost > availableLines) {
+        // 하단 여백이 부족할 때만 법인 단위로 페이지를 나눈다.
+        flush();
+      }
+
+      if (firmCost <= availableLines) {
+        for (const row of firmGroup) {
+          current.push(row);
+        }
+        usedLines += firmCost;
+        continue;
+      }
+
+      // 한 법인이 한 페이지를 넘는 불가피한 경우에만 행 단위로 분할
+      for (const row of firmGroup) {
+        appendRow(row);
+      }
+    }
+
+    if (current.length > 0 || expandedRows.length === 0) {
+      flush();
+    }
+    if (expandedRows.length === 0 && pages.length === 0) {
+      pages.push({
+        kind: "TABLE",
+        id: block.id,
+        title: block.title,
+        continued: false,
+        columns,
+        rows: [],
         columnGroupIndex,
         columnGroupCount: groups.length,
       });
@@ -728,22 +821,12 @@ function buildPagePlans(
       const chunks = paginateBlock(block);
       chunks.forEach((chunk) => {
         const cost = estimatedBlockLines(chunk);
+        // 여유 공간이 있으면 다음 블록도 같은 페이지에 배치
         if (
           packedBlocks.length > 0 &&
-          (packedLines + cost > 42 || chunk.kind === "TABLE")
+          packedLines + cost > PAGE_PACK_LINE_BUDGET
         ) {
           flushPacked();
-        }
-        if (chunk.kind === "TABLE" && cost > 20) {
-          plans.push({
-            key: `${section.id}-${block.id}-${packedIndex}`,
-            sectionId: section.id,
-            sectionTitle: section.title,
-            blocks: [chunk],
-            isCover: section.id === "cover" && plans.length === 0,
-          });
-          packedIndex += 1;
-          return;
         }
         packedBlocks.push(chunk);
         packedLines += cost;
@@ -847,16 +930,34 @@ function KeyValuesContent({ block }: { block: KeyValuesPageBlock }) {
   if (block.items.length === 0) {
     return <Text style={styles.empty}>{EMPTY_MESSAGE}</Text>;
   }
+  const highlight = block.id === "nh-audit-final-result";
   return (
     <View>
       {block.items.map((item, index) => (
         <View
           key={`${index}-${item.label}`}
-          style={styles.keyValueRow}
+          style={[
+            styles.keyValueRow,
+            ...(index === 0 ? [styles.keyValueRowFirst] : []),
+          ]}
           wrap={false}
         >
-          <Text style={styles.keyValueLabel}>{item.label}</Text>
-          <Text style={styles.keyValueValue}>{item.value}</Text>
+          <Text
+            style={[
+              styles.keyValueLabel,
+              ...(highlight ? [styles.keyValueLabelHighlight] : []),
+            ]}
+          >
+            {item.label}
+          </Text>
+          <Text
+            style={[
+              styles.keyValueValue,
+              ...(highlight ? [styles.keyValueValueHighlight] : []),
+            ]}
+          >
+            {item.value}
+          </Text>
         </View>
       ))}
     </View>
@@ -870,6 +971,13 @@ function TableContent({
   block: TablePageBlock;
   primaryColor: string;
 }) {
+  const compact = tableCompactLevel(block.columns.length);
+  const headerFontSize =
+    compact === "dense" ? 6.2 : compact === "medium" ? 6.8 : 7.2;
+  const cellFontSize =
+    compact === "dense" ? 6.1 : compact === "medium" ? 6.6 : 7;
+  const cellPadding =
+    compact === "dense" ? 2.5 : compact === "medium" ? 3.2 : 4;
   return (
     <View style={styles.table}>
       <View style={styles.tableRow} wrap={false}>
@@ -878,9 +986,22 @@ function TableContent({
             key={`${index}-${column}`}
             style={[
               styles.tableHeaderCell,
-              { backgroundColor: primaryColor },
-              ...(column === "예상 총부담액"
+              {
+                backgroundColor: primaryColor,
+                fontSize: headerFontSize,
+                paddingTop: cellPadding,
+                paddingRight: cellPadding,
+                paddingBottom: cellPadding,
+                paddingLeft: cellPadding,
+              },
+              ...(isEmphasizedReportColumn(block.columns, column)
                 ? [styles.tableTotalBurdenHeader]
+                : []),
+              ...(isAuditCountEmphasis(column)
+                ? [styles.tableAuditCountCell]
+                : []),
+              ...(isNowrapReportColumn(column)
+                ? [styles.tableNowrapCell]
                 : []),
             ]}
           >
@@ -896,20 +1017,45 @@ function TableContent({
             style={styles.tableRow}
             wrap={false}
           >
-            {row.cells.map((cell, index) => (
+            {row.cells.map((cell, index) => {
+              const isMergedPlaceholder = index === 0 && cell.trim() === "";
+              return (
               <Text
                 key={`${index}-${cell}`}
                 style={[
                   styles.tableCell,
-                  ...(index === 0 ? [styles.tableFirstCell] : []),
-                  ...(block.columns[index] === "예상 총부담액"
+                  {
+                    fontSize: cellFontSize,
+                    paddingTop: cellPadding,
+                    paddingRight: cellPadding,
+                    paddingBottom: cellPadding,
+                    paddingLeft: cellPadding,
+                  },
+                  ...(index === 0 && !isMergedPlaceholder
+                    ? [styles.tableFirstCell]
+                    : []),
+                  ...(isMergedPlaceholder
+                    ? [{ backgroundColor: "#ffffff" }]
+                    : []),
+                  ...(isEmphasizedReportColumn(
+                    block.columns,
+                    block.columns[index] ?? "",
+                  )
                     ? [styles.tableTotalBurdenCell]
+                    : []),
+                  ...(isAuditCountEmphasis(block.columns[index] ?? "") ||
+                  isAuditCountEmphasis(cell)
+                    ? [styles.tableAuditCountCell]
+                    : []),
+                  ...(isNowrapReportColumn(block.columns[index] ?? "")
+                    ? [styles.tableNowrapCell]
                     : []),
                 ]}
               >
-                {cell}
+                {isMergedPlaceholder ? " " : cell || " "}
               </Text>
-            ))}
+              );
+            })}
           </View>
         ))}
     </View>

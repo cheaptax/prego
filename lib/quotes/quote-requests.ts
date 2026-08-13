@@ -21,6 +21,18 @@ export function quoteRequestIdFor(sourceType: string, sourceId: string) {
   return `${sourceType}_${sourceId}`.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
+/** 평가 건 ID가 원본/인박스 어느 쪽이든 견적 자동화 프리셋을 찾는다. */
+export function quoteAutomationPlanLookupIds(quoteRequestId: string) {
+  const raw = quoteRequestId.startsWith("audit_quote_")
+    ? quoteRequestId.slice("audit_quote_".length)
+    : quoteRequestId;
+  return [
+    ...new Set(
+      [quoteRequestIdFor("audit_quote", raw), quoteRequestId].filter(Boolean),
+    ),
+  ];
+}
+
 export async function ensureQuoteRequest(
   db: Firestore,
   input: EnsureQuoteRequestInput,
@@ -85,6 +97,7 @@ function quoteRequestFromAuditQuote(
     customerEmailHash: source.emailHash,
     customerName: source.contactName,
     customerPhone: source.phone,
+    cooperativeId: source.targetCooperativeId,
     cooperativeName: source.targetCooperativeName,
     fiscalYear: source.fiscalYear,
     subject: `감사견적 요청 ${source.publicReference}`,

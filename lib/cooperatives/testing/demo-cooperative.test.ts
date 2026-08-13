@@ -54,7 +54,7 @@ describe("둥기농협 master identity", () => {
 });
 
 describe("internal test cooperative catalog", () => {
-  it("defines exactly the three requested test cooperatives with stable IDs", () => {
+  it("defines the requested test cooperatives with stable IDs", () => {
     assert.deepEqual(
       TEST_COOPERATIVE_DEFINITIONS.map((definition) => [
         definition.cooperativeId,
@@ -64,6 +64,9 @@ describe("internal test cooperative catalog", () => {
         [DUNGGI_COOPERATIVE_ID, "둥기농협"],
         [PRIGO_COOPERATIVE_ID, "프리고농협"],
         [PREGO_COOPERATIVE_ID, "프레고농협"],
+        ["demo-jaegyeong-nh", "재경농협"],
+        ["demo-seongmin-nh", "성민농협"],
+        ["demo-jihye-nh", "지혜농협"],
       ],
     );
   });

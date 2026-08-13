@@ -73,6 +73,7 @@ describe("portal login page rendering contract", () => {
     const form = source("components/LoginForm.tsx");
     const renderer = source("components/LoginPageRenderer.tsx");
     assert.match(renderer, /<LoginForm/);
+    assert.match(renderer, /HomePromoFloat/);
     assert.match(form, /<form className="login-form" onSubmit=\{submit\}/);
     assert.match(form, /autoComplete="email"/);
     assert.match(form, /autoComplete="current-password"/);
@@ -98,6 +99,17 @@ describe("portal login page rendering contract", () => {
     assert.match(JSON.stringify(partner), /제휴사 로그인/);
     assert.match(JSON.stringify(partner), /등록된 제휴사 운영자 계정/);
     assert.doesNotMatch(JSON.stringify(partner), /\/signup/);
+    const promo = customer.sections.find((section) => section.id === "promoFloat");
+    assert.equal(promo?.title, "2027년도 외부회계감사 견적 신청하기");
+    assert.equal(promo?.actions[0]?.href, "/events/audit-quote");
+    assert.equal(
+      partner.sections.some((section) => section.id === "promoFloat"),
+      false,
+    );
+    assert.equal(
+      admin.sections.some((section) => section.id === "promoFloat"),
+      false,
+    );
     assert.match(
       partner.sections.find((section) => section.id === "loginForm")
         ?.actions[0]?.href ?? "",

@@ -148,6 +148,25 @@ async function auditPage(page, baseUrl, route, device) {
         .filter(visible)
         .filter((element) => !inputLabel(element))
         .map((element) => element.outerHTML.slice(0, 160));
+      const partnerHeroInner = document.querySelector(
+        ".hero-section--compact > .section-inner",
+      );
+      const partnerFormInner = document.querySelector(
+        "main.page-shell > section:nth-of-type(2) > .section-inner",
+      );
+      const partnerApplyAlignment =
+        partnerHeroInner && partnerFormInner
+          ? {
+              leftDelta: Math.abs(
+                partnerHeroInner.getBoundingClientRect().left -
+                  partnerFormInner.getBoundingClientRect().left,
+              ),
+              rightDelta: Math.abs(
+                partnerHeroInner.getBoundingClientRect().right -
+                  partnerFormInner.getBoundingClientRect().right,
+              ),
+            }
+          : null;
       const navigation = performance.getEntriesByType("navigation")[0];
       return {
         title: document.title,
@@ -184,6 +203,7 @@ async function auditPage(page, baseUrl, route, device) {
         domContentLoadedMs: navigation?.domContentLoadedEventEnd ?? 0,
         layoutShift: window.__cmsE2eLayoutShift ?? 0,
         layoutShiftSources: window.__cmsE2eLayoutShiftSources ?? [],
+        partnerApplyAlignment,
       };
     },
     {
@@ -216,6 +236,15 @@ async function auditPage(page, baseUrl, route, device) {
   }
   if (diagnostics.layoutShift > 0.1) {
     issues.push(`누적 레이아웃 이동 ${diagnostics.layoutShift.toFixed(4)}`);
+  }
+  if (
+    diagnostics.partnerApplyAlignment &&
+    (diagnostics.partnerApplyAlignment.leftDelta > 1 ||
+      diagnostics.partnerApplyAlignment.rightDelta > 1)
+  ) {
+    issues.push(
+      `제휴 신청 상단·본문 정렬 불일치 ${JSON.stringify(diagnostics.partnerApplyAlignment)}`,
+    );
   }
   const actionableConsoleErrors = consoleErrors.filter(
     (message) =>

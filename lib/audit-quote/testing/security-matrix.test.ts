@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Firestore } from "firebase-admin/firestore";
+import type { FieldValue, Firestore } from "firebase-admin/firestore";
 import type { AuditQuoteConfig } from "@/lib/audit-quote/config";
 import { getAuditQuoteConfig } from "@/lib/audit-quote/config";
 import { AUDIT_QUOTE_REQUESTS } from "@/lib/audit-quote/collections";
@@ -48,14 +48,35 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     email: "matrix.user@nonghyup.com",
     contactName: "김농협",
     phone: "010-1234-5678",
+    targetCooperativeId: "demo-prigo-nh",
     targetCooperativeName: "프리고농협",
-    fiscalYear: 2026,
+    fiscalYear: 2027,
     privacyConsent: true,
     privacyPolicyVersion: "2026-07-20",
     campaign: "fy27-audit-quote",
     channel: "event_page",
     pagePath: "/events/audit-quote",
     idempotencyKey: randomUUID(),
+    ...overrides,
+  };
+}
+
+async function resolveTestCooperative(cooperativeId: string) {
+  if (cooperativeId !== "demo-prigo-nh") return null;
+  return {
+    cooperative_id: "demo-prigo-nh",
+    cooperative_name: "프리고농협",
+    status: "active" as const,
+  };
+}
+
+function submitOpts(overrides: {
+  ipHash?: string;
+  nowMs?: number;
+  serverTimestamp?: FieldValue;
+} = {}) {
+  return {
+    resolveCooperative: resolveTestCooperative,
     ...overrides,
   };
 }
@@ -76,17 +97,15 @@ describe("security matrix — intake", () => {
       db as unknown as Firestore,
       cfg,
       baseInput({ idempotencyKey: randomUUID() }),
-      { ipHash: "ip-a", nowMs: t0, serverTimestamp: "TS" as never }
+      submitOpts({ ipHash: "ip-a", nowMs: t0, serverTimestamp: "TS" as never })
     );
     const second = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       cfg,
       baseInput({ idempotencyKey: randomUUID() }),
-      {
-        ipHash: "ip-b",
+      submitOpts({ ipHash: "ip-b",
         nowMs: t0 + 24 * 60 * 60 * 1000 + 1,
-        serverTimestamp: "TS" as never,
-      }
+        serverTimestamp: "TS" as never, })
     );
     assert.equal(first.kind, "success");
     assert.equal(second.kind, "success");
@@ -115,7 +134,7 @@ describe("security matrix — intake", () => {
         email: "rate1@nonghyup.com",
         idempotencyKey: randomUUID(),
       }),
-      { ipHash: "same-ip", nowMs: 1000, serverTimestamp: "TS" as never }
+      submitOpts({ ipHash: "same-ip", nowMs: 1000, serverTimestamp: "TS" as never })
     );
     const second = await submitAuditQuoteRequest(
       db as unknown as Firestore,
@@ -124,7 +143,7 @@ describe("security matrix — intake", () => {
         email: "rate2@nonghyup.com",
         idempotencyKey: randomUUID(),
       }),
-      { ipHash: "same-ip", nowMs: 1001, serverTimestamp: "TS" as never }
+      submitOpts({ ipHash: "same-ip", nowMs: 1001, serverTimestamp: "TS" as never })
     );
     assert.equal(first.kind, "success");
     assert.equal(second.kind, "rejected");
@@ -147,13 +166,13 @@ describe("security matrix — intake", () => {
       db as unknown as Firestore,
       testConfig(),
       baseInput({ idempotencyKey: key }),
-      { ipHash: "ip", nowMs: 1, serverTimestamp: "TS" as never }
+      submitOpts({ ipHash: "ip", nowMs: 1, serverTimestamp: "TS" as never })
     );
     const second = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ idempotencyKey: key }),
-      { ipHash: "ip", nowMs: 2, serverTimestamp: "TS" as never }
+      submitOpts({ ipHash: "ip", nowMs: 2, serverTimestamp: "TS" as never })
     );
     assert.equal(first.kind, "success");
     assert.equal(second.kind, "success");

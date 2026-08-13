@@ -4,6 +4,7 @@ import { maskEmail } from "@/lib/audit-quote/email";
 export type AuditQuoteListItem = {
   requestId: string;
   publicReference: string;
+  targetCooperativeName: string;
   emailMasked: string;
   contactName: string;
   status: AuditQuoteStatus;
@@ -43,6 +44,7 @@ export function toAuditQuoteListItem(
   return {
     requestId: record.requestId,
     publicReference: record.publicReference,
+    targetCooperativeName: record.targetCooperativeName ?? "",
     emailMasked: maskEmail(record.email),
     contactName: record.contactName ?? "",
     status: record.status,

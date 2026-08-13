@@ -12,6 +12,52 @@ export const runtime = "nodejs";
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg"]);
 
+export async function GET(req: Request) {
+  let session;
+  try {
+    session = await requirePartner(req);
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: authErrorCode(err) },
+      { status: authErrorStatus(err) },
+    );
+  }
+
+  const partnerId = session.profile.partnerId as string;
+  const snapshot = await adminDb().collection("partners").doc(partnerId).get();
+  if (!snapshot.exists) {
+    return NextResponse.json(
+      { ok: false, error: "partner_not_found" },
+      { status: 404 },
+    );
+  }
+  const partner = snapshot.data() as PartnerRecord;
+  if (!partner.logoPath) {
+    return NextResponse.json(
+      { ok: false, error: "logo_not_found" },
+      { status: 404 },
+    );
+  }
+  try {
+    const [buffer] = await adminStorage()
+      .bucket()
+      .file(partner.logoPath)
+      .download();
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        "content-type": partner.logoContentType || "image/png",
+        "cache-control": "private, no-store",
+      },
+    });
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "logo_unavailable" },
+      { status: 404 },
+    );
+  }
+}
+
 export async function POST(req: Request) {
   let session;
   try {
@@ -64,5 +110,10 @@ export async function POST(req: Request) {
       { merge: true },
     );
 
-  return NextResponse.json({ ok: true, logoPath: path });
+  return NextResponse.json({
+    ok: true,
+    logoPath: path,
+    logoContentType: file.type,
+    logoUpdatedAt: now,
+  });
 }

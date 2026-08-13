@@ -22,10 +22,12 @@ import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSection
 import { PartnerNhAuditQuoteForm } from "@/components/PartnerNhAuditQuoteForm";
 import { validatePartnerQuoteInput } from "@/lib/quotes/partner-quote-validation";
 import {
+  extractNhAuditEvaluationDefaults,
+  resolveInitialNhAuditPartnerForm,
+} from "@/lib/quotes/nh-audit-evaluation-defaults";
+import {
   EMPTY_NH_AUDIT_PARTNER_FORM,
-  sanitizeNhAuditPartnerFormDraft,
   validateNhAuditPartnerForm,
-  valuesFromNhAuditSubmission,
   type NhAuditPartnerFormValues,
 } from "@/lib/quotes/nh-audit-quote-form";
 import {
@@ -34,11 +36,17 @@ import {
   type QuoteSupplierProfile,
 } from "@/lib/quotes/supplier-profile";
 import { canPartnerMutateQuoteAssignment } from "@/lib/quotes/nh-audit-quote-server";
+import {
+  canPartnerReviseQuoteAssignment,
+  formatQuoteVersionLabel,
+  isSentPartnerQuote,
+  pickLatestSentQuote,
+} from "@/lib/quotes/quote-revision";
 import { PortalSitemap } from "@/components/PortalSitemap";
 import type { PortalSitemapModel } from "@/lib/sitemap/portal-sitemap";
 
 type State = "loading" | "ready" | "denied" | "error";
-type QuoteAction = "draft" | "preview" | "send";
+type QuoteAction = "draft" | "preview" | "send" | "revise";
 type QuoteNotice = { tone: "success" | "error" | "warning"; text: string };
 const EMPTY_PARTNER_SITEMAP: PortalSitemapModel = {
   role: "partner",
@@ -105,6 +113,7 @@ export function PartnerDashboard({
   const [quotePreviewEmailReady, setQuotePreviewEmailReady] = useState<
     boolean | null
   >(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
 
   const deniedSection = content.sections.find((section) => section.id === "accessNotice");
   const quoteEvaluationSection = content.sections.find(
@@ -168,33 +177,70 @@ export function PartnerDashboard({
       const request = (data.quoteRequests ?? []).find(
         (item) => item.id === nextAssignments[0].quoteRequestId,
       );
+      const source =
+        draft ?? pickLatestSentQuote(nextQuotes, nextAssignments[0].id);
       setSelectedQuoteAssignmentId(nextAssignments[0].id);
       setQuoteItemName(
-        draft?.lineItems[0]?.name ??
+        source?.lineItems[0]?.name ??
           (request?.sourceType === "audit_quote"
             ? "회계감사 용역"
             : "전문 서비스"),
       );
-      setQuoteQuantity(String(draft?.lineItems[0]?.quantity ?? 1));
+      setQuoteQuantity(String(source?.lineItems[0]?.quantity ?? 1));
       setQuoteUnitPrice(
-        formatCurrencyInput(draft?.lineItems[0]?.unitPrice ?? ""),
+        formatCurrencyInput(source?.lineItems[0]?.unitPrice ?? ""),
       );
-      setQuoteVatIncluded(draft?.vatIncluded ?? true);
-      setQuoteServicePeriod(draft?.servicePeriod ?? "");
-      setQuoteValidUntil(draft?.validUntil ?? "");
-      setQuoteTerms(draft?.terms ?? "");
-      setQuoteNotes(draft?.notes ?? "");
+      setQuoteVatIncluded(source?.vatIncluded ?? true);
+      setQuoteServicePeriod(source?.servicePeriod ?? "");
+      setQuoteValidUntil(source?.validUntil ?? "");
+      setQuoteTerms(source?.terms ?? "");
+      setQuoteNotes(source?.notes ?? "");
       const supplierPartner = partnerOverride;
       if (supplierPartner) {
         setQuoteSupplierProfile(
-          quoteSupplierProfileFrom(supplierPartner, draft),
+          quoteSupplierProfileFrom(supplierPartner, source),
         );
       }
       setNhAuditFormValues(
-        draft?.nhAuditDraft
-          ? sanitizeNhAuditPartnerFormDraft(draft.nhAuditDraft)
-          : valuesFromNhAuditSubmission(draft?.nhAuditV2?.submission),
+        resolveInitialNhAuditPartnerForm({
+          draft,
+          partner: partnerOverride,
+          quotes: nextQuotes,
+          assignmentId: nextAssignments[0].id,
+        }),
       );
+      void (async () => {
+        try {
+          const authUser = getFirebaseAuth().currentUser;
+          if (!authUser) return;
+          const authToken = await authUser.getIdToken();
+          const presetRes = await fetch(
+            `/api/partner/quotes/${encodeURIComponent(nextAssignments[0].id)}/automation-preset`,
+            { headers: { authorization: `Bearer ${authToken}` } },
+          );
+          const presetData = (await presetRes.json().catch(() => null)) as {
+            ok?: boolean;
+            preset?: {
+              plannedAuditFeeWon: string;
+              expenseBillingMode: string;
+              expectedExpenseWon: string;
+            } | null;
+          } | null;
+          if (presetRes.ok && presetData?.ok && presetData.preset) {
+            setNhAuditFormValues(
+              resolveInitialNhAuditPartnerForm({
+                draft,
+                partner: partnerOverride,
+                quotes: nextQuotes,
+                assignmentId: nextAssignments[0].id,
+                automationPreset: presetData.preset,
+              }),
+            );
+          }
+        } catch {
+          // Optional preset.
+        }
+      })();
     }
   }, [selectedQuoteAssignmentId]);
 
@@ -206,12 +252,16 @@ export function PartnerDashboard({
       }
       void Promise.resolve()
         .then(async () => {
-          const tokenResult = await user.getIdTokenResult(true);
+          let tokenResult = await user.getIdTokenResult();
+          if (tokenResult.claims.partner !== true) {
+            // New partner accounts may need one forced refresh for custom claims.
+            tokenResult = await user.getIdTokenResult(true);
+          }
           if (tokenResult.claims.partner !== true) {
             setState("denied");
             return;
           }
-          const token = await user.getIdToken(true);
+          const token = await user.getIdToken();
           const sessionRes = await fetch("/api/partner/session", {
             headers: { authorization: `Bearer ${token}` },
           });
@@ -251,6 +301,43 @@ export function PartnerDashboard({
     return () => unsubscribe();
   }, [loadAssignments, loadQuotes]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const loadLogoPreview = async () => {
+      if (!partner?.logoPath) {
+        setLogoPreviewUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous);
+          return null;
+        });
+        return;
+      }
+      const user = getFirebaseAuth().currentUser;
+      if (!user) return;
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(
+          `/api/partner/profile/logo?v=${encodeURIComponent(partner.logoUpdatedAt ?? partner.logoPath)}`,
+          { headers: { authorization: `Bearer ${token}` } },
+        );
+        if (!response.ok || cancelled) return;
+        const blob = await response.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLogoPreviewUrl((previous) => {
+          if (previous) URL.revokeObjectURL(previous);
+          return objectUrl;
+        });
+      } catch {
+        // Preview is optional; quote PDF still loads logo from storage.
+      }
+    };
+    void loadLogoPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [partner?.logoPath, partner?.logoUpdatedAt]);
+
   const requestById = useMemo(
     () => new Map(requests.map((request) => [request.id, request])),
     [requests],
@@ -287,14 +374,265 @@ export function PartnerDashboard({
       }),
   );
   const selectedFinalizedQuote = selectedQuoteAssignment
-    ? quotes
-        .filter(
-          (quote) =>
-            quote.quoteAssignmentId === selectedQuoteAssignment.id &&
-            ["finalized", "delivered"].includes(quote.status),
-        )
-        .sort((left, right) => Number(right.version) - Number(left.version))[0]
+    ? pickLatestSentQuote(quotes, selectedQuoteAssignment.id)
     : null;
+  const canReviseSelectedQuote = Boolean(
+    partner &&
+      selectedQuoteAssignment &&
+      selectedQuoteRequest &&
+      selectedFinalizedQuote &&
+      canPartnerReviseQuoteAssignment({
+        authenticatedPartnerId: partner.id,
+        assignment: selectedQuoteAssignment,
+        quoteRequest: selectedQuoteRequest,
+      }),
+  );
+  const openQuoteAssignments = useMemo(
+    () =>
+      quoteAssignments.filter((assignment) =>
+        ["assigned", "drafting"].includes(assignment.status),
+      ),
+    [quoteAssignments],
+  );
+  const sentQuoteRows = useMemo(() => {
+    const latestByAssignment = new Map<string, QuoteRecord>();
+    for (const quote of quotes) {
+      if (!isSentPartnerQuote(quote)) continue;
+      const current = latestByAssignment.get(quote.quoteAssignmentId);
+      if (!current || Number(quote.version) > Number(current.version)) {
+        latestByAssignment.set(quote.quoteAssignmentId, quote);
+      }
+    }
+    return [...latestByAssignment.values()].sort((left, right) =>
+      (right.finalizedAt || right.deliveredAt || right.updatedAt || "").localeCompare(
+        left.finalizedAt || left.deliveredAt || left.updatedAt || "",
+      ),
+    );
+  }, [quotes]);
+
+  const applyNhAuditFormForAssignment = useCallback(
+    async (input: {
+      assignmentId: string;
+      draft?: QuoteRecord | null;
+      quotes: QuoteRecord[];
+      partnerOverride?: PartnerRecord | null;
+    }) => {
+      let automationPreset: {
+        plannedAuditFeeWon: string;
+        expenseBillingMode: string;
+        expectedExpenseWon: string;
+        locked?: boolean;
+      } | null = null;
+      try {
+        const user = getFirebaseAuth().currentUser;
+        if (user) {
+          const token = await user.getIdToken();
+          const response = await fetch(
+            `/api/partner/quotes/${encodeURIComponent(input.assignmentId)}/automation-preset`,
+            { headers: { authorization: `Bearer ${token}` } },
+          );
+          const data = (await response.json().catch(() => null)) as {
+            ok?: boolean;
+            preset?: {
+              plannedAuditFeeWon: string;
+              expenseBillingMode: string;
+              expectedExpenseWon: string;
+              locked?: boolean;
+            } | null;
+          } | null;
+          if (response.ok && data?.ok && data.preset) {
+            automationPreset = data.preset;
+          }
+        }
+      } catch {
+        // Preset is optional; partners can still enter fees manually.
+      }
+      setNhAuditFormValues(
+        resolveInitialNhAuditPartnerForm({
+          draft: input.draft,
+          partner: input.partnerOverride ?? partner,
+          quotes: input.quotes,
+          assignmentId: input.assignmentId,
+          automationPreset,
+        }),
+      );
+    },
+    [partner],
+  );
+
+  const selectQuoteAssignment = useCallback(
+    (assignmentId: string) => {
+      const assignment = quoteAssignments.find((item) => item.id === assignmentId);
+      if (!assignment) return;
+      const draft = quotes.find((quote) => quote.id === `${assignment.id}_draft`);
+      const latestSent = pickLatestSentQuote(quotes, assignment.id);
+      const source = draft ?? latestSent;
+      const request = quoteRequestById.get(assignment.quoteRequestId);
+      setQuotePreviewUrl(null);
+      setQuotePreviewEmailReady(null);
+      setQuoteNotice(null);
+      setQuoteFieldErrors({});
+      setSelectedQuoteAssignmentId(assignment.id);
+      setQuoteItemName(
+        source?.lineItems[0]?.name ??
+          (request?.sourceType === "audit_quote"
+            ? "회계감사 용역"
+            : "전문 서비스"),
+      );
+      setQuoteQuantity(String(source?.lineItems[0]?.quantity ?? 1));
+      setQuoteUnitPrice(
+        formatCurrencyInput(source?.lineItems[0]?.unitPrice ?? ""),
+      );
+      setQuoteVatIncluded(source?.vatIncluded ?? true);
+      setQuoteServicePeriod(source?.servicePeriod ?? "");
+      setQuoteValidUntil(source?.validUntil ?? "");
+      setQuoteTerms(source?.terms ?? "");
+      setQuoteNotes(source?.notes ?? "");
+      if (partner) {
+        setQuoteSupplierProfile(quoteSupplierProfileFrom(partner, source));
+      }
+      void applyNhAuditFormForAssignment({
+        assignmentId: assignment.id,
+        draft,
+        quotes,
+        partnerOverride: partner,
+      });
+    },
+    [
+      applyNhAuditFormForAssignment,
+      partner,
+      quoteAssignments,
+      quoteRequestById,
+      quotes,
+    ],
+  );
+
+  const previewQuoteAssignment = useCallback(
+    async (assignmentId: string) => {
+      const user = getFirebaseAuth().currentUser;
+      if (!user) {
+        setQuoteNotice({
+          tone: "error",
+          text: "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.",
+        });
+        return;
+      }
+      selectQuoteAssignment(assignmentId);
+      setQuoteAction("preview");
+      setQuoteNotice(null);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch(`/api/partner/quotes/${assignmentId}`, {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: "{}",
+        });
+        if (!res.ok) {
+          setQuoteNotice({
+            tone: "error",
+            text:
+              content.messages.quoteSaveFailed ??
+              "견적서를 불러오지 못했습니다.",
+          });
+          return;
+        }
+        const pdfBlob = await res.blob();
+        setQuotePreviewEmailReady(
+          res.headers.get("x-quote-email-ready") === "true",
+        );
+        setQuotePreviewUrl(URL.createObjectURL(pdfBlob));
+        if (res.headers.get("x-quote-already-finalized") === "true") {
+          setQuoteNotice({
+            tone: "success",
+            text:
+              content.messages.quoteAlreadyFinalizedPreview ??
+              "이미 최종확정된 견적서입니다. 저장된 PDF를 표시합니다.",
+          });
+        }
+      } catch {
+        setQuoteNotice({
+          tone: "error",
+          text:
+            content.messages.quoteNetworkFailed ??
+            "네트워크 오류로 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        });
+      } finally {
+        setQuoteAction(null);
+      }
+    },
+    [content.messages, selectQuoteAssignment],
+  );
+
+  const startQuoteRevision = useCallback(
+    async (assignmentId: string) => {
+      const user = getFirebaseAuth().currentUser;
+      if (!user) {
+        setQuoteNotice({
+          tone: "error",
+          text: "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.",
+        });
+        return;
+      }
+      setQuoteAction("revise");
+      setQuoteNotice(null);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch(
+          `/api/partner/quotes/${assignmentId}/revise`,
+          {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` },
+          },
+        );
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          error?: string;
+        } | null;
+        if (!res.ok || !data?.ok) {
+          let text =
+            content.messages.quoteReviseFailed ??
+            "견적 개정을 시작하지 못했습니다.";
+          if (data?.error === "quote_request_closed") {
+            text =
+              content.messages.quoteRequestClosed ??
+              "이 견적 요청은 마감되어 더 이상 저장·발송할 수 없습니다.";
+          } else if (data?.error === "assignment_not_finalized") {
+            text =
+              content.messages.quoteReviseNotFinalized ??
+              "발송된 견적만 개정할 수 있습니다.";
+          }
+          setQuoteNotice({ tone: "error", text });
+          return;
+        }
+        await loadQuotes(partner ?? undefined);
+        selectQuoteAssignment(assignmentId);
+        setQuoteNotice({
+          tone: "success",
+          text:
+            content.messages.quoteReviseStarted ??
+            "이전 발송 내용을 불러왔습니다. 수정 후 다시 최종확정하면 고객에게 개정 견적이 발송됩니다.",
+        });
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById("partner-quote-detail")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      } catch {
+        setQuoteNotice({
+          tone: "error",
+          text:
+            content.messages.quoteNetworkFailed ??
+            "네트워크 오류로 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        });
+      } finally {
+        setQuoteAction(null);
+      }
+    },
+    [content.messages, loadQuotes, partner, selectQuoteAssignment],
+  );
 
   const submitDraft = async (event: FormEvent<HTMLFormElement>, submit: boolean) => {
     event.preventDefault();
@@ -340,13 +678,29 @@ export function PartnerDashboard({
       headers: { authorization: `Bearer ${token}` },
       body: formData,
     });
-    if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      logoPath?: string;
+      logoContentType?: string;
+      logoUpdatedAt?: string;
+    } | null;
+    if (!res.ok || !data?.ok || !data.logoPath) {
       setQuoteNotice({
         tone: "error",
         text: content.messages.quoteLogoUploadFailed,
       });
       return;
     }
+    setPartner((current) =>
+      current
+        ? {
+            ...current,
+            logoPath: data.logoPath,
+            logoContentType: data.logoContentType,
+            logoUpdatedAt: data.logoUpdatedAt,
+          }
+        : current,
+    );
     setQuoteNotice({
       tone: "success",
       text: content.messages.quoteLogoUploadSuccess,
@@ -580,6 +934,7 @@ export function PartnerDashboard({
               message: string;
             }>;
             supplierProfileErrors?: Record<string, string>;
+            nhAuditEvaluationDefaults?: PartnerRecord["nhAuditEvaluationDefaults"];
             delivery?: {
               status?: "sent" | "failed";
               error?: "email_not_configured" | "email_send_failed";
@@ -678,11 +1033,16 @@ export function PartnerDashboard({
       if (action === "send") {
         setQuotePreviewUrl(null);
         if (data.delivery?.status === "sent") {
+          const versionLabel = formatQuoteVersionLabel(
+            Number(data.quote?.version) || 1,
+          );
           setQuoteNotice({
             tone: "success",
             text:
-              content.messages.quoteFinalized ??
-              "견적서를 확정하고 고객에게 이메일로 발송했습니다.",
+              Number(data.quote?.version) > 1
+                ? `수정된 견적서 ${versionLabel}를 고객에게 발송했습니다.`
+                : content.messages.quoteFinalized ??
+                  "견적서를 확정하고 고객에게 이메일로 발송했습니다.",
           });
         } else {
           setQuoteNotice({
@@ -700,9 +1060,21 @@ export function PartnerDashboard({
           tone: validation.valid ? "success" : "warning",
           text: validation.valid
             ? content.messages.quoteDraftSaved ??
-              "견적서 초안을 저장했습니다."
+              "견적서 초안을 저장했습니다. 평가정보는 다음 견적에도 자동 입력됩니다."
             : `${content.messages.quoteDraftIncomplete ?? "초안은 저장했습니다. 최종확정 전에 표시된 필수 입력정보를 보완해 주세요."} (${validation.missingLabels.join(", ")})`,
         });
+      }
+      const nextDefaults =
+        data.nhAuditEvaluationDefaults ??
+        (selectedQuoteRequest?.sourceType === "audit_quote"
+          ? extractNhAuditEvaluationDefaults(nhAuditFormValues)
+          : null);
+      if (nextDefaults) {
+        setPartner((current) =>
+          current
+            ? { ...current, nhAuditEvaluationDefaults: nextDefaults }
+            : current,
+        );
       }
       await loadQuotes();
     } catch {
@@ -812,61 +1184,23 @@ export function PartnerDashboard({
               );
             })}
           </nav>
-          <nav className="admin-nav" aria-label="배정 견적">
-            <span className="admin-nav__section">견적 업무</span>
-            {quoteAssignments.map((assignment) => {
-              const quoteRequest = quoteRequestById.get(assignment.quoteRequestId);
-              return (
-                <button
-                  key={assignment.id}
-                  type="button"
-                  className={`admin-nav__item${selectedQuoteAssignment?.id === assignment.id ? " is-active" : ""}`}
-                  onClick={() => {
-                    const draft = quotes.find(
-                      (quote) => quote.id === `${assignment.id}_draft`,
-                    );
-                    setQuotePreviewUrl(null);
-                    setQuotePreviewEmailReady(null);
-                    setQuoteNotice(null);
-                    setQuoteFieldErrors({});
-                    setSelectedQuoteAssignmentId(assignment.id);
-                    setQuoteItemName(draft?.lineItems[0]?.name ?? "전문 서비스");
-                    setQuoteQuantity(String(draft?.lineItems[0]?.quantity ?? 1));
-                    setQuoteUnitPrice(
-                      formatCurrencyInput(
-                        draft?.lineItems[0]?.unitPrice ?? "",
-                      ),
-                    );
-                    setQuoteVatIncluded(draft?.vatIncluded ?? true);
-                    setQuoteServicePeriod(draft?.servicePeriod ?? "");
-                    setQuoteValidUntil(draft?.validUntil ?? "");
-                    setQuoteTerms(draft?.terms ?? "");
-                    setQuoteNotes(draft?.notes ?? "");
-                    if (partner) {
-                      setQuoteSupplierProfile(
-                        quoteSupplierProfileFrom(partner, draft),
-                      );
-                    }
-                    setNhAuditFormValues(
-                      draft?.nhAuditDraft
-                        ? sanitizeNhAuditPartnerFormDraft(
-                            draft.nhAuditDraft,
-                          )
-                        : valuesFromNhAuditSubmission(
-                            draft?.nhAuditV2?.submission,
-                          ),
-                    );
-                  }}
-                >
-                  <span className="admin-nav__label">
-                    {quoteRequest?.subject ?? assignment.quoteRequestId}
-                  </span>
-                  <span className="admin-nav__desc">
-                    {quoteAssignmentStatusLabel(assignment.status)}
-                  </span>
-                </button>
-              );
-            })}
+          <nav className="admin-nav" aria-label="견적 업무">
+            <a className="admin-nav__item" href="#partner-quotes">
+              <span className="admin-nav__label">견적 업무</span>
+              <span className="admin-nav__desc">
+                {openQuoteAssignments.length > 0
+                  ? `${openQuoteAssignments.length}건 작성 중`
+                  : "작성 중 견적 없음"}
+              </span>
+            </a>
+            <a className="admin-nav__item" href="#partner-sent-quotes">
+              <span className="admin-nav__label">보낸 견적함</span>
+              <span className="admin-nav__desc">
+                {sentQuoteRows.length > 0
+                  ? `${sentQuoteRows.length}건 발송`
+                  : "발송 내역 없음"}
+              </span>
+            </a>
           </nav>
         </aside>
         <section className="admin-main">
@@ -935,7 +1269,284 @@ export function PartnerDashboard({
           ) : (
             <p className="admin-empty">현재 배정된 문의가 없습니다.</p>
           )}
-          <section className="admin-card admin-card--span-2">
+          <div id="partner-quotes" className="partner-quote-desk">
+            <section className="admin-card admin-card--span-2">
+              <header className="admin-card__head">
+                <div>
+                  <p className="admin-eyebrow">견적 업무</p>
+                  <h2>작성 중 견적</h2>
+                  <p>
+                    배정된 요청과 개정 중인 견적을 선택한 뒤 아래에서 작성·확정합니다.
+                  </p>
+                </div>
+              </header>
+              {openQuoteAssignments.length === 0 ? (
+                <p className="admin-empty">
+                  {content.messages.quoteAssignmentsEmpty}
+                </p>
+              ) : (
+                <>
+                  <div className="admin-table-wrap partner-quote-desk__table-wrap">
+                    <table className="admin-table partner-quote-desk__table">
+                      <thead>
+                        <tr>
+                          <th>접수번호 · 제목</th>
+                          <th>고객</th>
+                          <th>유형</th>
+                          <th>상태</th>
+                          <th>관리</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {openQuoteAssignments.map((assignment) => {
+                          const quoteRequest = quoteRequestById.get(
+                            assignment.quoteRequestId,
+                          );
+                          const selected =
+                            selectedQuoteAssignment?.id === assignment.id;
+                          const hasSent = Boolean(
+                            pickLatestSentQuote(quotes, assignment.id),
+                          );
+                          return (
+                            <tr
+                              key={assignment.id}
+                              className={selected ? "is-selected" : undefined}
+                            >
+                              <td>
+                                <strong>
+                                  {quoteRequest?.sourceReference ??
+                                    quoteRequest?.subject ??
+                                    assignment.quoteRequestId}
+                                </strong>
+                                <small>
+                                  {hasSent
+                                    ? "개정 작성 중"
+                                    : (quoteRequest?.subject ?? "-")}
+                                </small>
+                              </td>
+                              <td>
+                                {quoteRequest?.customerName ??
+                                  quoteRequest?.customerEmail ??
+                                  "-"}
+                              </td>
+                              <td>
+                                {quoteRequest?.sourceType === "audit_quote"
+                                  ? "회계감사"
+                                  : "일반 견적"}
+                              </td>
+                              <td>
+                                <span className="partner-quote-desk__status">
+                                  {quoteAssignmentStatusLabel(assignment.status)}
+                                </span>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="admin-link"
+                                  aria-controls="partner-quote-detail"
+                                  aria-pressed={selected}
+                                  onClick={() =>
+                                    selectQuoteAssignment(assignment.id)}
+                                >
+                                  {selected ? "작성 중" : "열기"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ul className="partner-quote-desk__mobile-list">
+                    {openQuoteAssignments.map((assignment) => {
+                      const quoteRequest = quoteRequestById.get(
+                        assignment.quoteRequestId,
+                      );
+                      const selected =
+                        selectedQuoteAssignment?.id === assignment.id;
+                      return (
+                        <li key={assignment.id}>
+                          <button
+                            type="button"
+                            aria-controls="partner-quote-detail"
+                            aria-pressed={selected}
+                            onClick={() =>
+                              selectQuoteAssignment(assignment.id)}
+                          >
+                            <span>
+                              <strong>
+                                {quoteRequest?.sourceReference ??
+                                  quoteRequest?.subject ??
+                                  assignment.quoteRequestId}
+                              </strong>
+                              <small>
+                                {quoteRequest?.customerName ??
+                                  quoteRequest?.customerEmail ??
+                                  "-"}
+                              </small>
+                            </span>
+                            <span>
+                              <span className="partner-quote-desk__status">
+                                {quoteAssignmentStatusLabel(assignment.status)}
+                              </span>
+                              <small>
+                                {quoteRequest?.sourceType === "audit_quote"
+                                  ? "회계감사"
+                                  : "일반 견적"}
+                              </small>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </section>
+
+            <section
+              id="partner-sent-quotes"
+              className="admin-card admin-card--span-2"
+            >
+              <header className="admin-card__head">
+                <div>
+                  <p className="admin-eyebrow">보낸 견적함</p>
+                  <h2>발송한 견적</h2>
+                  <p>
+                    {content.messages.quoteSentInboxHelp ??
+                      "발송한 견적서를 확인하고, 가격 조정 등이 필요하면 개정 후 다시 발송할 수 있습니다."}
+                  </p>
+                </div>
+              </header>
+              {sentQuoteRows.length === 0 ? (
+                <p className="admin-empty">
+                  {content.messages.quoteSentInboxEmpty ??
+                    "아직 발송한 견적이 없습니다."}
+                </p>
+              ) : (
+                <div className="admin-table-wrap partner-quote-desk__table-wrap">
+                  <table className="admin-table partner-quote-desk__table">
+                    <thead>
+                      <tr>
+                        <th>접수번호 · 고객</th>
+                        <th>버전</th>
+                        <th>금액</th>
+                        <th>발송일</th>
+                        <th>관리</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sentQuoteRows.map((quote) => {
+                        const assignment = quoteAssignments.find(
+                          (item) => item.id === quote.quoteAssignmentId,
+                        );
+                        const quoteRequest = quoteRequestById.get(
+                          quote.quoteRequestId,
+                        );
+                        const selected =
+                          selectedQuoteAssignment?.id ===
+                          quote.quoteAssignmentId;
+                        const canRevise =
+                          partner &&
+                          assignment &&
+                          quoteRequest &&
+                          canPartnerReviseQuoteAssignment({
+                            authenticatedPartnerId: partner.id,
+                            assignment,
+                            quoteRequest,
+                          });
+                        return (
+                          <tr
+                            key={quote.id}
+                            className={selected ? "is-selected" : undefined}
+                          >
+                            <td>
+                              <strong>
+                                {quoteRequest?.sourceReference ??
+                                  quoteRequest?.subject ??
+                                  quote.quoteRequestId}
+                              </strong>
+                              <small>
+                                {quoteRequest?.customerName ??
+                                  quote.customerEmail}
+                              </small>
+                            </td>
+                            <td>
+                              v{quote.version}
+                              {quote.notes?.includes("안전가격 규칙") ? (
+                                <small>안전가격 재발행</small>
+                              ) : null}
+                            </td>
+                            <td>
+                              {Number(quote.totalAmount).toLocaleString("ko-KR")}
+                              원
+                            </td>
+                            <td>
+                              {(
+                                quote.deliveredAt ||
+                                quote.finalizedAt ||
+                                quote.updatedAt ||
+                                ""
+                              ).slice(0, 10) || "-"}
+                            </td>
+                            <td>
+                              <div className="admin-inline-actions">
+                                <button
+                                  type="button"
+                                  className="admin-link"
+                                  disabled={quoteAction !== null}
+                                  onClick={() =>
+                                    void previewQuoteAssignment(
+                                      quote.quoteAssignmentId,
+                                    )}
+                                >
+                                  {content.messages.quoteViewFinalizedButton ??
+                                    "미리보기"}
+                                </button>
+                                {canRevise ? (
+                                  <button
+                                    type="button"
+                                    className="admin-link"
+                                    disabled={quoteAction !== null}
+                                    onClick={() =>
+                                      void startQuoteRevision(
+                                        quote.quoteAssignmentId,
+                                      )}
+                                  >
+                                    {content.messages.quoteReviseButton ??
+                                      "가격 수정·재발송"}
+                                  </button>
+                                ) : assignment &&
+                                  ["assigned", "drafting"].includes(
+                                    assignment.status,
+                                  ) ? (
+                                  <button
+                                    type="button"
+                                    className="admin-link"
+                                    onClick={() =>
+                                      selectQuoteAssignment(
+                                        quote.quoteAssignmentId,
+                                      )}
+                                  >
+                                    개정 이어서 작성
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section
+              id="partner-quote-detail"
+              className="admin-card admin-card--span-2 partner-quote-desk__detail"
+              aria-labelledby="partner-quote-detail-title"
+            >
             <header className="admin-card__head">
               <div>
                 <p className="admin-eyebrow">
@@ -943,7 +1554,9 @@ export function PartnerDashboard({
                     ? "회계감사 견적 평가"
                     : "자동 견적서"}
                 </p>
-                <h2>{selectedQuoteRequest?.subject ?? "배정된 견적 요청이 없습니다."}</h2>
+                <h2 id="partner-quote-detail-title">
+                  {selectedQuoteRequest?.subject ?? "배정된 견적 요청이 없습니다."}
+                </h2>
                 {selectedQuoteRequest?.sourceType === "audit_quote" ? (
                   <p className="admin-form__hint">
                     평가항목과 금액을 입력한 뒤 최종확정하면 고객 이메일로 견적서가
@@ -959,7 +1572,7 @@ export function PartnerDashboard({
                   void requestQuote("draft");
                 }}
               >
-                <dl className="admin-detail-list">
+                <dl className="admin-detail-list partner-quote-desk__summary">
                   <div>
                     <dt>접수번호</dt>
                     <dd>{selectedQuoteRequest.sourceReference ?? selectedQuoteRequest.id}</dd>
@@ -975,6 +1588,20 @@ export function PartnerDashboard({
                   <div>
                     <dt>연락처</dt>
                     <dd>{selectedQuoteRequest.customerPhone ?? "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>배정 상태</dt>
+                    <dd>
+                      {quoteAssignmentStatusLabel(selectedQuoteAssignment.status)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>유형</dt>
+                    <dd>
+                      {selectedQuoteRequest.sourceType === "audit_quote"
+                        ? "회계감사 견적"
+                        : "일반 견적"}
+                    </dd>
                   </div>
                 </dl>
                 <fieldset className="admin-form__group">
@@ -1149,6 +1776,19 @@ export function PartnerDashboard({
                         onChange={(event) =>
                           void uploadLogo(event.target.files?.[0] ?? null)}
                       />
+                      {logoPreviewUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- authenticated blob / API preview
+                        <img
+                          className="partner-quote-logo-preview"
+                          src={logoPreviewUrl}
+                          alt="등록된 제휴사 로고"
+                        />
+                      ) : null}
+                      <small>
+                        {partner?.logoPath
+                          ? quoteDocumentCopy.text.logoRegisteredHelp
+                          : quoteDocumentCopy.text.logoRequiredHelp}
+                      </small>
                     </label>
                     <label
                       id="quote-field-supplierSeal"
@@ -1374,9 +2014,21 @@ export function PartnerDashboard({
                   <p className="admin-form__hint" role="status">
                     {selectedFinalizedQuote
                       ? (content.messages.quoteAlreadyFinalizedHint ??
-                        "이미 최종확정된 견적입니다. 미리보기로 저장된 PDF를 확인할 수 있으며, 같은 제휴사 계정으로는 다시 발송할 수 없습니다.")
+                        "이미 발송된 견적입니다. 미리보기로 확인할 수 있으며, 가격 수정이 필요하면 개정 후 다시 발송할 수 있습니다.")
                       : (content.messages.quoteMutationLocked ??
                         "이 견적 요청은 현재 저장·발송할 수 없는 상태입니다.")}
+                  </p>
+                ) : null}
+                {selectedFinalizedQuote ? (
+                  <p className="admin-form__hint" role="status">
+                    최근 발송: v{selectedFinalizedQuote.version} ·{" "}
+                    {Number(selectedFinalizedQuote.totalAmount).toLocaleString(
+                      "ko-KR",
+                    )}
+                    원
+                    {selectedFinalizedQuote.supersedesQuoteId
+                      ? " (개정본)"
+                      : ""}
                   </p>
                 ) : null}
                 <div className="admin-modal__actions">
@@ -1404,6 +2056,21 @@ export function PartnerDashboard({
                         : content.messages.quotePreviewButton ??
                           "견적서 미리보기 및 전송 확인"}
                   </button>
+                  {canReviseSelectedQuote ? (
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      disabled={quoteAction !== null}
+                      onClick={() =>
+                        void startQuoteRevision(selectedQuoteAssignment!.id)}
+                    >
+                      {quoteAction === "revise"
+                        ? (content.messages.quoteReviseLoading ??
+                          "개정 준비 중...")
+                        : (content.messages.quoteReviseButton ??
+                          "가격 수정·재발송")}
+                    </button>
+                  ) : null}
                 </div>
               </form>
             ) : (
@@ -1412,6 +2079,7 @@ export function PartnerDashboard({
               </p>
             )}
           </section>
+          </div>
           <div id="partner-sitemap">
             <PortalSitemap
               sitemap={sitemap}

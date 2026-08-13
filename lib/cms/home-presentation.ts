@@ -197,4 +197,10 @@ export const CMS_HOME_SECTION_PRESENTATION: Record<
       description: "답변",
     },
   },
+  promoFloat: {
+    name: "우측 임시 안내 배너",
+    eyebrowLabel: "배지 문구",
+    titleLabel: "배너 제목",
+    descriptionLabel: "배너 보조 설명",
+  },
 };

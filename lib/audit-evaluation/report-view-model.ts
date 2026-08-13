@@ -144,6 +144,13 @@ const displayStringSchema = z
   .refine((value) => !hasControlCharacters(value), {
     message: "Control characters are not allowed.",
   });
+/** 표 셀은 좌측 병합(rowspan)용 빈칸을 허용 */
+const tableCellStringSchema = z
+  .string()
+  .max(DISPLAY_STRING_MAX)
+  .refine((value) => !hasControlCharacters(value), {
+    message: "Control characters are not allowed.",
+  });
 const idSchema = z.string().regex(SAFE_ID);
 const keyValueBlockSchema = z
   .object({
@@ -168,7 +175,7 @@ const tableBlockSchema = z
     type: z.literal("TABLE"),
     title: displayStringSchema,
     columns: z.array(displayStringSchema).min(1).max(100),
-    rows: z.array(z.array(displayStringSchema).max(100)).max(20_000),
+    rows: z.array(z.array(tableCellStringSchema).max(100)).max(20_000),
   })
   .strict()
   .superRefine((block, context) => {
@@ -267,7 +274,7 @@ export const auditEvaluationReportViewModelSchema: z.ZodType<
         downloadFilename: z
           .string()
           .regex(
-            /^audit-evaluation-report-(?:(?:[\p{L}\p{N}][\p{L}\p{N}._-]{0,47}-)?FY[0-9]{4}|case-[a-zA-Z0-9][a-zA-Z0-9._-]{0,63})-v[0-9]+\.pdf$/u,
+            /^(?:audit-evaluation-report-(?:(?:[\p{L}\p{N}][\p{L}\p{N}._-]{0,47}-)?FY[0-9]{4}|case-[a-zA-Z0-9][a-zA-Z0-9._-]{0,63})-v[0-9]+\.pdf|[\p{L}\p{N}][\p{L}\p{N} ._-]{0,79}_FY[0-9]{4} 감사인견적평가보고서(?:_v[1-9][0-9]*)?\.pdf)$/u,
           ),
         watermark: z
           .object({
@@ -387,7 +394,7 @@ const FALLBACK_SECTION_TITLES: Record<ReportSectionId, string> = {
   "capability-analysis": "감사 수행역량 분석",
   "fee-analysis": "감사보수 적정성 분석",
   "firm-review": "회계법인별 강점 및 검토사항",
-  "overall-opinion": "종합 검토의견",
+  "overall-opinion": "계산 방법",
   appendix: "부록",
 };
 
@@ -395,7 +402,6 @@ const MANDATORY_REPORT_SECTION_IDS = [
   "cover",
   "purpose-scope",
   "overall-opinion",
-  "appendix",
 ] as const satisfies readonly ReportSectionId[];
 
 const FIELD_LABELS: Record<NormalizedAuditQuoteField, string> = {
@@ -474,10 +480,22 @@ export function buildDeterministicReportViewModel(
     appendix: buildAppendixBlocks,
   };
   const sections = REPORT_SECTION_IDS
-    .filter((id) => sectionPresentation[id].enabled)
+    .filter((id) => {
+      if (!sectionPresentation[id].enabled) return false;
+      // NH 감사 평가보고서: 부록 전체 삭제
+      if (reportRun.nhAuditEvaluationSnapshot && id === "appendix") {
+        return false;
+      }
+      return true;
+    })
     .map((id) => ({
       id,
-      title: sectionPresentation[id].title,
+      title:
+        nhAuditSectionTitle(
+          id,
+          sectionPresentation[id].title,
+          Boolean(reportRun.nhAuditEvaluationSnapshot),
+        ),
       order: sectionPresentation[id].order,
       blocks: reportRun.nhAuditEvaluationSnapshot
         ? buildNhAuditSectionBlocks(id, context, sectionBuilders[id])
@@ -546,6 +564,38 @@ export function buildDeterministicReportViewModel(
   }
 }
 
+export function rebuildNhAuditReportViewModel(input: {
+  reportRun: EvaluationReportRun;
+  evaluationCase: AuditEvaluationCase;
+  storedViewModel?: AuditEvaluationReportViewModel | null;
+}): AuditEvaluationReportViewModel {
+  const stored = input.storedViewModel ?? null;
+  const rebuilt = buildDeterministicReportViewModel({
+    reportRun: {
+      ...input.reportRun,
+      status: "GENERATING",
+    },
+    evaluationCase: input.evaluationCase,
+    corrections: [],
+    generatedAt:
+      stored?.metadata.generatedAt ??
+      input.reportRun.generatedAt ??
+      new Date().toISOString(),
+    resolvedLogoDataUri: stored?.metadata.branding.logoDataUri,
+  });
+  if (!stored) return rebuilt;
+  return auditEvaluationReportViewModelSchema.parse({
+    ...rebuilt,
+    metadata: {
+      ...rebuilt.metadata,
+      branding: stored.metadata.branding,
+      generatedAt: stored.metadata.generatedAt,
+      finalizedAt: stored.metadata.finalizedAt ?? rebuilt.metadata.finalizedAt,
+    },
+    narrative: stored.narrative,
+  });
+}
+
 export function parseAuditEvaluationReportViewModel(
   value: unknown,
 ): AuditEvaluationReportViewModel {
@@ -599,9 +649,13 @@ export function safeReportDownloadFilename(
   ) {
     throw new ReportViewModelError("invalid_download_filename_input");
   }
-  const cooperativeSlug = safeCooperativeFileSlug(cooperativeName);
-  if (cooperativeSlug) {
-    return `audit-evaluation-report-${cooperativeSlug}-FY${fiscalYear}-v${version}.pdf`;
+  const cooperativeLabel = sanitizeReportFileNameSegment(
+    cooperativeName,
+    "농협",
+  );
+  if (cooperativeName?.trim()) {
+    const koreanBase = `${cooperativeLabel}_FY${fiscalYear} 감사인견적평가보고서`;
+    return `${version > 1 ? `${koreanBase}_v${version}` : koreanBase}.pdf`;
   }
   if (
     rule !== "FISCAL_YEAR_VERSION" &&
@@ -621,14 +675,17 @@ export function safeReportDownloadFilename(
   return `audit-evaluation-report-FY${fiscalYear}-v${version}.pdf`;
 }
 
-function safeCooperativeFileSlug(value: string | undefined) {
-  if (!value) return null;
-  const normalized = value
+function sanitizeReportFileNameSegment(
+  value: string | undefined,
+  fallback: string,
+) {
+  const cleaned = String(value ?? "")
     .normalize("NFKC")
-    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
-    .replace(/^[._-]+|[._-]+$/gu, "")
-    .slice(0, 48);
-  return normalized || null;
+    .replace(/[\\/:*?"<>|#%{}^~[\]`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  return cleaned || fallback;
 }
 
 type BuildContext = {
@@ -657,15 +714,6 @@ function buildCoverBlocks(context: BuildContext) {
           ? formatReportInstant(snapshot.createdAt)
           : context.generatedAt.slice(0, 10),
       ],
-      ["보고서 버전", `v${context.reportRun.reportVersion}`],
-      ...(snapshot
-        ? [
-            ["보고서 ID", snapshot.reportId],
-            ["평가기준 버전", snapshot.evaluationStandardVersion],
-          ] as Array<[string, string]>
-        : []),
-      ["센터", FALLBACK_CENTER],
-      ["문의", context.centerContact],
     ]),
   ];
 }
@@ -677,16 +725,11 @@ function buildPurposeScopeBlocks(context: BuildContext) {
       keyValues("purpose-scope-basis", "비교 범위와 기준", [
         ["수집 견적", `${snapshot.quoteResults.length}개`],
         ["적격 비교대상", `${snapshot.includedQuoteIds.length}개 회계법인`],
-        ["사용 자료", "고객 확정 보고서별 평가 스냅샷"],
-        ["평가기준 버전", snapshot.evaluationStandardVersion],
-        ["대표 비용값", "VAT와 예상 제경비를 포함한 예상 총부담액"],
+        ["사용 자료", "회계법인이 제공한 견적서"],
         [
-          "지원자료 성격",
-          "가격과 수행역량을 함께 비교하는 감사인 선정 검토자료",
+          "총비용기준",
+          "VAT와 예상 제경비를 포함한 예상 총부담액",
         ],
-      ]),
-      paragraphs("purpose-scope-snapshot", "확정본 기준", [
-        "확정 후 화면과 PDF는 현재 견적 원본을 다시 계산하지 않고 확정 당시 저장한 설정과 계산결과를 재현합니다.",
       ]),
     ];
   }
@@ -780,16 +823,22 @@ function buildExecutiveSummaryBlocks(context: BuildContext) {
 }
 
 function buildQuoteComparisonBlocks(context: BuildContext) {
-  const rows = context.quotes.map((quote) => [
+  const coreRows = context.quotes.map((quote) => [
     displayOrUnknown(quote.accountingFirmName),
     formatWon(quote.auditFee),
     formatVat(quote.vatIncluded),
     formatWon(quote.accountingFirmRevenue),
+    formatPartner(quote),
+  ]);
+  const capabilityRows = context.quotes.map((quote) => [
+    displayOrUnknown(quote.accountingFirmName),
     displayNumber(quote.recentNonghyupAuditCount, "건"),
     displayStringList(quote.auditedNonghyupTypes),
     formatExperience(quote.taxAgencyExperience),
     formatExperience(quote.subsidySettlementExperience),
-    formatPartner(quote),
+  ]);
+  const planRows = context.quotes.map((quote) => [
+    displayOrUnknown(quote.accountingFirmName),
     displayNumber(quote.totalPlannedHours, "시간"),
     displayNumber(quote.partnerHours, "시간"),
     displayStringList(quote.qualityControlPlan),
@@ -807,18 +856,34 @@ function buildQuoteComparisonBlocks(context: BuildContext) {
         "감사보수(원)",
         "부가가치세",
         "매출액(원)",
+        "업무수행이사",
+      ],
+      coreRows,
+    ),
+    table(
+      "quote-comparison-capability",
+      "확정 견적 수행역량 비교",
+      [
+        "회계법인",
         "최근 농협 감사",
         "농협 종류",
         "세무대리 경험",
         "보조금 정산 경험",
-        "업무수행이사",
+      ],
+      capabilityRows,
+    ),
+    table(
+      "quote-comparison-plan",
+      "확정 견적 투입·제안 비교",
+      [
+        "회계법인",
         "총 예정시간",
         "이사 예정시간",
         "품질관리계획",
         "필수 제안항목",
         "누락 필드",
       ],
-      rows,
+      planRows,
     ),
     paragraphs("quote-comparison-unit", "표시 기준", [
       "모든 금액은 원 단위로 표시하며, 부가가치세 포함 여부가 확인되지 않은 경우 미확인으로 표시합니다.",
@@ -919,7 +984,20 @@ function buildNhAuditSummaryBlocks(context: BuildContext) {
   const eligibleCount = snapshot.quoteResults.filter(
     ({ eligibilityStatus }) => eligibilityStatus === "ELIGIBLE",
   ).length;
+  const firstPlace = orderedNhEligibleResults(snapshot).filter(
+    (result) => result.rank === 1,
+  );
   return [
+    keyValues(
+      "nh-audit-final-result",
+      "최종 결과",
+      nhAuditFinalResultItems(firstPlace),
+    ),
+    paragraphs("nh-audit-final-result-guidance", "선정 검토 포인트", [
+      firstPlace.length === 0
+        ? "적격 견적이 없어 최종 종합 1위를 표시하지 않습니다."
+        : "최종 종합 1위는 고객이 적용한 품질·가격 비중으로 산출한 결과입니다. 감사인 선임 안건을 검토할 때 이 회계법인의 점수와 예상 총부담액을 우선 참고할 수 있습니다.",
+    ]),
     keyValues("nh-audit-report-summary", "보고서 요약", [
       ["대상 농협", displayOrUnknown(context.evaluationCase.cooperativeNameSnapshot)],
       ["대상 사업연도", `${context.evaluationCase.fiscalYear}년`],
@@ -928,11 +1006,6 @@ function buildNhAuditSummaryBlocks(context: BuildContext) {
       [
         "평가 제외·부적격 견적 수",
         `${snapshot.quoteResults.length - eligibleCount}개`,
-      ],
-      ["적용 평가기준 버전", snapshot.evaluationStandardVersion],
-      [
-        "기본값 사용 여부",
-        snapshot.usesDefaultWeights ? "기본값 사용" : "고객 조정값 사용",
       ],
       [
         "품질·가격 비중",
@@ -957,31 +1030,63 @@ function buildNhAuditCompositeComparisonBlocks(context: BuildContext) {
     paragraphs("nh-audit-total-burden-notice", "비용 비교 기준", [
       "비용 비교의 대표값은 예상 총부담액입니다. 예상 총부담액은 감사보수와 별도 청구 예상 제경비를 합산한 공급가액에 VAT를 반영한 금액입니다.",
     ]),
+    // 열 묶음 없이 핵심·비용·점수를 각각 한 표로 배치해 한눈에 비교
     table(
-      "nh-audit-composite-comparison",
-      "적격 회계법인 종합 비교표",
+      "nh-audit-composite-comparison-rank",
+      "회계법인 종합 비교표",
+      [
+        "순위",
+        "회계법인명",
+        "적격여부",
+        "담당회계사",
+        "예상 총부담액",
+        "최종 종합점수",
+      ],
+      eligible.map((result) => [
+        `${result.rank}위`,
+        result.lowPriceEngagementRisk
+          ? `${result.accountingFirmName} (저가부실수임 우려)`
+          : result.accountingFirmName,
+        mapNhEligibilityStatus(
+          result.eligibilityStatus,
+          result.lowPriceEngagementRisk,
+        ),
+        result.engagementPartnerName ?? "확인 불가",
+        formatWon(result.expectedTotalBurdenWon),
+        formatNhScore(result.overallScore),
+      ]),
+    ),
+    table(
+      "nh-audit-composite-comparison-cost",
+      "회계법인 비용 상세",
       [
         "회계법인명",
-        "순위",
-        "담당회계사",
         "감사보수",
         "예상 제경비",
         "VAT",
         "예상 총부담액",
+      ],
+      eligible.map((result) => [
+        result.accountingFirmName,
+        formatWon(result.auditFeeWon),
+        formatWon(result.expectedExpenseWon),
+        formatWon(result.vatWon),
+        formatWon(result.expectedTotalBurdenWon),
+      ]),
+    ),
+    table(
+      "nh-audit-composite-comparison-score",
+      "회계법인 견적 평가점수 상세",
+      [
+        "회계법인명",
         "품질 원점수",
         "품질 환산점수",
-        "가격 기초점수",
+        "가격 원점수",
         "가격 환산점수",
         "최종 종합점수",
       ],
       eligible.map((result) => [
         result.accountingFirmName,
-        `${result.rank}위`,
-        result.engagementPartnerName ?? "확인 불가",
-        formatWon(result.auditFeeWon),
-        formatWon(result.expectedExpenseWon),
-        formatWon(result.vatWon),
-        formatWon(result.expectedTotalBurdenWon),
         formatNhScore(result.qualityScore),
         formatNhScore(result.weightedQualityScore),
         formatNhScore(result.priceBaseScore),
@@ -994,58 +1099,85 @@ function buildNhAuditCompositeComparisonBlocks(context: BuildContext) {
 
 function buildNhAuditQualityDetailBlocks(context: BuildContext) {
   const eligible = orderedNhEligibleResults(requiredNhSnapshot(context));
+  const inputRows = eligible.flatMap((result) =>
+    result.criteria.map((criterion, index) => [
+      index === 0 ? result.accountingFirmName : "",
+      nhCriterionLabel(criterion.criterionId),
+      formatNhCriterionInput(criterion.criterionId, criterion.inputValue),
+      `${criterion.weightPoints}점`,
+    ])
+  );
+  const scoreRows = eligible.flatMap((result) =>
+    result.criteria.map((criterion, index) => [
+      index === 0 ? result.accountingFirmName : "",
+      nhCriterionLabel(criterion.criterionId),
+      nhBandLabel(criterion.appliedBandId),
+      formatRecognitionRate(criterion.recognitionRateBasisPoints),
+      formatNhScore(criterion.earnedScore),
+    ])
+  );
   return [
     table(
-      "nh-audit-quality-detail",
-      "회계법인별 세부 품질평가",
+      "nh-audit-quality-detail-input",
+      "회계법인별 세부 품질평가 (입력·배점)",
       [
         "회계법인명",
         "평가항목",
         "입력값",
         "고객 적용 배점",
+      ],
+      inputRows,
+    ),
+    table(
+      "nh-audit-quality-detail-score",
+      "회계법인별 세부 품질평가 (구간·점수)",
+      [
+        "회계법인명",
+        "평가항목",
         "적용 평가구간",
         "인정률",
         "획득점수",
       ],
-      eligible.flatMap((result) =>
-        result.criteria.map((criterion) => [
-          result.accountingFirmName,
-          nhCriterionLabel(criterion.criterionId),
-          formatNhCriterionInput(criterion.criterionId, criterion.inputValue),
-          `${criterion.weightPoints}점`,
-          nhBandLabel(criterion.appliedBandId),
-          formatRecognitionRate(criterion.recognitionRateBasisPoints),
-          formatNhScore(criterion.earnedScore),
-        ])
-      ),
+      scoreRows,
     ),
   ];
 }
 
 function buildNhAuditCapabilityOverviewBlocks(context: BuildContext) {
   const eligible = orderedNhEligibleResults(requiredNhSnapshot(context));
+  const criterionIds = nhCriterionIds();
+  const mid = Math.ceil(criterionIds.length / 2);
+  const firstHalf = criterionIds.slice(0, mid);
+  const secondHalf = criterionIds.slice(mid);
+  const rowFor = (
+    result: (typeof eligible)[number],
+    ids: typeof criterionIds,
+  ) => {
+    const criteria = new Map(
+      result.criteria.map((criterion) => [criterion.criterionId, criterion]),
+    );
+    return [
+      result.accountingFirmName,
+      ...ids.map((criterionId) => {
+        const criterion = criteria.get(criterionId);
+        return criterion
+          ? formatNhCriterionInput(criterionId, criterion.inputValue)
+          : "확인 불가";
+      }),
+    ];
+  };
   return [
     table(
-      "nh-audit-capability-overview",
-      "적격 회계법인 수행역량 입력값 비교",
-      ["회계법인명", ...nhCriterionIds().map(nhCriterionLabel)],
-      eligible.map((result) => {
-        const criteria = new Map(
-          result.criteria.map((criterion) => [
-            criterion.criterionId,
-            criterion,
-          ]),
-        );
-        return [
-          result.accountingFirmName,
-          ...nhCriterionIds().map((criterionId) => {
-            const criterion = criteria.get(criterionId);
-            return criterion
-              ? formatNhCriterionInput(criterionId, criterion.inputValue)
-              : "확인 불가";
-          }),
-        ];
-      }),
+      "nh-audit-capability-overview-a",
+      "회계법인 수행역량 비교",
+      ["회계법인명", ...firstHalf.map(nhCriterionLabel)],
+      eligible.map((result) => rowFor(result, firstHalf)),
+    ),
+    table(
+      "nh-audit-capability-overview-b",
+      "회계법인 농협업무 수행역량 비교",
+      ["회계법인명", ...secondHalf.map(nhCriterionLabel)],
+      eligible.map((result) => rowFor(result, secondHalf)),
     ),
   ];
 }
@@ -1055,7 +1187,7 @@ function buildNhAuditCostComparisonBlocks(context: BuildContext) {
   return [
     table(
       "nh-audit-cost-comparison",
-      "적격 회계법인 예상 총부담액 비교",
+      "회계법인 예상 총부담액 비교",
       [
         "회계법인명",
         "감사보수",
@@ -1073,20 +1205,19 @@ function buildNhAuditCostComparisonBlocks(context: BuildContext) {
         formatWon(result.expectedTotalBurdenWon),
       ]),
     ),
-    paragraphs("nh-audit-low-price-policy", "저가견적 표시 정책", [
-      "예상 총부담액을 기준으로 한 현저한 저가견적 판정기준은 아직 확정되지 않았으므로 이 보고서에서는 자동 경고나 감점을 적용하지 않습니다. 향후 명시적인 공통기준이 확정될 때 별도 버전으로 적용합니다.",
-    ]),
   ];
 }
 
 function buildNhAuditExcludedQuoteBlocks(context: BuildContext) {
-  const excluded = requiredNhSnapshot(context).quoteResults.filter(
-    ({ eligibilityStatus }) => eligibilityStatus !== "ELIGIBLE",
+  const listed = requiredNhSnapshot(context).quoteResults.filter(
+    (result) =>
+      result.eligibilityStatus !== "ELIGIBLE" ||
+      result.lowPriceEngagementRisk === true,
   );
   return [
     table(
       "nh-audit-excluded-quotes",
-      "평가제외·부적격·재제출 필요 견적",
+      "평가제외·부적격·우려·재제출 필요 견적",
       [
         "회계법인명",
         "제안 주체",
@@ -1094,24 +1225,29 @@ function buildNhAuditExcludedQuoteBlocks(context: BuildContext) {
         "제외·부적격 사유",
         "누락 필드",
       ],
-      excluded.map((result) => [
+      listed.map((result) => [
         result.accountingFirmName,
         result.proposerType === "AUDIT_GROUP"
           ? "감사반"
           : result.proposerType === "ACCOUNTING_FIRM"
             ? "회계법인"
             : "확인 불가",
-        mapNhEligibilityStatus(result.eligibilityStatus),
+        mapNhEligibilityStatus(
+          result.eligibilityStatus,
+          result.lowPriceEngagementRisk,
+        ),
         result.reasonCodes.length > 0
           ? result.reasonCodes.map(nhReasonLabel).join(", ")
-          : "사유 확인 필요",
+          : result.lowPriceEngagementRisk
+            ? "저가부실수임 우려"
+            : "사유 확인 필요",
         result.missingFields.length > 0
           ? result.missingFields.map(nhMissingFieldLabel).join(", ")
           : "해당 없음",
       ]),
     ),
     paragraphs("nh-audit-exclusion-note", "순위 제외 안내", [
-      "감사반, 재제출 필요 견적, 관리자 평가제외 견적, 서버 검증 실패 또는 비정상 가격 견적은 정상 순위와 최저가격 산정에서 제외됩니다. 이 견적들을 0점 업체로 해석하지 않습니다.",
+      "감사반, 재제출 필요 견적, 관리자 평가제외 견적, 서버 검증 실패 또는 비정상 가격 견적은 정상 순위와 최저가격 산정에서 제외됩니다. 저가부실수임 우려 견적은 순위에 포함하되 이 표에 함께 표시합니다. 이 견적들을 0점 업체로 해석하지 않습니다. 저가부실수임 우려 견적은 품질점수에서 감점 반영합니다.",
     ]),
   ];
 }
@@ -1121,14 +1257,12 @@ function buildNhAuditMethodExplanationBlocks(context: BuildContext) {
   return [
     bullets("nh-audit-method-explanation", "평가 계산방법", [
       "품질 원점수는 6개 수행역량 항목의 고객 적용 배점에 공통 평가구간별 인정률을 곱하여 합산한 점수입니다.",
-      "가격 기초점수는 100 × 적격 견적 중 최저 예상 총부담액 ÷ 해당 견적의 예상 총부담액으로 계산합니다.",
+      "가격 원점수는 100 × 만점기준 예상 총부담액 ÷ 해당 견적의 예상 총부담액으로 계산하며, 100점을 넘지 않습니다. 만점기준은 적격 견적 중 최저 예상 총부담액입니다.",
+      "저가부실수임 우려 견적은(Prego AI가 최소 필수 투입 시간 등 원가를 고려해 검증) 품질 원점수에 감점조정율(1.05 − A/B, 최대 80%)을 적용하여 부실수임을 방지합니다. (A= 부실 우려 해당 기업 제안보수, B=Prego AI 산정 최저수임 가능 가격의 80% 수준)",
       "예상 총부담액에는 감사보수, 별도 청구 예상 제경비 및 VAT가 포함됩니다.",
-      `최종 종합점수는 품질 원점수에 ${snapshot.weights.qualityWeightPercent}%, 가격 기초점수에 ${snapshot.weights.priceWeightPercent}%를 각각 적용한 합계입니다.`,
+      `최종 종합점수는 품질 원점수에 ${snapshot.weights.qualityWeightPercent}%, 가격 원점수에 ${snapshot.weights.priceWeightPercent}%를 각각 적용한 합계입니다.`,
       "고객은 항목별 총배점만 조정할 수 있으며 각 항목 내부의 평가구간과 인정률은 모든 견적에 동일한 공통기준을 적용합니다.",
-      "순위는 반올림 전 최종 종합점수, 반올림 전 품질 원점수, 낮은 예상 총부담액, 감사 수행 건수가 많은 순으로 결정합니다.",
-    ]),
-    paragraphs("nh-audit-decision-guidance", "선정 검토 안내", [
-      "본 보고서는 가격과 수행역량을 비교하기 위한 선정 검토자료이며 최종 감사인 선임 판단을 대신하지 않습니다.",
+      "순위는 귀 농협이 설정한 배점과 가격과 품질 가중치를 반영한 최종 종합점수, 낮은 예상 총부담액, 감사 수행 건수가 많은 순으로 결정합니다.",
     ]),
   ];
 }
@@ -1163,6 +1297,18 @@ function requiredNhSnapshot(context: BuildContext) {
   return snapshot;
 }
 
+function nhAuditSectionTitle(
+  id: ReportSectionId,
+  configuredTitle: string,
+  isNhAuditReport: boolean,
+) {
+  if (!isNhAuditReport) return configuredTitle;
+  if (id === "overall-opinion") return "계산 방법";
+  if (id === "fee-analysis") return "감사보수 분석";
+  if (id === "firm-review") return "부적격·우려 견적 내역";
+  return configuredTitle;
+}
+
 function orderedNhEligibleResults(snapshot: NhAuditReportEvaluationSnapshot) {
   return snapshot.quoteResults
     .filter(
@@ -1175,6 +1321,42 @@ function orderedNhEligibleResults(snapshot: NhAuditReportEvaluationSnapshot) {
         (right.rank ?? Number.MAX_SAFE_INTEGER) ||
       compareText(left.quoteId, right.quoteId)
     );
+}
+
+function uniqueJoined(values: readonly string[]) {
+  return [...new Set(values.filter((value) => value.trim().length > 0))].join(
+    ", ",
+  );
+}
+
+function nhAuditFinalResultItems(
+  firstPlace: ReturnType<typeof orderedNhEligibleResults>,
+): Array<[string, string]> {
+  if (firstPlace.length === 0) {
+    return [
+      ["1위 회계법인", "해당 없음"],
+      ["최종 종합점수", "해당 없음"],
+      ["예상 총부담액", "해당 없음"],
+    ];
+  }
+  const names = firstPlace.map((result) =>
+    result.lowPriceEngagementRisk
+      ? `${result.accountingFirmName} (저가부실수임 우려)`
+      : result.accountingFirmName,
+  );
+  return [
+    [
+      "1위 회계법인",
+      firstPlace.length > 1 ? `${names.join(", ")} (동점)` : names[0]!,
+    ],
+    ["최종 종합점수", uniqueJoined(firstPlace.map((result) => formatNhScore(result.overallScore)))],
+    [
+      "예상 총부담액",
+      uniqueJoined(
+        firstPlace.map((result) => formatWon(result.expectedTotalBurdenWon)),
+      ),
+    ],
+  ];
 }
 
 function nhCriterionIds() {
@@ -1333,8 +1515,11 @@ function mapNhEligibilityStatus(
     | "INELIGIBLE"
     | "RESUBMISSION_REQUIRED"
     | "EXCLUDED",
+  lowPriceEngagementRisk?: boolean,
 ) {
-  if (status === "ELIGIBLE") return "적격";
+  if (status === "ELIGIBLE") {
+    return lowPriceEngagementRisk ? "우려" : "적격";
+  }
   if (status === "INELIGIBLE") return "부적격";
   if (status === "RESUBMISSION_REQUIRED") return "재제출 필요";
   return "평가 제외";
@@ -1500,7 +1685,7 @@ function buildOverallOpinionBlocks(context: BuildContext) {
     paragraphs("overall-opinion-decision", "최종 의사결정 안내", [
       "정량 품질평가와 감사보수 분석은 서로 분리하여 검토해야 합니다.",
       "감사보수가 가장 낮다는 이유만으로 특정 회계법인을 추천하지 않습니다.",
-      "최종 선임 판단과 의사결정은 보고서의 근거자료와 추가 확인 결과를 바탕으로 해당 농협이 수행합니다.",
+      "보고서는 품질과 보수를 같은 기준으로 비교한 근거를 제공하여, 농협이 선임 안건을 검토하고 설명할 수 있게 돕습니다.",
     ]),
   ];
 }
@@ -1840,7 +2025,8 @@ function table(
     type: "TABLE",
     title,
     columns: columns.map(displayOrUnknown),
-    rows: rows.map((row) => row.map(displayOrUnknown)),
+    // 빈 문자열은 회계법인명 rowspan 병합용 자리표시자로 유지한다.
+    rows: rows.map((row) => row.map(displayTableCell)),
   };
 }
 
@@ -1875,7 +2061,8 @@ function createFacts(
 ): AuditEvaluationReportFactViewModel[] {
   const facts: AuditEvaluationReportFactViewModel[] = [];
   for (const section of sections) {
-    const strings = [section.title, ...section.blocks.flatMap(blockStrings)];
+    const strings = [section.title, ...section.blocks.flatMap(blockStrings)]
+      .filter((text) => text.trim().length > 0);
     for (const text of strings) {
       facts.push({
         id: `fact-${String(facts.length + 1).padStart(4, "0")}`,
@@ -1933,6 +2120,47 @@ function safeFreeText(value: string): string {
 function displayOrUnknown(value: string | null | undefined): string {
   if (value === null || value === undefined) return "미확인";
   return cleanExternalText(value);
+}
+
+/** 표 셀 전용: 빈칸은 병합 자리표시자로 보존하고, 그 외만 미확인 치환 */
+function displayTableCell(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "미확인";
+  if (value === "") return "";
+  return cleanExternalText(value);
+}
+
+/** 종합 비교표는 최종 종합점수와 예상 총부담액을 함께 강조한다. */
+export function isEmphasizedReportColumn(
+  columns: readonly string[],
+  column: string,
+): boolean {
+  return column === "최종 종합점수" || column === "예상 총부담액";
+}
+
+export function isAuditCountEmphasis(text: string): boolean {
+  return text === "감사 수행 건수";
+}
+
+export function isNowrapReportColumn(column: string): boolean {
+  return column === "평가항목" || column === "보조금 정산 수행 여부";
+}
+
+export function reportTableCellClassName(
+  columns: readonly string[],
+  column: string,
+  cell = column,
+): string | undefined {
+  const classes: string[] = [];
+  if (isEmphasizedReportColumn(columns, column)) {
+    classes.push("is-total-burden");
+  }
+  if (isAuditCountEmphasis(column) || isAuditCountEmphasis(cell)) {
+    classes.push("is-audit-count");
+  }
+  if (isNowrapReportColumn(column)) {
+    classes.push("is-nowrap");
+  }
+  return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
 function displayStringList(values: readonly string[]): string {
@@ -2226,7 +2454,8 @@ function stripAllowedRecommendationLanguage(value: string) {
   return value
     .replace(/^부\s*적격$/g, "")
     .replace(/감사반은 평가기준상 부\s*적격/g, "")
-    .replace(/평가\s*제외[·\s]*부\s*적격(?:[·\s]*재제출\s*필요)?\s*견적(?:\s*수)?/g, "")
+    .replace(/부\s*적격[·\s]*우려\s*견적\s*내역/g, "")
+    .replace(/평가\s*제외[·\s]*부\s*적격(?:[·\s]*우려)?(?:[·\s]*재제출\s*필요)?\s*견적(?:\s*수)?/g, "")
     .replace(/제외[·\s]*부\s*적격\s*사유/g, "")
     .replace(/감사보수가 가장 낮다는 이유만으로 특정 회계법인을 추천하지 않습니다[.]?/g, "")
     .replace(/비\s*추천/g, "")

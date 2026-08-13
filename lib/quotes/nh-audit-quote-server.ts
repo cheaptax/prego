@@ -203,6 +203,33 @@ export function partnerQuoteMutationBlockReason(input: {
   return null;
 }
 
+/** First send, or the next immutable version after a quote was already sent. */
+export function partnerQuoteFinalizeBlockReason(input: {
+  authenticatedPartnerId: string;
+  assignment: Pick<QuoteAssignmentRecord, "partnerId" | "status">;
+  quoteRequest: Pick<QuoteRequestRecord, "status">;
+}):
+  | null
+  | "permission_denied"
+  | "assignment_already_finalized"
+  | "assignment_revoked"
+  | "quote_request_closed" {
+  const mutate = partnerQuoteMutationBlockReason(input);
+  if (mutate !== "assignment_already_finalized") return mutate;
+  if (["closed", "cancelled"].includes(input.quoteRequest.status)) {
+    return "quote_request_closed";
+  }
+  return null;
+}
+
+export function canPartnerFinalizeQuoteAssignment(input: {
+  authenticatedPartnerId: string;
+  assignment: Pick<QuoteAssignmentRecord, "partnerId" | "status">;
+  quoteRequest: Pick<QuoteRequestRecord, "status">;
+}) {
+  return partnerQuoteFinalizeBlockReason(input) === null;
+}
+
 export function nextImmutableQuoteVersion(
   versions: readonly number[],
 ): number {

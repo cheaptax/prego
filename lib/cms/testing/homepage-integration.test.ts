@@ -9,6 +9,7 @@ import {
 } from "@/lib/cms/defaults";
 import { normalizePageContentForPublish } from "@/lib/cms/editor-validation";
 import { loadCmsGlobalEditorData } from "@/lib/cms/global-editor-data";
+import { normalizeCmsPageContent } from "@/lib/cms/page-content";
 import type { FirestoreCmsRepository } from "@/lib/cms/repository";
 import {
   cmsGlobalContentSchema,
@@ -36,12 +37,30 @@ describe("homepage CMS operating defaults", () => {
         "process",
         "caseStudies",
         "faqPreview",
+        "promoFloat",
       ],
     );
     assert.equal(
       home.sections.find((section) => section.id === "hero")?.title,
       "농협 업무의\n복잡한 전문 문의를",
     );
+    const heroActions =
+      home.sections.find((section) => section.id === "hero")?.actions ?? [];
+    assert.deepEqual(
+      heroActions.map(({ id, label, href }) => [id, label, href]),
+      [
+        ["startConsult", "상담·견적 요청하기", "/consult"],
+        ["viewServices", "지원분야 보기", "#services"],
+      ],
+    );
+    const promoFloat = home.sections.find(
+      (section) => section.id === "promoFloat",
+    );
+    assert.equal(
+      promoFloat?.title,
+      "2027년도 외부회계감사 견적 신청하기",
+    );
+    assert.equal(promoFloat?.actions[0]?.href, "/events/audit-quote");
     assert.equal(
       home.sections
         .find((section) => section.id === "hero")
@@ -102,6 +121,42 @@ describe("homepage CMS operating defaults", () => {
       "제휴사 및 운영자 로그인",
     );
     assert.equal(support.links.support.href, "/support");
+  });
+
+  it("moves the temporary audit-quote CTA from hero into the floating banner", () => {
+    const legacy = structuredClone(CMS_PAGE_DEFAULTS.home);
+    const hero = legacy.sections.find((section) => section.id === "hero");
+    assert.ok(hero);
+    hero.actions = [
+      ...hero.actions,
+      {
+        id: "auditQuote",
+        label: "2027년도 외부회계감사 견적 신청하기",
+        href: "/events/audit-quote",
+        linkType: "internal",
+        appearance: "primary",
+        openInNewWindow: false,
+      },
+    ];
+    legacy.sections = legacy.sections.filter(
+      (section) => section.id !== "promoFloat",
+    );
+    const normalized = normalizeCmsPageContent("home", legacy);
+    const heroActions =
+      normalized.sections.find((section) => section.id === "hero")?.actions ??
+      [];
+    assert.equal(
+      heroActions.some((action) => action.id === "auditQuote"),
+      false,
+    );
+    const promo = normalized.sections.find(
+      (section) => section.id === "promoFloat",
+    );
+    assert.equal(
+      promo?.title,
+      "2027년도 외부회계감사 견적 신청하기",
+    );
+    assert.equal(promo?.actions[0]?.href, "/events/audit-quote");
   });
 
   it("supports explicit page overrides without copying common documents", () => {

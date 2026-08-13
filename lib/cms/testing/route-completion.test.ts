@@ -300,6 +300,66 @@ describe("published routes and side-effect-free previews", () => {
     ]) {
       assert.ok(preview.includes(`<${renderer}`));
     }
+    for (const renderer of [
+      "LoginPageRenderer",
+      "SignupPageRenderer",
+      "MyPageDashboard",
+      "RequestDetailPage",
+      "AdminDashboard",
+      "CmsAdminConsole",
+      "CustomerQuotesPage",
+      "PartnerApplicationForm",
+      "ConsultPageRenderer",
+      "BoardPageRenderer",
+    ]) {
+      assert.match(
+        preview,
+        new RegExp(`<${renderer}[\\s\\S]{0,320}\\{\\.\\.\\.shared\\}`),
+        `editing props are not forwarded to ${renderer}`,
+      );
+    }
+    for (const relativePath of [
+      "components/HomePageRenderer.tsx",
+      "components/AuditQuoteEventPage.tsx",
+      "components/AuditEvaluationCustomerPage.tsx",
+      "components/AuditQuoteReviewWorkspace.tsx",
+      "components/cms-editor/CmsActualPagePreview.tsx",
+      "components/cms-editor/CmsPageRenderer.tsx",
+      "components/LoginPageRenderer.tsx",
+      "components/CmsSimplePage.tsx",
+      "components/ConsultPageRenderer.tsx",
+      "components/ConsultForm.tsx",
+      "components/BoardPageRenderer.tsx",
+      "components/SignupForm.tsx",
+      "components/SignupPageRenderer.tsx",
+      "components/MyPageDashboard.tsx",
+      "components/RequestDetailPage.tsx",
+      "components/CustomerQuotesPage.tsx",
+      "components/PartnerApplicationForm.tsx",
+      "components/AdminDashboard.tsx",
+      "components/CmsAdminConsole.tsx",
+      "components/InquiryBoard.tsx",
+      "components/FaqBoard.tsx",
+    ]) {
+      assert.match(
+        source(relativePath),
+        /cms(?:EditableSection|SectionSelection)Props/,
+        `missing click-to-edit section binding: ${relativePath}`,
+      );
+    }
+    const selectionSources = [
+      "components/HomePageRenderer.tsx",
+      "components/AuditQuoteEventPage.tsx",
+      "components/AuditEvaluationCustomerPage.tsx",
+      "components/AuditQuoteReviewWorkspace.tsx",
+    ]
+      .map(source)
+      .join("\n");
+    assert.doesNotMatch(
+      selectionSources,
+      /onClick:\s*editing\s*\?\s*\(\)\s*=>\s*onSelectSection/,
+      "a route renderer bypasses the shared keyboard-accessible selection contract",
+    );
     assert.match(preview, /<CmsSimplePage[\s\S]*previewMode/);
     assert.match(simple, /editing \|\| previewMode/);
     for (const component of [login, signup, consult]) {
@@ -312,12 +372,16 @@ describe("published routes and side-effect-free previews", () => {
 
   it("keeps partner route gated with the CMS lockout fallback", () => {
     const partner = CMS_PAGE_DEFAULTS["partner.portal"];
-    assert.equal(partner.sections.length, 3);
+    assert.equal(partner.sections.length, 4);
     const accessNotice = partner.sections.find(
       (section) => section.id === "accessNotice",
     );
     assert.equal(accessNotice?.locked, true);
     assert.equal(accessNotice?.visible, true);
+    assert.equal(
+      partner.sections.find((section) => section.id === "sitemap")?.locked,
+      true,
+    );
     assert.equal(
       partner.sections.some((section) => section.id === "quoteEvaluation"),
       true,
@@ -329,7 +393,10 @@ describe("published routes and side-effect-free previews", () => {
     );
     const route = source("app/partner/page.tsx");
     const dashboard = source("components/PartnerDashboard.tsx");
-    assert.match(route, /<PartnerDashboard content=\{content\} \/>/);
+    assert.match(
+      route,
+      /<PartnerDashboard content=\{content\} sitemap=\{sitemap\} \/>/,
+    );
     assert.match(dashboard, /tokenResult\.claims\.partner !== true/);
     assert.match(dashboard, /\/api\/partner\/session/);
     assert.match(dashboard, /accessNotice/);

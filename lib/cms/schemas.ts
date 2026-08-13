@@ -249,6 +249,7 @@ export const cmsSectionSchema = z
     id: cmsStableIdSchema,
     visible: z.boolean().default(true),
     locked: z.boolean().default(false),
+    deleted: z.boolean().default(false),
     headingLevel: z.union([z.literal(2), z.literal(3)]).default(2),
     eyebrow: safePlainTextSchema.max(200).optional(),
     title: nonEmptyPlainTextSchema,

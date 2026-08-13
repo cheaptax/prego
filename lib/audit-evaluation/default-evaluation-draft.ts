@@ -217,7 +217,7 @@ export function createDefaultAuditQualityDraft(input: {
       },
       {
         id: "overall-opinion",
-        name: "종합 검토의견",
+        name: "계산 방법",
         order: 8,
         enabled: true,
         type: "OVERALL_OPINION",
@@ -235,7 +235,7 @@ export function createDefaultAuditQualityDraft(input: {
         id: "decision-support",
         label: "의사결정 안내",
         text:
-          "품질평가와 감사보수 분석은 분리하여 제공하며 최종 선임 판단과 의사결정은 해당 농협이 수행합니다.",
+          "품질평가와 감사보수 분석을 분리하여 제공하므로, 농협이 선임 안건을 균형 있게 검토할 수 있습니다.",
       },
       {
         id: "report-purpose",

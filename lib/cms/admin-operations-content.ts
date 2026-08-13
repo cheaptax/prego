@@ -7,12 +7,31 @@ export const ADMIN_OPERATION_TAB_IDS = [
   "partners",
   "inquiries",
   "auditQuotes",
+  "quotePriceMaster",
   "auditEvaluations",
   "points",
   "audit",
+  "sitemap",
 ] as const;
 
 export type AdminOperationTabId = (typeof ADMIN_OPERATION_TAB_IDS)[number];
+
+/** Tab keys used in the sidebar; some CMS section ids differ from the tab id. */
+export const ADMIN_OPERATION_TAB_SECTION_IDS: Record<
+  AdminOperationTabId,
+  string
+> = {
+  overview: "overview",
+  members: "members",
+  partners: "partners",
+  inquiries: "inquiries",
+  auditQuotes: "auditQuotes",
+  quotePriceMaster: "quotePriceMaster",
+  auditEvaluations: "auditEvaluationAdmin",
+  points: "points",
+  audit: "auditLog",
+  sitemap: "sitemap",
+};
 
 const TAB_DESCRIPTIONS: Record<AdminOperationTabId, string> = {
   overview: "overviewDescription",
@@ -20,9 +39,11 @@ const TAB_DESCRIPTIONS: Record<AdminOperationTabId, string> = {
   partners: "partnersDescription",
   inquiries: "inquiriesDescription",
   auditQuotes: "auditQuotesDescription",
+  quotePriceMaster: "quotePriceMasterDescription",
   auditEvaluations: "auditEvaluationsDescription",
   points: "pointsDescription",
   audit: "auditDescription",
+  sitemap: "sitemapDescription",
 };
 
 export const ADMIN_REQUEST_STATUS_FILTERS = [

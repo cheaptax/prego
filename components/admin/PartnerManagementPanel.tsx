@@ -10,6 +10,7 @@ import {
 } from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { AdminNhAuditQuotesPanel } from "@/components/admin/AdminNhAuditQuotesPanel";
+import { PartnerQuoteProfileSection } from "@/components/admin/PartnerQuoteProfileSection";
 import {
   canShowAdminAction,
   canShowAdminMenu,
@@ -1462,22 +1463,30 @@ export function PartnerManagementPanel({
                     <dt>{partnersCopy.text("phoneLabel")}</dt>
                     <dd>{selectedPartner.contactPhone || "-"}</dd>
                   </div>
-                  <div>
-                    <dt>사업자등록번호</dt>
-                    <dd>{selectedPartner.businessRegistrationNumber || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt>사업장 주소</dt>
-                    <dd>{selectedPartner.businessAddress || "-"}</dd>
-                  </div>
-                  <div>
-                    <dt>회계법인 직인</dt>
-                    <dd>
-                      {selectedPartner.sealPath ? "등록됨" : "미등록"}
-                    </dd>
-                  </div>
                 </dl>
               </section>
+              <PartnerQuoteProfileSection
+                copy={copy}
+                partner={selectedPartner}
+                canUpdate={canUpdate}
+                previewMode={previewMode}
+                onMessage={(message) => {
+                  if (message.tone === "success") {
+                    setActionMessage(message.text);
+                    setActionError("");
+                  } else {
+                    setActionError(message.text);
+                    setActionMessage("");
+                  }
+                }}
+                onPartnerUpdated={(nextPartner) => {
+                  setDetail((current) =>
+                    current
+                      ? { ...current, partner: { ...current.partner, ...nextPartner } }
+                      : current,
+                  );
+                }}
+              />
               <section>
                 <h3>{partnersCopy.text("scopeInfoTitle")}</h3>
                 <div className="admin-chip-list">
@@ -1978,11 +1987,11 @@ function PartnerEditorModal({
     }
     if (field === "businessRegistrationNumber") {
       return errors.businessRegistrationNumber === "invalid"
-        ? "사업자등록번호 10자리를 확인해 주세요."
-        : "사업자등록번호를 입력해 주세요.";
+        ? partnersCopy.text("businessRegistrationNumberInvalid")
+        : partnersCopy.text("businessRegistrationNumberRequired");
     }
     if (field === "businessAddress") {
-      return "사업장 주소를 입력해 주세요.";
+      return partnersCopy.text("businessAddressRequired");
     }
     if (field === "pointRange") {
       return partnersCopy.text("pointRangeValidationError");
@@ -2168,7 +2177,7 @@ function PartnerEditorModal({
               ) : null}
             </label>
             <label className="admin-modal__field">
-              사업자등록번호
+              {partnersCopy.text("businessRegistrationNumberLabel")}
               <input
                 className="admin-input"
                 value={businessRegistrationNumber}
@@ -2177,7 +2186,9 @@ function PartnerEditorModal({
                 }
                 disabled={loading || !canEditBase}
                 inputMode="numeric"
-                placeholder="000-00-00000"
+                placeholder={partnersCopy.text(
+                  "businessRegistrationNumberPlaceholder",
+                )}
                 aria-invalid={Boolean(errors.businessRegistrationNumber)}
               />
               {errors.businessRegistrationNumber ? (
@@ -2187,7 +2198,7 @@ function PartnerEditorModal({
               ) : null}
             </label>
             <label className="admin-modal__field">
-              사업장 주소
+              {partnersCopy.text("businessAddressLabel")}
               <input
                 className="admin-input"
                 value={businessAddress}

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -10,9 +11,10 @@ import {
 } from "react";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 import { getCmsMessage } from "@/lib/cms/runtime";
-import type {
-  AuditEvaluationReportBlockViewModel,
-  AuditEvaluationReportViewModel,
+import {
+  reportTableCellClassName,
+  type AuditEvaluationReportBlockViewModel,
+  type AuditEvaluationReportViewModel,
 } from "@/lib/audit-evaluation/report-view-model";
 import type { NhAuditReportPreview } from "@/lib/audit-evaluation/nh-audit-report-snapshot";
 import {
@@ -23,6 +25,7 @@ import {
   NH_AUDIT_QUALITY_CRITERION_IDS,
   type NhAuditCustomerWeightsV2,
 } from "@/lib/audit-evaluation/nh-audit-v2-types";
+import { ExternalManualQuotesPanel } from "@/components/ExternalManualQuotesPanel";
 
 type ReportStatus =
   | "NOT_REQUESTED"
@@ -74,11 +77,38 @@ export function AuditEvaluationReportWorkspace({
     createDefaultNhAuditCustomerWeightsV2,
   );
   const [preview, setPreview] = useState<NhAuditReportPreview | null>(null);
+  const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const requestSequence = useRef(0);
   const previewSequence = useRef(0);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const livePreviewActiveRef = useRef(false);
   const weightValidation = useMemo(
     () => validateNhAuditCustomerWeightsV2(weights),
     [weights],
+  );
+  const confirmationVersion = data?.confirmationVersion ?? null;
+
+  const refreshPreview = useCallback(
+    async (options?: { quiet?: boolean }) => {
+      if (!confirmationVersion || !weightValidation.success) return false;
+      const sequence = ++previewSequence.current;
+      if (!options?.quiet) setAction("previewing");
+      const result = await loadNhAuditPreview(
+        caseId,
+        confirmationVersion,
+        weightValidation.data,
+      );
+      if (sequence !== previewSequence.current) return false;
+      if (!result) {
+        if (!options?.quiet) setAction("error");
+        return false;
+      }
+      livePreviewActiveRef.current = true;
+      setPreview(result);
+      if (!options?.quiet) setAction("idle");
+      return true;
+    },
+    [caseId, confirmationVersion, weightValidation],
   );
 
   useEffect(() => {
@@ -94,13 +124,26 @@ export function AuditEvaluationReportWorkspace({
         if (!cancelled && result === null) setAction("error");
         return;
       }
-      setData(result);
+      setData((current) => {
+        const keepPreviousReport =
+          (result.status === "PENDING" || result.status === "GENERATING") &&
+          result.viewModel === null &&
+          current?.viewModel;
+        return keepPreviousReport
+          ? { ...result, viewModel: current.viewModel }
+          : result;
+      });
       if (result.nhAuditEvaluation) {
         setWeights(result.nhAuditEvaluation.weights);
-        setPreview(result.nhAuditEvaluation);
+        // 비제휴 추가 후 실시간 미리보기를 확정 스냅샷으로 덮어쓰지 않음
+        if (!livePreviewActiveRef.current) {
+          setPreview(result.nhAuditEvaluation);
+        }
       } else if (result.reportVersion !== null) {
         setWeights(createDefaultNhAuditCustomerWeightsV2());
-        setPreview(null);
+        if (!livePreviewActiveRef.current) {
+          setPreview(null);
+        }
       }
     };
     void refresh();
@@ -116,44 +159,37 @@ export function AuditEvaluationReportWorkspace({
   }, [caseId, data?.status, selectedVersion]);
 
   useEffect(() => {
-    if (
-      !data ||
-      data.reportVersion !== null ||
-      !data.confirmationVersion ||
-      !weightValidation.success
-    ) {
-      return;
-    }
-    const sequence = ++previewSequence.current;
+    if (!confirmationVersion || !weightValidation.success) return;
     const timer = window.setTimeout(() => {
-      setAction("previewing");
-      void loadNhAuditPreview(
-        caseId,
-        data.confirmationVersion!,
-        weightValidation.data,
-      ).then((result) => {
-        if (sequence !== previewSequence.current) return;
-        if (!result) {
-          setPreview(null);
-          setAction("error");
-          return;
-        }
-        setPreview(result);
-        setAction("idle");
-      });
+      void refreshPreview({ quiet: true });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [caseId, data, weightValidation]);
+  }, [
+    caseId,
+    confirmationVersion,
+    weightValidation,
+    previewRevision,
+    refreshPreview,
+  ]);
+
+  async function handleExternalQuotesChanged() {
+    livePreviewActiveRef.current = true;
+    setPreviewRevision((current) => current + 1);
+    await refreshPreview();
+  }
 
   async function applyReport() {
     if (
-      !data?.confirmationVersion ||
-      data.reportVersion !== null ||
+      !confirmationVersion ||
       !weightValidation.success ||
-      !preview
+      !preview ||
+      action === "applying" ||
+      data?.status === "PENDING" ||
+      data?.status === "GENERATING"
     ) {
       return;
     }
+    setApplyNotice(null);
     setAction("applying");
     const response = await fetch(
       `/api/audit-evaluations/${encodeURIComponent(caseId)}/reports`,
@@ -161,7 +197,7 @@ export function AuditEvaluationReportWorkspace({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          confirmationVersion: data.confirmationVersion,
+          confirmationVersion,
           weights: weightValidation.data,
         }),
       },
@@ -173,7 +209,16 @@ export function AuditEvaluationReportWorkspace({
     const payload = (await response.json().catch(() => null)) as {
       reportVersion?: number;
       status?: ReportStatus;
+      replayed?: boolean;
     } | null;
+    if (payload?.replayed) {
+      setApplyNotice(
+        "견적과 배점이 기존 보고서와 같아 보고서를 다시 만들지 않았습니다.",
+      );
+      setAction("idle");
+      return;
+    }
+    livePreviewActiveRef.current = false;
     setData((current) =>
       current
         ? {
@@ -182,7 +227,7 @@ export function AuditEvaluationReportWorkspace({
             status: payload?.status ?? "PENDING",
             nhAuditEvaluation: preview,
           }
-        : current
+        : current,
     );
     setAction("idle");
   }
@@ -221,6 +266,28 @@ export function AuditEvaluationReportWorkspace({
     window.location.assign(
       `/api/audit-evaluations/${encodeURIComponent(caseId)}/reports/${data.reportVersion}/download`,
     );
+    window.setTimeout(() => setAction("idle"), 3_000);
+  }
+
+  function printPdf() {
+    if (!data?.reportVersion || !data.downloadAvailable) return;
+    setAction("downloading");
+    const url =
+      `/api/audit-evaluations/${encodeURIComponent(caseId)}/reports/${data.reportVersion}/download?inline=1`;
+    // noopener를 features에 넣으면 window.open이 null을 반환해 현재 창으로 이동하는
+    // fallback이 실행되므로, 새 창을 연 뒤 opener만 끊는다.
+    const opened = window.open(url, "_blank");
+    if (opened) {
+      opened.opener = null;
+    } else {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    }
     window.setTimeout(() => setAction("idle"), 3_000);
   }
 
@@ -274,15 +341,38 @@ export function AuditEvaluationReportWorkspace({
 
       {data.confirmationVersion &&
       (data.reportVersion === null || data.nhAuditEvaluation) ? (
-        <NhAuditWeightEditor
-          weights={weights}
-          preview={weightValidation.success ? preview : null}
-          locked={data.reportVersion !== null}
-          busy={action === "previewing" || action === "applying"}
-          text={section.text}
-          onChange={setWeights}
-          onApply={() => void applyReport()}
-        />
+        <>
+          <ExternalManualQuotesPanel
+            caseId={caseId}
+            targetCooperativeName={
+              data.viewModel?.metadata.cooperative.name || undefined
+            }
+            fiscalYear={data.viewModel?.metadata.fiscalYear || undefined}
+            onChanged={() => handleExternalQuotesChanged()}
+          />
+          <NhAuditWeightEditor
+            weights={weights}
+            preview={weightValidation.success ? preview : null}
+            locked={false}
+            busy={
+              action === "applying" ||
+              data.status === "PENDING" ||
+              data.status === "GENERATING"
+            }
+            text={section.text}
+            applyLabel={
+              data.reportVersion !== null
+                ? (section.text.reapplyWeightsLabel ??
+                  "변경 견적으로 보고서 다시 확정")
+                : undefined
+            }
+            onChange={setWeights}
+            onApply={() => void applyReport()}
+          />
+          {applyNotice ? (
+            <p role="status">{applyNotice}</p>
+          ) : null}
+        </>
       ) : null}
 
       {(data.status === "PENDING" || data.status === "GENERATING") && (
@@ -306,8 +396,14 @@ export function AuditEvaluationReportWorkspace({
         </button>
       ) : null}
 
-      {data.status === "COMPLETED" && data.viewModel ? (
+      {data.viewModel ? (
         <>
+          {data.status === "PENDING" || data.status === "GENERATING" ? (
+            <p role="status">
+              새 PDF를 만드는 동안 이전 보고서를 보여 줍니다. 완료되면 자동으로
+              바뀝니다.
+            </p>
+          ) : null}
           <div className="audit-report-workspace__actions">
             <button
               type="button"
@@ -325,6 +421,18 @@ export function AuditEvaluationReportWorkspace({
               {action === "downloading"
                 ? section.text.downloadingLabel
                 : section.text.downloadLabel}
+            </button>
+            <button
+              type="button"
+              className="cta cta--ghost audit-report-workspace__print"
+              disabled={
+                !data.downloadAvailable ||
+                action === "downloading" ||
+                !weightValidation.success
+              }
+              onClick={printPdf}
+            >
+              인쇄하기
             </button>
             {downloadExpired ? (
               <p id="audit-report-download-expiry" role="status">
@@ -404,6 +512,7 @@ function NhAuditWeightEditor({
   locked,
   busy,
   text,
+  applyLabel,
   onChange,
   onApply,
 }: {
@@ -412,6 +521,7 @@ function NhAuditWeightEditor({
   locked: boolean;
   busy: boolean;
   text: CmsSection["text"];
+  applyLabel?: string;
   onChange: (weights: NhAuditCustomerWeightsV2) => void;
   onApply: () => void;
 }) {
@@ -582,7 +692,7 @@ function NhAuditWeightEditor({
           disabled={!valid || !preview || busy}
           onClick={onApply}
         >
-          {busy ? text.applyingWeightsLabel : text.applyWeightsLabel}
+          {busy ? text.applyingWeightsLabel : applyLabel || text.applyWeightsLabel}
         </button>
       ) : null}
 
@@ -613,8 +723,14 @@ function NhAuditRankingPreview({
         <table>
           <thead>
             <tr>
-              <th>{text.accountingFirmLabel}</th>
-              <th className="is-total-burden">{text.totalBurdenLabel}</th>
+              <th className="is-frozen-1">{text.accountingFirmLabel}</th>
+              <th className="is-frozen-2 is-total-burden">
+                {text.overallScoreLabel}
+              </th>
+              <th className="is-frozen-3 is-total-burden">
+                {text.totalBurdenLabel}
+              </th>
+              <th>{text.finalRankLabel}</th>
               {NH_QUALITY_WEIGHT_FIELDS.map((field) => (
                 <th key={field.id}>{text[field.labelKey]}</th>
               ))}
@@ -622,8 +738,6 @@ function NhAuditRankingPreview({
               <th>{text.priceBaseScoreLabel}</th>
               <th>{text.weightedQualityScoreLabel}</th>
               <th>{text.weightedPriceScoreLabel}</th>
-              <th>{text.overallScoreLabel}</th>
-              <th>{text.finalRankLabel}</th>
               <th>{text.eligibilityStatusLabel}</th>
             </tr>
           </thead>
@@ -637,9 +751,28 @@ function NhAuditRankingPreview({
               );
               return (
                 <tr key={result.quoteId}>
-                  <th scope="row">{result.accountingFirmName}</th>
-                  <td className="is-total-burden">
+                  <th scope="row" className="is-frozen-1">
+                    {result.accountingFirmName}
+                    {result.lowPriceEngagementRisk ? (
+                      <span className="nh-audit-low-price-risk">
+                        {text.lowPriceEngagementRiskLabel ??
+                          "저가부실수임 우려"}
+                      </span>
+                    ) : null}
+                  </th>
+                  <td className="is-frozen-2 is-total-burden">
+                    {scoreLabel(result.overallScoreOneDecimal)}
+                  </td>
+                  <td className="is-frozen-3 is-total-burden">
                     {formatWon(result.expectedTotalBurdenWon)}
+                  </td>
+                  <td>
+                    {result.rank === null
+                      ? result.eligibilityStatus === "INELIGIBLE" ||
+                        result.proposerType === "AUDIT_GROUP"
+                        ? `${text.ineligibleStatusLabel || "부적격"} · ${text.notRankedLabel || "순위외"}`
+                        : text.notRankedLabel
+                      : `${result.rank}${text.rankUnitLabel}`}
                   </td>
                   {NH_QUALITY_WEIGHT_FIELDS.map((field) => (
                     <td key={field.id}>
@@ -652,13 +785,19 @@ function NhAuditRankingPreview({
                     {scoreLabel(result.weightedQualityScoreOneDecimal)}
                   </td>
                   <td>{scoreLabel(result.weightedPriceScoreOneDecimal)}</td>
-                  <td>{scoreLabel(result.overallScoreOneDecimal)}</td>
-                  <td>
-                    {result.rank === null
-                      ? text.notRankedLabel
-                      : `${result.rank}${text.rankUnitLabel}`}
+                  <td
+                    className={
+                      result.lowPriceEngagementRisk ? "is-low-price-risk" : undefined
+                    }
+                  >
+                    {result.proposerType === "AUDIT_GROUP"
+                      ? `${eligibilityLabel(result.eligibilityStatus, text, result.lowPriceEngagementRisk)}(감사반)`
+                      : eligibilityLabel(
+                          result.eligibilityStatus,
+                          text,
+                          result.lowPriceEngagementRisk,
+                        )}
                   </td>
-                  <td>{eligibilityLabel(result.eligibilityStatus, text)}</td>
                 </tr>
               );
             })}
@@ -744,7 +883,13 @@ function ReportBlock({
 }) {
   if (block.type === "KEY_VALUES") {
     return (
-      <div className="audit-report-block">
+      <div
+        className={
+          block.id === "nh-audit-final-result"
+            ? "audit-report-block audit-report-block--result"
+            : "audit-report-block"
+        }
+      >
         <h3>{block.title}</h3>
         <dl>
           {block.items.map((item, index) => (
@@ -769,11 +914,7 @@ function ReportBlock({
                   <th
                     key={`${column}-${index}`}
                     scope="col"
-                    className={
-                      column === "예상 총부담액"
-                        ? "is-total-burden"
-                        : undefined
-                    }
+                    className={reportTableCellClassName(block.columns, column)}
                   >
                     {column}
                   </th>
@@ -786,22 +927,44 @@ function ReportBlock({
                   <td colSpan={block.columns.length}>해당 견적 없음</td>
                 </tr>
               ) : (
-                block.rows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    {row.map((cell, cellIndex) => (
-                      <td
-                        key={cellIndex}
-                        className={
-                          block.columns[cellIndex] === "예상 총부담액"
-                            ? "is-total-burden"
-                            : undefined
+                (() => {
+                  const rowSpans = computeFirstColumnRowSpans(block.rows);
+                  return block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => {
+                        if (cellIndex === 0) {
+                          const span = rowSpans[rowIndex];
+                          if (span === 0) return null;
+                          return (
+                            <td
+                              key={cellIndex}
+                              rowSpan={span > 1 ? span : undefined}
+                              className={reportTableCellClassName(
+                                block.columns,
+                                block.columns[cellIndex] ?? "",
+                                cell,
+                              )}
+                            >
+                              {cell}
+                            </td>
+                          );
                         }
-                      >
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))
+                        return (
+                          <td
+                            key={cellIndex}
+                            className={reportTableCellClassName(
+                              block.columns,
+                              block.columns[cellIndex] ?? "",
+                              cell,
+                            )}
+                          >
+                            {cell}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ));
+                })()
               )}
             </tbody>
           </table>
@@ -827,6 +990,25 @@ function ReportBlock({
       ))}
     </div>
   );
+}
+
+/** 빈 첫 열은 위 행과 같은 회계법인으로 보고 rowspan 계산 */
+function computeFirstColumnRowSpans(rows: string[][]) {
+  const spans = rows.map(() => 1);
+  for (let index = 0; index < rows.length; index += 1) {
+    const value = rows[index]?.[0]?.trim() ?? "";
+    if (!value) {
+      spans[index] = 0;
+      continue;
+    }
+    let span = 1;
+    for (let next = index + 1; next < rows.length; next += 1) {
+      if ((rows[next]?.[0] ?? "").trim()) break;
+      span += 1;
+    }
+    spans[index] = span;
+  }
+  return spans;
 }
 
 async function loadNhAuditPreview(
@@ -862,7 +1044,11 @@ function formatWon(value: string | null) {
 function eligibilityLabel(
   status: NhAuditReportPreview["quoteResults"][number]["eligibilityStatus"],
   text: CmsSection["text"],
+  lowPriceEngagementRisk?: boolean,
 ) {
+  if (status === "ELIGIBLE" && lowPriceEngagementRisk) {
+    return text.eligibleLowPriceRiskStatusLabel || "우려";
+  }
   if (status === "ELIGIBLE") return text.eligibleStatusLabel;
   if (status === "INELIGIBLE") return text.ineligibleStatusLabel;
   if (status === "RESUBMISSION_REQUIRED") {

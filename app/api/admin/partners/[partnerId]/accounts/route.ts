@@ -7,6 +7,11 @@ import {
   authErrorStatus,
   requirePermission,
 } from "@/lib/firebase/server";
+import {
+  buildMultiRoleOperatorClaims,
+  buildMultiRolePartnerAttachment,
+} from "@/lib/admin/multi-role-operator";
+import { isMultiRoleTestEmail } from "@/lib/test-data/multi-role-test-accounts";
 import { shouldEnablePartnerAccount } from "@/lib/partner-management";
 import { loadPartnerAccounts } from "@/lib/partner-management-server";
 import type {
@@ -139,6 +144,100 @@ export async function POST(req: Request, { params }: Params) {
       typeof error === "object" && error && "code" in error
         ? String(error.code)
         : "";
+    if (code === "auth/email-already-exists" && isMultiRoleTestEmail(email)) {
+      try {
+        authUser = await adminAuth().getUserByEmail(email);
+        const existingSnapshot = await db
+          .collection("users")
+          .doc(authUser.uid)
+          .get();
+        if (!existingSnapshot.exists) {
+          return NextResponse.json(
+            { ok: false, error: "partner_account_create_failed" },
+            { status: 500 },
+          );
+        }
+        const existingProfile = existingSnapshot.data() as UserRecord;
+        if (
+          existingProfile.role === "partner" &&
+          !existingProfile.multiRoleTestAccount &&
+          existingProfile.partnerId &&
+          existingProfile.partnerId !== partnerId
+        ) {
+          return NextResponse.json(
+            { ok: false, error: "partner_account_email_exists" },
+            { status: 409 },
+          );
+        }
+        await adminAuth().updateUser(authUser.uid, {
+          password,
+          displayName: name,
+          emailVerified: true,
+          disabled: !enabled,
+        });
+        const now = new Date().toISOString();
+        const user = buildMultiRolePartnerAttachment({
+          authUser,
+          existingProfile,
+          partnerId,
+          partnerDisplayName: partner.displayName,
+          name,
+          phone: body?.phone?.trim() ?? "",
+          position: body?.position?.trim() || "제휴 전문가",
+          duty: body?.duty?.trim() || partner.displayName,
+          accountStatus,
+          status,
+          now,
+        });
+        await adminAuth().setCustomUserClaims(
+          authUser.uid,
+          buildMultiRoleOperatorClaims({
+            authUser,
+            profile: user,
+            adminEnabled:
+              user.role === "admin" &&
+              (user.accountStatus ?? "active") === "active",
+          }),
+        );
+        await db.collection("users").doc(authUser.uid).set(user);
+        await addAdminAuditLog(db, {
+          actorId: session.decoded.uid,
+          actorEmail: session.decoded.email,
+          actorRole: session.context.adminRole,
+          requiredPermission: "partners:manageMembers",
+          action: "partner.account_multi_role_attached",
+          targetType: "partner",
+          targetId: partnerId,
+          after: {
+            uid: user.uid,
+            name: user.name,
+            email: user.email,
+            partnerId: user.partnerId,
+            accountStatus: user.accountStatus,
+            multiRoleTestAccount: true,
+            enabledPortals: user.enabledPortals ?? [],
+          },
+          metadata: {
+            targetUid: authUser.uid,
+            targetEmail: email,
+            status: accountStatus,
+            attachedExisting: true,
+          },
+          createdAt: now,
+        });
+        return NextResponse.json({
+          ok: true,
+          user,
+          accessEnabled: enabled,
+          attachedExisting: true,
+        });
+      } catch {
+        return NextResponse.json(
+          { ok: false, error: "partner_account_create_failed" },
+          { status: 500 },
+        );
+      }
+    }
     return NextResponse.json(
       {
         ok: false,

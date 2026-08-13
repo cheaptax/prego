@@ -17,6 +17,18 @@ const accountsRoute = read(
 const accountRoute = read(
   "app/api/admin/partners/[partnerId]/accounts/[uid]/route.ts",
 );
+const logoRoute = read("app/api/admin/partners/[partnerId]/logo/route.ts");
+const sealRoute = read("app/api/admin/partners/[partnerId]/seal/route.ts");
+const quoteProfileRoute = read(
+  "app/api/admin/partners/[partnerId]/quote-profile/route.ts",
+);
+const defaultsRoute = read(
+  "app/api/admin/partners/[partnerId]/nh-audit-defaults/route.ts",
+);
+const panel = read("components/admin/PartnerManagementPanel.tsx");
+const quoteProfilePanel = read(
+  "components/admin/PartnerQuoteProfileSection.tsx",
+);
 const partnerServer = read("lib/firebase/server.ts");
 const migration = read("scripts/migrate-partners.mjs");
 
@@ -96,5 +108,26 @@ describe("partner management API contract", () => {
     assert.match(migration, /transaction\.set\(row\.ref/);
     assert.match(migration, /conflicts\.length > 0/);
     assert.match(migration, /failures=/);
+  });
+
+  it("lets operators manage quote assets, consent, and evaluation defaults", () => {
+    assert.match(logoRoute, /requirePermission\(req, "partners:read"\)/);
+    assert.match(logoRoute, /requirePermission\(req, "partners:update"\)/);
+    assert.match(sealRoute, /requirePermission\(req, "partners:update"\)/);
+    assert.match(quoteProfileRoute, /opsProxyQuoteSendConsent/);
+    assert.match(quoteProfileRoute, /nhAuditEvaluationDefaults/);
+    assert.match(
+      defaultsRoute,
+      /requireAnyPermission\(req, \[\s*"partners:update",\s*"auditQuotes:write",\s*\]\)/,
+    );
+    assert.match(panel, /<PartnerQuoteProfileSection/);
+    assert.match(
+      quoteProfilePanel,
+      /\/api\/admin\/partners\/\$\{encodeURIComponent\(partner\.id\)\}\/\$\{kind\}/,
+    );
+    assert.match(quoteProfilePanel, /\/quote-profile/);
+    assert.match(quoteProfilePanel, /type="file"/);
+    assert.match(quoteProfilePanel, /opsProxyQuoteSendConsent/);
+    assert.match(quoteProfilePanel, /showCostFields=\{false\}/);
   });
 });

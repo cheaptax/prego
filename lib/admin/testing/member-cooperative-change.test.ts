@@ -14,8 +14,8 @@ const read = (relativePath: string) =>
   readFileSync(path.join(root, relativePath), "utf8");
 
 describe("member cooperative administration", () => {
-  it("registers the three test cooperative masters and prelaunch target", () => {
-    assert.equal(TEST_COOPERATIVE_DEFINITIONS.length, 3);
+  it("registers the test cooperative masters and prelaunch target", () => {
+    assert.equal(TEST_COOPERATIVE_DEFINITIONS.length, 6);
     assert.equal(
       TEST_COOPERATIVE_DEFINITIONS.find(
         (definition) => definition.cooperativeId === PREGO_COOPERATIVE_ID,

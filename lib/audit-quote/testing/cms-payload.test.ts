@@ -22,6 +22,7 @@ const config: PublicAuditQuoteConfig = {
   channel: "event_page",
   pagePath: "/events/audit-quote",
   privacyPolicyHref: "/signup",
+  fixedFiscalYear: 2027,
   guaranteeMinQuotes: false,
   showPointsBenefit: false,
   pointsBenefitBaseLabel: null,
@@ -36,8 +37,10 @@ describe("audit-quote CMS payload boundary", () => {
         email: "finance.team@nonghyup.com",
         name: "김농협",
         phone: "010-1234-5678",
+        phoneVerificationIdToken: "phone-token",
+        targetCooperativeId: "demo-prigo-nh",
         targetCooperativeName: "프리고농협",
-        fiscalYear: 2026,
+        fiscalYear: 2027,
         marketingConsent: true,
         companyWebsite: "",
       },
@@ -48,8 +51,10 @@ describe("audit-quote CMS payload boundary", () => {
       email: "finance.team@nonghyup.com",
       name: "김농협",
       phone: "010-1234-5678",
+      phoneVerificationIdToken: "phone-token",
+      targetCooperativeId: "demo-prigo-nh",
       targetCooperativeName: "프리고농협",
-      fiscalYear: 2026,
+      fiscalYear: 2027,
       privacyConsent: true,
       privacyPolicyVersion: "2026-07-20",
       marketingConsent: true,
@@ -63,6 +68,8 @@ describe("audit-quote CMS payload boundary", () => {
       "email",
       "name",
       "phone",
+      "phoneVerificationIdToken",
+      "targetCooperativeId",
       "targetCooperativeName",
       "fiscalYear",
       "privacyConsent",
@@ -89,8 +96,10 @@ describe("audit-quote CMS payload boundary", () => {
       email: "finance.team@nonghyup.com",
       name: "김농협",
       phone: "010-1234-5678",
+      phoneVerificationIdToken: "phone-token",
+      targetCooperativeId: "demo-prigo-nh",
       targetCooperativeName: "프리고농협",
-      fiscalYear: 2026,
+      fiscalYear: 2027,
       marketingConsent: false,
       companyWebsite: "",
     };
@@ -115,14 +124,16 @@ describe("audit-quote CMS payload boundary", () => {
       "email",
       "name",
       "phone",
-      "targetCooperativeName",
+      "targetCooperativeQuery",
       "fiscalYear",
     ]) {
       assert.match(pageSource, new RegExp(`name=\"${name}\"`));
     }
+    assert.match(pageSource, /targetCooperativeId/);
     assert.match(pageSource, /company-website/);
     assert.match(pageSource, /buildAuditQuoteRequestPayload/);
     assert.match(routeSource, /contactName:\s*body\.name/);
+    assert.match(routeSource, /targetCooperativeId:\s*body\.targetCooperativeId/);
     assert.match(routeSource, /companyWebsite:\s*body\.companyWebsite/);
     assert.match(routeSource, /privacyConsent:\s*body\.privacyConsent === true/);
   });

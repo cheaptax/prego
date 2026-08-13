@@ -4,7 +4,11 @@ import {
   quoteConditionRows,
   quoteDisplayNumber,
   quoteDocumentTitle,
+  quoteIssueDate,
+  quotePartnerCredentialRows,
+  quotePartnerEvaluationFactRows,
   quoteRecipient,
+  formatQuoteWon,
 } from "@/lib/quotes/quote-presentation";
 import {
   quoteSupplierProfileFrom,
@@ -171,5 +175,79 @@ describe("quote supplier profile", () => {
     assert.equal(invalid.valid, false);
     assert.ok(invalid.fieldErrors.businessRegistrationNumber);
     assert.ok(invalid.fieldErrors.seal);
+  });
+
+  it("exposes a logo slot copy for the quote document header", () => {
+    const { copy } = quoteDocumentContentFromCms(
+      CMS_PAGE_DEFAULTS["partner.portal"],
+    );
+    assert.equal(copy.logoMissing, "제휴사 로고 미등록");
+    assert.match(copy.logoMissing, /로고/u);
+    assert.equal(copy.credentialsHelp, "");
+  });
+});
+
+describe("customer-visible partner facts", () => {
+  const quote = {
+    supplierBusinessRegistrationNumber: "123-45-67890",
+    supplierAddress: "서울특별시 중구 세종대로 1",
+    supplierContactName: "김담당",
+    supplierContactPhone: "02-1234-5678",
+    supplierContactEmail: "quote@example.com",
+    nhAuditV2: {
+      submission: {
+        engagementPartnerName: "홍길동",
+        proposerType: "ACCOUNTING_FIRM",
+        certifiedPublicAccountantCount: 12,
+        accountingFirmRevenueWon: "1000000000",
+        localNonghyupAuditCount2025: 8,
+        auditedNonghyupTypes2025: ["LOCAL_AGRICULTURAL_COOPERATIVE"],
+        nonghyupTaxAgencyPerformed2025: true,
+        nonghyupSubsidySettlementPerformed2025: false,
+      },
+    },
+  } as QuoteRecord;
+
+  it("formats the issue date from the finalized timestamp", () => {
+    assert.equal(
+      quoteIssueDate({
+        createdAt: "2026-07-01T00:00:00.000Z",
+        finalizedAt: "2026-07-24T00:00:00.000Z",
+      }),
+      "2026.07.24",
+    );
+  });
+
+  it("exposes supplier credentials and engagement facts for the customer", () => {
+    const rows = Object.fromEntries(quotePartnerCredentialRows(quote));
+    assert.equal(rows["사업자등록번호"], "123-45-67890");
+    assert.equal(rows["담당회계사"], "홍길동");
+    assert.equal(rows["제안 주체"], "회계법인");
+    assert.equal(rows["소속 공인회계사"], "12명");
+    assert.equal(rows["전화"], "02-1234-5678");
+    assert.equal(rows["이메일"], "quote@example.com");
+  });
+
+  it("exposes evaluation facts the customer needs to compare firms", () => {
+    const rows = Object.fromEntries(quotePartnerEvaluationFactRows(quote));
+    assert.equal(rows["회계법인 매출액"], "1,000,000,000원");
+    assert.equal(rows["2025년 지역농협 감사건수"], "8건");
+    assert.equal(rows["감사 수행 농협 유형"], "지역농협");
+    assert.equal(rows["농협 세무대리 경험"], "있음");
+    assert.equal(rows["농협 보조금 정산 경험"], "없음");
+  });
+
+  it("omits evaluation facts when the partner has not submitted them", () => {
+    assert.deepEqual(
+      quotePartnerEvaluationFactRows({
+        supplierBusinessRegistrationNumber: "123-45-67890",
+      } as QuoteRecord),
+      [],
+    );
+  });
+
+  it("formats large won amounts without using unsafe numbers", () => {
+    assert.equal(formatQuoteWon("10000000001", "원"), "10,000,000,001원");
+    assert.equal(formatQuoteWon("not-a-number", "원"), "");
   });
 });

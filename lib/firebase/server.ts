@@ -20,6 +20,9 @@ import {
   assertInstitutionWriteAllowed,
   InstitutionPurgeLockedError,
 } from "@/lib/test-data/purge-lock";
+import {
+  isMultiRoleTestProfile,
+} from "@/lib/test-data/multi-role-test-accounts";
 import type {
   AdminAuditLogInput,
   AdminCapability,
@@ -81,6 +84,10 @@ export function isAdminToken(decoded: DecodedIdToken) {
   return decoded.admin === true;
 }
 
+function isMultiRoleToken(decoded: DecodedIdToken) {
+  return (decoded as { multiRole?: unknown }).multiRole === true;
+}
+
 export type AuthenticatedAdmin = {
   decoded: DecodedIdToken;
   profile: UserRecord;
@@ -107,7 +114,10 @@ export async function requireAuthenticatedAdmin(
   req: Request,
 ): Promise<AuthenticatedAdmin> {
   const decoded = await verifyBearerToken(req);
-  if (!isAdminToken(decoded) || decoded.partner === true) {
+  if (
+    !isAdminToken(decoded) ||
+    (decoded.partner === true && !isMultiRoleToken(decoded))
+  ) {
     throw new AdminAuthorizationError("permission_denied", 403);
   }
   const profile = await getUserRecord(decoded.uid);
@@ -118,6 +128,13 @@ export async function requireAuthenticatedAdmin(
     throw new AdminAuthorizationError("permission_denied", 403);
   }
   if (!isAdminRole(profile.adminRole)) {
+    throw new AdminAuthorizationError("permission_denied", 403);
+  }
+  if (
+    isMultiRoleToken(decoded) &&
+    (!isMultiRoleTestProfile(profile) ||
+      !profile.enabledPortals?.includes("admin"))
+  ) {
     throw new AdminAuthorizationError("permission_denied", 403);
   }
   assertTokenProfileIdentity(decoded, profile);
@@ -228,7 +245,11 @@ export function isActivePartnerProfile(
 
 export async function requireMember(req: Request) {
   const decoded = await verifyBearerToken(req);
-  if (decoded.admin === true || decoded.partner === true) {
+  const multiRole = isMultiRoleToken(decoded);
+  if (
+    (decoded.admin === true || decoded.partner === true) &&
+    !multiRole
+  ) {
     throw new AdminAuthorizationError("permission_denied", 403);
   }
   const profile = await getUserRecord(decoded.uid);
@@ -236,7 +257,15 @@ export async function requireMember(req: Request) {
     throw new AdminAuthorizationError("profile_not_found", 403);
   }
   if (profile.role !== "member") {
-    throw new AdminAuthorizationError("permission_denied", 403);
+    if (
+      !(
+        multiRole &&
+        isMultiRoleTestProfile(profile) &&
+        profile.enabledPortals?.includes("customer")
+      )
+    ) {
+      throw new AdminAuthorizationError("permission_denied", 403);
+    }
   }
   assertTokenProfileIdentity(decoded, profile);
   return { decoded, profile };
@@ -279,14 +308,25 @@ export async function requireWritableActiveMember(req: Request) {
 
 export async function requirePartner(req: Request) {
   const decoded = await verifyBearerToken(req);
-  if (decoded.partner !== true || decoded.admin === true) {
+  const multiRole = isMultiRoleToken(decoded);
+  if (
+    decoded.partner !== true ||
+    (decoded.admin === true && !multiRole)
+  ) {
     throw new AdminAuthorizationError("permission_denied", 403);
   }
   const profile = await getUserRecord(decoded.uid);
   if (!profile) {
     throw new AdminAuthorizationError("profile_not_found", 403);
   }
-  if (!isActivePartnerProfile(profile)) {
+  const partnerCapable =
+    isActivePartnerProfile(profile) ||
+    (multiRole &&
+      isMultiRoleTestProfile(profile) &&
+      profile.enabledPortals?.includes("partner") &&
+      Boolean(profile.partnerId?.trim()) &&
+      isAccountActive(profile));
+  if (!partnerCapable) {
     throw new AdminAuthorizationError("inactive_account", 403);
   }
   assertTokenProfileIdentity(decoded, profile);

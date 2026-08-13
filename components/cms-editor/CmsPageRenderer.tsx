@@ -1,6 +1,7 @@
 "use client";
 
-import type { CSSProperties, KeyboardEvent } from "react";
+import type { CSSProperties } from "react";
+import { cmsEditableSectionProps } from "@/lib/cms/editable-section";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 
 export type CmsPreviewDevice = "desktop" | "tablet" | "mobile";
@@ -103,16 +104,6 @@ function sectionStyle(
   };
 }
 
-function activateSection(
-  event: KeyboardEvent<HTMLElement>,
-  sectionId: string,
-  onSelect?: (sectionId: string) => void,
-) {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault();
-  onSelect?.(sectionId);
-}
-
 export function CmsPageRenderer({
   content,
   device,
@@ -131,34 +122,36 @@ export function CmsPageRenderer({
   return (
     <main className={`cms-page-renderer is-${device}`}>
       {content.sections.map((section) => {
+        if (section.deleted && !editing) return null;
         if (!section.visible && !editing) return null;
         const Heading = section.headingLevel === 3 ? "h3" : "h2";
         const media = section.media?.deleted ? undefined : section.media;
         const imageUrl = media
           ? assetUrls?.[media.assetId]
           : undefined;
+        const editableProps = cmsEditableSectionProps(
+          section,
+          "cms-rendered-section",
+          { editing, selectedSectionId, onSelectSection },
+        );
         return (
           <section
+            {...editableProps}
             className={[
-              "cms-rendered-section",
-              selectedSectionId === section.id ? "is-selected" : "",
-              !section.visible ? "is-hidden" : "",
+              editableProps.className,
+              !section.visible && !editing ? "is-hidden" : "",
             ]
               .filter(Boolean)
               .join(" ")}
             key={section.id}
-            style={sectionStyle(section, device)}
-            onClick={() => onSelectSection?.(section.id)}
-            onKeyDown={(event) =>
-              activateSection(event, section.id, onSelectSection)
-            }
-            tabIndex={editing ? 0 : undefined}
-            role={editing ? "button" : undefined}
-            aria-label={
-              editing ? `${section.title} 영역 편집 설정 열기` : undefined
-            }
+            style={{
+              ...editableProps.style,
+              ...sectionStyle(section, device),
+            }}
           >
-            {!section.visible ? (
+            {section.deleted ? (
+              <span className="cms-rendered-section__hidden">삭제한 영역 · 복원 가능</span>
+            ) : !section.visible ? (
               <span className="cms-rendered-section__hidden">현재 숨긴 영역</span>
             ) : null}
             <div className="cms-rendered-section__copy">

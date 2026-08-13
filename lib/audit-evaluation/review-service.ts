@@ -22,6 +22,7 @@ import {
 } from "@/lib/audit-evaluation/review-schemas";
 import type {
   AuditEvaluationActor,
+  NormalizedAuditQuote,
   NormalizedAuditQuoteField,
 } from "@/lib/audit-evaluation/types";
 
@@ -81,6 +82,16 @@ export type ConfirmCaseInput = {
   finalAcknowledged: true;
   actor: CustomerReviewActor;
   now: string;
+};
+
+export type ConfirmPartnerInboxQuotesInput = {
+  caseId: string;
+  quotes: readonly NormalizedAuditQuote[];
+  finalAcknowledged: true;
+  actor: CustomerReviewActor;
+  now: string;
+  cooperativeNameSnapshot?: string;
+  fiscalYear?: number;
 };
 
 export type RequestReportInput = {
@@ -218,6 +229,38 @@ export class AuditEvaluationReviewService {
       finalAcknowledged: confirmation.finalAcknowledged,
       actor: envelope.actor,
       now: envelope.now,
+    });
+  }
+
+  async confirmPartnerInboxQuotes(
+    input: ConfirmPartnerInboxQuotesInput,
+  ): Promise<ConfirmCaseResult> {
+    this.assertEnabled();
+    const envelope = parseServiceInput(
+      z
+        .object({
+          caseId: resourceIdSchema,
+          actor: customerActorSchema,
+          now: instantSchema,
+        })
+        .strict(),
+      {
+        caseId: input.caseId,
+        actor: input.actor,
+        now: input.now,
+      },
+    );
+    if (input.finalAcknowledged !== true) {
+      throw new ReviewServiceError("invalid_input");
+    }
+    return this.repository.confirmPartnerInboxQuotes({
+      caseId: envelope.caseId,
+      quotes: input.quotes,
+      finalAcknowledged: true,
+      actor: envelope.actor,
+      now: envelope.now,
+      cooperativeNameSnapshot: input.cooperativeNameSnapshot,
+      fiscalYear: input.fiscalYear,
     });
   }
 

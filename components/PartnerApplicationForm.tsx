@@ -8,6 +8,11 @@ import {
   PARTNER_PROFESSION_OPTIONS,
 } from "@/lib/partner-professions";
 import type { PartnerProfession } from "@/lib/firebase/schema";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getCmsMessage, getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 
@@ -16,10 +21,13 @@ type SubmitState = "idle" | "submitting" | "success" | "error";
 export function PartnerApplicationForm({
   content,
   previewMode = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const hero = getCmsSection(content, "partner.apply", "hero");
   const formCopy = getCmsSection(content, "partner.apply", "form");
   const messageCopy = (key: string) =>
@@ -39,6 +47,7 @@ export function PartnerApplicationForm({
   const [companyWebsite, setCompanyWebsite] = useState("");
   const [state, setState] = useState<SubmitState>("idle");
   const [message, setMessage] = useState("");
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
 
   const toggleField = (label: string) => {
     setFields((current) =>
@@ -87,7 +96,13 @@ export function PartnerApplicationForm({
 
   return (
     <main className="page-shell">
-      <section className="hero-section hero-section--compact">
+      <section
+        {...cmsEditableSectionProps(
+          hero,
+          "section hero-section hero-section--compact",
+          editingOptions,
+        )}
+      >
         <div className="section-inner">
           {hero.eyebrow ? <p className="eyebrow">{hero.eyebrow}</p> : null}
           <h1>{hero.title}</h1>
@@ -96,13 +111,21 @@ export function PartnerApplicationForm({
           ) : null}
           <p className="hero-copy">
             {hero.text.loginPrompt}{" "}
-            <Link className="admin-link" href="/login">
+            <Link
+              className="admin-link"
+              href="/login"
+              onClick={
+                previewMode ? (event) => event.preventDefault() : undefined
+              }
+            >
               {hero.text.loginLabel}
             </Link>
           </p>
         </div>
       </section>
-      <section className="section">
+      <section
+        {...cmsEditableSectionProps(formCopy, "section", editingOptions)}
+      >
         <div className="section-inner">
           <header className="admin-card__head">
             <div>
@@ -263,6 +286,13 @@ export function PartnerApplicationForm({
           </form>
         </div>
       </section>
+      <CmsSupplementalSections
+        pageKey="partner.apply"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </main>
   );
 }

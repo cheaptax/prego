@@ -3,6 +3,10 @@
 import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
@@ -107,10 +111,13 @@ function createPreviewItems(copy: CmsPageContent["sections"][number]["text"]) {
 export function InquiryBoard({
   content,
   previewMode = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const filterCopy = getCmsSection(content, "public.inquiries", "filters");
   const listCopy = getCmsSection(content, "public.inquiries", "list");
   const [items, setItems] = useState<InquiryBoardItem[]>([]);
@@ -121,6 +128,7 @@ export function InquiryBoard({
   );
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [query, setQuery] = useState("");
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
   const effectiveItems = useMemo(
     () => (previewMode ? createPreviewItems(listCopy.text) : items),
     [items, listCopy.text, previewMode],
@@ -214,6 +222,9 @@ export function InquiryBoard({
       className="inquiry-board"
       aria-label={filterCopy.text.boardAriaLabel}
     >
+      <div
+        {...cmsEditableSectionProps(filterCopy, "", editingOptions)}
+      >
       <div className="inquiry-board__toolbar">
         <div>
           <strong>
@@ -250,17 +261,46 @@ export function InquiryBoard({
           </button>
         ))}
       </div>
+      </div>
 
       {loading ? (
-        <div className="inquiry-board__state">{content.messages.loading}</div>
+        <div
+          {...cmsEditableSectionProps(
+            listCopy,
+            "inquiry-board__state",
+            editingOptions,
+          )}
+        >
+          {content.messages.loading}
+        </div>
       ) : error ? (
-        <div className="inquiry-board__state inquiry-board__state--error">
+        <div
+          {...cmsEditableSectionProps(
+            listCopy,
+            "inquiry-board__state inquiry-board__state--error",
+            editingOptions,
+          )}
+        >
           {error}
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="inquiry-board__state">{content.messages.empty}</div>
+        <div
+          {...cmsEditableSectionProps(
+            listCopy,
+            "inquiry-board__state",
+            editingOptions,
+          )}
+        >
+          {content.messages.empty}
+        </div>
       ) : (
-        <div className="inquiry-list">
+        <div
+          {...cmsEditableSectionProps(
+            listCopy,
+            "inquiry-list",
+            editingOptions,
+          )}
+        >
           {filteredItems.map((item) => (
             <details className="inquiry-row" key={item.id}>
               <summary>

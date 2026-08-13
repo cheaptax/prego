@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { Auth, UserRecord as FirebaseAuthUser } from "firebase-admin/auth";
 import type { Firestore } from "firebase-admin/firestore";
+import { normalizePhoneDigits } from "@/lib/audit-quote/contact-core";
 import type { UserRecord } from "@/lib/firebase/schema";
 
 export const TEMPORARY_QUOTE_MEMBER_STATUS = "temporary_quote_member" as const;
@@ -48,6 +49,13 @@ function validPassword(password: string) {
   );
 }
 
+export function buildTemporaryQuoteMemberInitialPassword(phone: string) {
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 4) return null;
+  const lastFour = digits.slice(-4);
+  return `nh${lastFour}${lastFour}`;
+}
+
 export function isTemporaryQuoteMember(
   profile: UserRecord | null | undefined,
 ): profile is UserRecord & { status: typeof TEMPORARY_QUOTE_MEMBER_STATUS } {
@@ -61,6 +69,7 @@ async function resolveOrCreateAuthUser(
   auth: Auth,
   email: string,
   displayName: string,
+  initialPassword: string | null,
 ): Promise<{ user: FirebaseAuthUser; created: boolean }> {
   try {
     return { user: await auth.getUserByEmail(email), created: false };
@@ -75,7 +84,7 @@ async function resolveOrCreateAuthUser(
       email,
       displayName,
       emailVerified: false,
-      password: randomBytes(48).toString("base64url"),
+      password: initialPassword ?? randomBytes(48).toString("base64url"),
     });
     return { user, created: true };
   } catch (error) {
@@ -99,10 +108,12 @@ export async function provisionTemporaryQuoteMember(input: {
 }) {
   const email = normalizedEmail(input.email);
   const now = input.now ?? new Date().toISOString();
+  const initialPassword = buildTemporaryQuoteMemberInitialPassword(input.phone);
   const { user, created } = await resolveOrCreateAuthUser(
     input.auth,
     email,
     input.contactName.trim(),
+    initialPassword,
   );
   const userRef = input.db.collection("users").doc(user.uid);
   const auditRequestRef = input.db
@@ -189,13 +200,42 @@ export async function provisionTemporaryQuoteMember(input: {
       { customerUid: user.uid, updatedAt: now },
       { merge: true },
     );
+    const shouldResetUnactivatedTemporaryPassword =
+      Boolean(initialPassword) &&
+      !created &&
+      isTemporaryQuoteMember(existing) &&
+      !existing.temporaryMember?.activatedAt;
+
     return {
       uid: user.uid,
       profileStatus: existing?.status ?? TEMPORARY_QUOTE_MEMBER_STATUS,
+      initialPasswordIssued:
+        Boolean(initialPassword) &&
+        (created || shouldResetUnactivatedTemporaryPassword),
+      shouldResetUnactivatedTemporaryPassword,
     };
   });
 
-  return { ...result, authUserCreated: created };
+  let initialPasswordIssued = result.initialPasswordIssued;
+  if (initialPassword && result.shouldResetUnactivatedTemporaryPassword) {
+    try {
+      await input.auth.updateUser(user.uid, { password: initialPassword });
+    } catch (error) {
+      console.error("[temporary-member] initial_password_reset_failed", {
+        uid: user.uid,
+        error: error instanceof Error ? error.message : "reset_failed",
+      });
+      initialPasswordIssued = false;
+    }
+  }
+
+  return {
+    uid: result.uid,
+    profileStatus: result.profileStatus,
+    authUserCreated: created,
+    initialPasswordIssued,
+    initialPassword: initialPasswordIssued ? initialPassword : null,
+  };
 }
 
 export async function createTemporaryMemberActivationLink(input: {

@@ -26,19 +26,30 @@ import {
   isValidIdempotencyKey,
 } from "@/lib/audit-quote/idempotency";
 import { createPublicReference } from "@/lib/audit-quote/public-reference";
-import { assertSourceAllowed, isHoneypotTriggered } from "@/lib/audit-quote/security";
+import { AUDIT_QUOTE_FIXED_FISCAL_YEAR } from "@/lib/audit-quote/fiscal-year";
+import {
+  assertSourceAllowed,
+  hashRateLimitKey,
+  isHoneypotTriggered,
+} from "@/lib/audit-quote/security";
 import {
   AUDIT_QUOTE_SCHEMA_VERSION,
   type SubmitAuditQuoteInput,
   type SubmitAuditQuoteResult,
 } from "@/lib/audit-quote/types";
+import { resolveSignupCooperative } from "@/lib/cooperatives/server";
 import { withoutUndefined } from "@/lib/firebase/clean";
+import { UNLIMITED_TEST_PHONE } from "@/lib/test-data/email-classification";
+
+const MAX_QUOTE_REQUESTS_PER_PHONE = 5;
 
 type DedupRecord = {
   requestId: string;
   publicReference: string;
   emailHash: string;
   campaign: string;
+  targetCooperativeId?: string;
+  fiscalYear?: number;
   createdAtMs: number;
 };
 
@@ -53,6 +64,11 @@ type RateLimitRecord = {
   count: number;
   windowStartMs: number;
   updatedAtMs?: number;
+};
+
+type PhoneQuoteLimitRecord = {
+  count: number;
+  updatedAtMs: number;
 };
 
 function readCreatedAtMs(value: unknown, fallback: number) {
@@ -120,6 +136,13 @@ export async function submitAuditQuoteRequest(
     ipHash?: string;
     nowMs?: number;
     serverTimestamp?: FieldValue;
+    resolveCooperative?: (
+      cooperativeId: string,
+    ) => Promise<{
+      cooperative_id: string;
+      cooperative_name: string;
+      status: string;
+    } | null>;
   }
 ): Promise<SubmitAuditQuoteResult> {
   if (!isValidIdempotencyKey(input.idempotencyKey)) {
@@ -152,23 +175,39 @@ export async function submitAuditQuoteRequest(
   }
   const phone = formatKoreanMobile(phoneDigits);
 
-  const targetCooperativeName = normalizeTargetCooperativeName(
-    input.targetCooperativeName,
-  );
-  if (!honeypot && !isValidTargetCooperativeName(targetCooperativeName)) {
-    return {
-      kind: "rejected",
-      error: "invalid_target_cooperative",
-      status: 400,
-    };
+  const targetCooperativeId = String(input.targetCooperativeId ?? "").trim();
+  let targetCooperativeName = "";
+  if (!honeypot) {
+    if (!targetCooperativeId) {
+      return {
+        kind: "rejected",
+        error: "invalid_target_cooperative",
+        status: 400,
+      };
+    }
+    const cooperative = await (
+      options?.resolveCooperative ?? resolveSignupCooperative
+    )(targetCooperativeId);
+    if (!cooperative || cooperative.status !== "active") {
+      return {
+        kind: "rejected",
+        error: "invalid_target_cooperative",
+        status: 400,
+      };
+    }
+    targetCooperativeName = cooperative.cooperative_name;
+  } else {
+    targetCooperativeName = normalizeTargetCooperativeName(
+      input.targetCooperativeName,
+    );
   }
 
-  const fiscalYear = Number(input.fiscalYear);
+  // FY27 intake locks the business year in code; ignore client-submitted values.
+  const fiscalYear = AUDIT_QUOTE_FIXED_FISCAL_YEAR;
   if (
     !honeypot &&
-    (!Number.isSafeInteger(fiscalYear) ||
-      fiscalYear < 2_000 ||
-      fiscalYear > 2_100)
+    Number.isFinite(Number(input.fiscalYear)) &&
+    Number(input.fiscalYear) !== AUDIT_QUOTE_FIXED_FISCAL_YEAR
   ) {
     return { kind: "rejected", error: "invalid_fiscal_year", status: 400 };
   }
@@ -204,8 +243,19 @@ export async function submitAuditQuoteRequest(
     input.idempotencyKey,
     config.hashPepper
   );
-  const dedupId = emailHash ? emailDedupDocId(campaign, emailHash) : "";
+  const dedupId = emailHash
+    ? emailDedupDocId({
+        campaign,
+        emailHash,
+        targetCooperativeId,
+        fiscalYear,
+      })
+    : "";
   const ipHash = options?.ipHash;
+  const phoneLimitHash =
+    !honeypot && phoneDigits !== UNLIMITED_TEST_PHONE
+      ? hashRateLimitKey("audit_quote_phone", phoneDigits, config.hashPepper)
+      : "";
 
   try {
     type TxResult =
@@ -231,6 +281,11 @@ export async function submitAuditQuoteRequest(
       const emailRateRef = emailHash
         ? db.collection(AUDIT_QUOTE_RATE_LIMITS).doc(`email_${emailHash}`)
         : null;
+      const phoneLimitRef = phoneLimitHash
+        ? db
+            .collection(AUDIT_QUOTE_RATE_LIMITS)
+            .doc(`phone_quote_${phoneLimitHash}`)
+        : null;
 
       // Firestore requires all reads before any writes.
       const idempotencySnap = honeypot
@@ -241,6 +296,10 @@ export async function submitAuditQuoteRequest(
       const ipRateSnap = ipRateRef ? await transaction.get(ipRateRef) : null;
       const emailRateSnap =
         !honeypot && emailRateRef ? await transaction.get(emailRateRef) : null;
+      const phoneLimitSnap =
+        !honeypot && phoneLimitRef
+          ? await transaction.get(phoneLimitRef)
+          : null;
 
       if (idempotencySnap?.exists) {
         const existing = idempotencySnap.data() as IdempotencyRecord;
@@ -308,6 +367,23 @@ export async function submitAuditQuoteRequest(
         transaction.set(emailRateRef, emailLimit.next);
       }
 
+      if (phoneLimitRef) {
+        const currentPhoneLimit = phoneLimitSnap?.exists
+          ? (phoneLimitSnap.data() as PhoneQuoteLimitRecord)
+          : null;
+        const currentCount =
+          currentPhoneLimit && Number.isFinite(currentPhoneLimit.count)
+            ? currentPhoneLimit.count
+            : 0;
+        if (currentCount >= MAX_QUOTE_REQUESTS_PER_PHONE) {
+          throw new PhoneQuoteLimitError();
+        }
+        transaction.set(phoneLimitRef, {
+          count: currentCount + 1,
+          updatedAtMs: nowMs,
+        } satisfies PhoneQuoteLimitRecord);
+      }
+
       const requestRef = db.collection(AUDIT_QUOTE_REQUESTS).doc();
       const publicReference = createPublicReference(new Date(nowMs));
 
@@ -321,6 +397,7 @@ export async function submitAuditQuoteRequest(
           emailHash,
           contactName,
           phone,
+          targetCooperativeId: honeypot ? undefined : targetCooperativeId,
           targetCooperativeName,
           fiscalYear,
           status: "received",
@@ -345,6 +422,8 @@ export async function submitAuditQuoteRequest(
           publicReference,
           emailHash,
           campaign,
+          targetCooperativeId,
+          fiscalYear,
           createdAtMs: nowMs,
         } satisfies DedupRecord);
       }
@@ -370,6 +449,13 @@ export async function submitAuditQuoteRequest(
     if (error instanceof RateLimitError) {
       return { kind: "rejected", error: "rate_limited", status: 429 };
     }
+    if (error instanceof PhoneQuoteLimitError) {
+      return {
+        kind: "rejected",
+        error: "phone_quote_limit_exceeded",
+        status: 429,
+      };
+    }
     throw error;
   }
 }
@@ -378,5 +464,12 @@ class RateLimitError extends Error {
   constructor() {
     super("rate_limited");
     this.name = "RateLimitError";
+  }
+}
+
+class PhoneQuoteLimitError extends Error {
+  constructor() {
+    super("phone_quote_limit_exceeded");
+    this.name = "PhoneQuoteLimitError";
   }
 }

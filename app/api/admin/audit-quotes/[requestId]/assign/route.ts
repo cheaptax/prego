@@ -29,6 +29,8 @@ import {
   ensureQuoteRequest,
   quoteRequestIdFor,
 } from "@/lib/quotes/quote-requests";
+import { notifyPartnerQuoteAssignment } from "@/lib/quotes/partner-assignment-email";
+import { seedQuoteAutomationFromMaster } from "@/lib/quotes/cooperative-quote-price-master-repository";
 
 export const runtime = "nodejs";
 
@@ -260,10 +262,51 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
+  void notifyPartnerQuoteAssignment({
+    db,
+    partner,
+    quoteRequest: {
+      ...quoteRequest,
+      id: quoteRequestId,
+      subject:
+        quoteRequest.subject ||
+        `${audit.fiscalYear}년도 ${audit.targetCooperativeName} 회계감사 견적`,
+      sourceReference:
+        quoteRequest.sourceReference || audit.publicReference,
+      customerName: quoteRequest.customerName || audit.contactName,
+      customerEmail: quoteRequest.customerEmail || audit.email,
+      cooperativeName:
+        quoteRequest.cooperativeName || audit.targetCooperativeName,
+      targetCooperativeName: audit.targetCooperativeName,
+      fiscalYear: quoteRequest.fiscalYear ?? audit.fiscalYear,
+      sourceType: "audit_quote",
+    },
+    assignmentId: result.assignment.id,
+  }).catch((error: unknown) => {
+    console.error("[quote-assignment] notify_unhandled", {
+      requestId,
+      partnerId,
+      error: error instanceof Error ? error.message : "notify_failed",
+    });
+  });
+
   const updatedAudit = (
     await auditRef.get()
   ).data() as AuditQuoteRequestRecord;
   const assignments = await loadActiveAssignments(quoteRequestId);
+  const automationSeed = await seedQuoteAutomationFromMaster({
+    auditQuoteRequest: updatedAudit,
+    assignments,
+    actor: { uid: admin.uid, email: admin.email },
+    now: new Date().toISOString(),
+  }).catch((error: unknown) => {
+    console.error("[quote-assignment] automation_seed_failed", {
+      requestId,
+      quoteRequestId,
+      error: error instanceof Error ? error.message : "seed_failed",
+    });
+    return { ok: false as const, error: "seed_failed" };
+  });
   return NextResponse.json({
     ok: true,
     item: toAuditQuoteDetail(updatedAudit),
@@ -272,6 +315,7 @@ export async function POST(req: Request, { params }: Params) {
     assignments,
     assignmentCount: assignments.length,
     expectedQuoteCount,
+    automationSeed,
   });
 }
 

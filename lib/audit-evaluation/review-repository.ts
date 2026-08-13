@@ -45,7 +45,10 @@ import {
   type StandardQuoteDocumentRecord,
   type UploadedQuoteDocument,
 } from "@/lib/audit-evaluation/types";
-import { nhAuditReportEvaluationSnapshotSchema } from "@/lib/audit-evaluation/nh-audit-report-snapshot";
+import {
+  nhAuditReportEvaluationSnapshotSchema,
+  nhAuditSnapshotNeedsRegeneration,
+} from "@/lib/audit-evaluation/nh-audit-report-snapshot";
 import { uploadedQuoteDocumentSchema } from "@/lib/audit-evaluation/upload-schemas";
 import { adminDb } from "@/lib/firebase/admin";
 
@@ -339,6 +342,16 @@ export type ConfirmCaseResult = {
   confirmation: AuditEvaluationConfirmationRecord;
 };
 
+export type ConfirmPartnerInboxQuotesRepositoryInput = {
+  caseId: string;
+  quotes: readonly NormalizedAuditQuote[];
+  finalAcknowledged: true;
+  actor: Extract<AuditEvaluationActor, { type: "CUSTOMER" }>;
+  now: string;
+  cooperativeNameSnapshot?: string;
+  fiscalYear?: number;
+};
+
 export type RequestReportRepositoryInput = {
   caseId: string;
   confirmationVersion: number;
@@ -363,6 +376,9 @@ export interface AuditEvaluationReviewRepository {
     input: SaveCustomerCorrectionRepositoryInput,
   ): Promise<SaveCustomerCorrectionResult>;
   confirmCase(input: ConfirmCaseRepositoryInput): Promise<ConfirmCaseResult>;
+  confirmPartnerInboxQuotes(
+    input: ConfirmPartnerInboxQuotesRepositoryInput,
+  ): Promise<ConfirmCaseResult>;
   requestReport(
     input: RequestReportRepositoryInput,
   ): Promise<RequestReportResult>;
@@ -862,6 +878,141 @@ implements AuditEvaluationReviewRepository {
     });
   }
 
+  async confirmPartnerInboxQuotes(
+    input: ConfirmPartnerInboxQuotesRepositoryInput,
+  ) {
+    if (input.quotes.length < 2) {
+      throw new ReviewServiceError("readiness_failed");
+    }
+    if (!input.quotes.every((quote) => quote.confirmedByCustomer)) {
+      throw new ReviewServiceError("confirmation_not_final");
+    }
+    return this.db.runTransaction(async (transaction) => {
+      const caseRef = this.db
+        .collection(AUDIT_EVALUATION_COLLECTIONS.cases)
+        .doc(input.caseId);
+      const caseSnapshot = await transaction.get(caseRef);
+      if (!caseSnapshot.exists) throw new ReviewServiceError("case_not_found");
+      const evaluationCase = parseCase(caseSnapshot.data());
+      if (
+        evaluationCase.id !== input.caseId ||
+        evaluationCase.status === "DELETED"
+      ) {
+        throw new ReviewServiceError("case_not_found");
+      }
+      if (
+        evaluationCase.status === "READY" &&
+        Number.isInteger(evaluationCase.confirmationVersion) &&
+        (evaluationCase.confirmationVersion ?? 0) > 0
+      ) {
+        const existingVersion = evaluationCase.confirmationVersion!;
+        const existingConfirmation = await transaction.get(
+          this.db
+            .collection(AUDIT_EVALUATION_COLLECTIONS.confirmations)
+            .doc(confirmationId(input.caseId, existingVersion)),
+        );
+        if (existingConfirmation.exists) {
+          return {
+            evaluationCase,
+            confirmation: parseConfirmation(existingConfirmation.data()),
+          };
+        }
+      }
+      if (
+        !canTransitionAuditEvaluationStatus(evaluationCase.status, "READY")
+      ) {
+        throw new ReviewServiceError("invalid_status_transition");
+      }
+      const configSnapshot = await transaction.get(
+        this.configQuery(evaluationCase),
+      );
+      const config = parsePinnedConfig(
+        configSnapshot.docs.map((item) => item.data()),
+        evaluationCase,
+      );
+      assertPublishedEffective(config, input.now);
+      const confirmedQuotes = [...input.quotes]
+        .map((quote) =>
+          parseQuote({
+            ...quote,
+            caseId: input.caseId,
+            confirmedByCustomer: true,
+            confirmedAt: input.now,
+            updatedAt: input.now,
+          })
+        )
+        .sort((left, right) => left.quoteId.localeCompare(right.quoteId));
+      const version = (evaluationCase.latestConfirmationVersion ?? 0) + 1;
+      const evaluationConfigSnapshot =
+        createEvaluationConfigSnapshot(config);
+      const quoteDataSnapshots = createQuoteDataSnapshots(confirmedQuotes);
+      const inputHash = hashConfirmationInput(
+        evaluationConfigSnapshot,
+        quoteDataSnapshots,
+      );
+      const confirmation = confirmationRecordSchema.parse({
+        id: confirmationId(input.caseId, version),
+        caseId: input.caseId,
+        version,
+        evaluationConfigSnapshot,
+        quoteDataSnapshots,
+        inputHash,
+        finalAcknowledged: input.finalAcknowledged,
+        confirmedBy: input.actor,
+        confirmedAt: input.now,
+      });
+      const cooperativeNameSnapshot =
+        input.cooperativeNameSnapshot?.trim() ||
+        evaluationCase.cooperativeNameSnapshot;
+      const fiscalYear =
+        Number.isInteger(input.fiscalYear) &&
+        input.fiscalYear !== undefined &&
+        input.fiscalYear >= 2_000 &&
+        input.fiscalYear <= 9_999
+          ? input.fiscalYear
+          : evaluationCase.fiscalYear;
+      const updatedCase = parseCase({
+        ...evaluationCase,
+        status: "READY",
+        latestConfirmationVersion: version,
+        confirmationVersion: version,
+        confirmedQuoteCount: confirmedQuotes.length,
+        cooperativeNameSnapshot,
+        fiscalYear,
+        reportRequestedConfirmationVersion: null,
+        reportRegenerationRequired:
+          evaluationCase.reportRegenerationRequired ?? false,
+        updatedAt: input.now,
+      });
+
+      for (const quote of confirmedQuotes) {
+        transaction.set(
+          this.db
+            .collection(AUDIT_EVALUATION_COLLECTIONS.normalizedQuotes)
+            .doc(quote.quoteId),
+          quote,
+        );
+      }
+      transaction.create(
+        this.db
+          .collection(AUDIT_EVALUATION_COLLECTIONS.confirmations)
+          .doc(confirmation.id),
+        confirmation,
+      );
+      transaction.set(caseRef, updatedCase);
+      createReviewAuditLog(transaction, this.db, {
+        caseId: input.caseId,
+        documentId: null,
+        reportVersion: null,
+        action: "CUSTOMER_FINAL_CONFIRMED",
+        actor: input.actor,
+        occurredAt: input.now,
+        detail: `inbox_partner_quotes:confirmationVersion:${version}`,
+      });
+      return { evaluationCase: updatedCase, confirmation };
+    });
+  }
+
   async requestReport(input: RequestReportRepositoryInput) {
     return this.db.runTransaction(async (transaction) => {
       const caseRef = this.db
@@ -922,6 +1073,75 @@ implements AuditEvaluationReviewRepository {
           existing.inputHash !== confirmation.inputHash
         ) {
           throw new ReviewServiceError("report_conflict");
+        }
+        const nextSnapshot = input.nhAuditEvaluationSnapshot;
+        if (
+          nextSnapshot &&
+          nhAuditSnapshotNeedsRegeneration(
+            existing.nhAuditEvaluationSnapshot,
+            nextSnapshot,
+          )
+        ) {
+          if (
+            !canTransitionAuditEvaluationStatus(
+              evaluationCase.status,
+              "GENERATING",
+            )
+          ) {
+            throw new ReviewServiceError("invalid_status_transition");
+          }
+          const reportId = createAuditEvaluationReportRunId(
+            input.caseId,
+            input.confirmationVersion,
+          );
+          if (
+            nextSnapshot.reportId !== reportId ||
+            nextSnapshot.evaluationId !== input.caseId ||
+            nextSnapshot.quoteRequestId !== evaluationCase.quoteRequestId ||
+            nextSnapshot.customerId !== input.actor.subjectId
+          ) {
+            throw new ReviewServiceError("report_conflict");
+          }
+          const regenerated = parseReport({
+            ...existing,
+            status: "PENDING",
+            requestedAt: input.now,
+            generationAttempt: 0,
+            generationStartedAt: null,
+            generationLeaseExpiresAt: null,
+            nhAuditEvaluationSnapshot: nextSnapshot,
+            htmlStoragePath: null,
+            renderingReference: null,
+            pdfStoragePath: null,
+            generatedAt: null,
+            generatedBy: input.actor,
+            failureCode: null,
+            failureMessage: null,
+          });
+          const updatedCase = parseCase({
+            ...evaluationCase,
+            status: "GENERATING",
+            latestReportVersion: regenerated.reportVersion,
+            reportRequestedConfirmationVersion: input.confirmationVersion,
+            updatedAt: input.now,
+            completedAt: null,
+          });
+          transaction.set(reportRef, regenerated, { merge: false });
+          transaction.set(caseRef, updatedCase, { merge: false });
+          createReviewAuditLog(transaction, this.db, {
+            caseId: input.caseId,
+            documentId: null,
+            reportVersion: regenerated.reportVersion,
+            action: "REPORT_GENERATION_REQUESTED",
+            actor: input.actor,
+            occurredAt: input.now,
+            detail: "nh_audit_snapshot_regenerated",
+          });
+          return {
+            evaluationCase: updatedCase,
+            report: regenerated,
+            replayed: false,
+          };
         }
         return {
           evaluationCase,

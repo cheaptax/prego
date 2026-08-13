@@ -273,7 +273,7 @@ describe("CMS administrator route security contract", () => {
     assert.match(publicLoader, /resolvePublishedPage\(repository, pageKey\)/);
     assert.match(
       preview,
-      /<CmsAdminConsole content=\{content\} previewMode \/>/,
+      /<CmsAdminConsole \{\.\.\.shared\} \/>/,
     );
 
     const consoleSource = readFileSync(

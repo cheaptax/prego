@@ -7,6 +7,7 @@ import {
   buildNhAuditReportEvaluationSnapshot,
   nhAuditReportEvaluationSnapshotSchema,
   nhAuditReportPreviewFromSnapshot,
+  nhAuditSnapshotNeedsRegeneration,
 } from "@/lib/audit-evaluation/nh-audit-report-snapshot";
 import { formatExactScoreOneDecimal } from "@/lib/audit-evaluation/nh-audit-v2-engine";
 import {
@@ -16,7 +17,10 @@ import {
 import type { NhAuditCustomerWeightsV2 } from "@/lib/audit-evaluation/nh-audit-v2-types";
 import { extractPdfText } from "@/lib/audit-evaluation/pdf-text-extractor";
 import { renderAuditEvaluationReportPdf } from "@/lib/audit-evaluation/report-pdf";
-import { buildDeterministicReportViewModel } from "@/lib/audit-evaluation/report-view-model";
+import {
+  buildDeterministicReportViewModel,
+  rebuildNhAuditReportViewModel,
+} from "@/lib/audit-evaluation/report-view-model";
 import {
   createReportFixture,
   REPORT_FIXTURE_NOW,
@@ -108,6 +112,152 @@ function build(
 }
 
 describe("NH audit report-specific evaluation snapshot", () => {
+  it("regenerates the report when quote fees change even if weights stay the same", () => {
+    const first = build([quote("a"), quote("b", {}, "20000000")]);
+    const second = build([quote("a"), quote("b", {}, "15000000")]);
+    assert.equal(nhAuditSnapshotNeedsRegeneration(first, first), false);
+    assert.equal(nhAuditSnapshotNeedsRegeneration(first, second), true);
+  });
+
+  it("marks quotes below 최저안전가격 as 저가부실수임 우려", () => {
+    const snapshot = buildNhAuditReportEvaluationSnapshot({
+      reportId: "case-a_v1",
+      evaluationId: "case-a",
+      quoteRequestId: "request-a",
+      customerId: "customer-a",
+      quotes: [
+        quote("safe", {}, "12500000"),
+        quote("samduk", {}, "12000000"),
+        quote("low", {}, "10000000"),
+      ],
+      weights: createDefaultNhAuditCustomerWeightsV2(),
+      now: NOW,
+      safePriceMinWon: "11300000",
+    });
+    assert.equal(
+      snapshot.quoteResults.find((result) => result.quoteId === "safe")
+        ?.lowPriceEngagementRisk,
+      undefined,
+    );
+    assert.equal(
+      snapshot.quoteResults.find((result) => result.quoteId === "samduk")
+        ?.lowPriceEngagementRisk,
+      undefined,
+    );
+    assert.equal(
+      snapshot.quoteResults.find((result) => result.quoteId === "low")
+        ?.lowPriceEngagementRisk,
+      true,
+    );
+    assert.equal(
+      snapshot.quoteResults.find((result) => result.quoteId === "low")
+        ?.eligibilityStatus,
+      "ELIGIBLE",
+    );
+    const fixture = createReportFixture();
+    const viewModel = buildDeterministicReportViewModel({
+      reportRun: {
+        ...fixture.reportRun,
+        nhAuditEvaluationSnapshot: snapshot,
+      },
+      evaluationCase: fixture.evaluationCase,
+      corrections: [],
+      generatedAt: REPORT_FIXTURE_NOW,
+    });
+    const comparison = viewModel.sections
+      .flatMap(({ blocks }) => blocks)
+      .find(({ id }) => id === "nh-audit-composite-comparison-rank");
+    assert.equal(comparison?.type, "TABLE");
+    if (comparison?.type === "TABLE") {
+      assert.deepEqual(comparison.columns, [
+        "순위",
+        "회계법인명",
+        "적격여부",
+        "담당회계사",
+        "예상 총부담액",
+        "최종 종합점수",
+      ]);
+      const lowRow = comparison.rows.find((row) =>
+        row.some((cell) => cell.includes("회계법인 low")),
+      );
+      const safeRow = comparison.rows.find((row) =>
+        row.some((cell) => cell.includes("회계법인 safe")),
+      );
+      assert.equal(lowRow?.[2], "우려");
+      assert.equal(safeRow?.[2], "적격");
+    }
+    assert.equal(
+      viewModel.sections.find(({ id }) => id === "fee-analysis")?.title,
+      "감사보수 분석",
+    );
+    assert.equal(
+      viewModel.sections.find(({ id }) => id === "firm-review")?.title,
+      "부적격·우려 견적 내역",
+    );
+    const excluded = viewModel.sections
+      .flatMap(({ blocks }) => blocks)
+      .find(({ id }) => id === "nh-audit-excluded-quotes");
+    assert.equal(excluded?.type, "TABLE");
+    if (excluded?.type === "TABLE") {
+      assert.equal(excluded.title, "평가제외·부적격·우려·재제출 필요 견적");
+      const listedLow = excluded.rows.find((row) =>
+        row.some((cell) => cell.includes("회계법인 low")),
+      );
+      const listedSafe = excluded.rows.find((row) =>
+        row.some((cell) => cell.includes("회계법인 safe")),
+      );
+      assert.deepEqual(listedLow?.slice(0, 4), [
+        "회계법인 low",
+        "회계법인",
+        "우려",
+        "저가부실수임 우려",
+      ]);
+      assert.equal(listedSafe, undefined);
+    }
+  });
+
+  it("applies the 저가부실수임 quality-score penalty before ranking", () => {
+    const snapshot = buildNhAuditReportEvaluationSnapshot({
+      reportId: "case-a_v1",
+      evaluationId: "case-a",
+      quoteRequestId: "request-a",
+      customerId: "customer-a",
+      quotes: [
+        quote("low", {}, "7500000"),
+        quote("second", {}, "7700000"),
+      ],
+      weights: createDefaultNhAuditCustomerWeightsV2(),
+      now: NOW,
+      safePriceMinWon: "7600000",
+    });
+    const low = snapshot.quoteResults.find((result) => result.quoteId === "low");
+    const second = snapshot.quoteResults.find(
+      (result) => result.quoteId === "second",
+    );
+    assert.equal(low?.lowPriceEngagementRisk, true);
+    assert.deepEqual(low?.priceBaseScore, {
+      numerator: "7500",
+      denominator: "77",
+    });
+    assert.deepEqual(low?.qualityScore, {
+      numerator: "1780",
+      denominator: "19",
+    });
+    assert.deepEqual(low?.overallScore, {
+      numerator: "139236",
+      denominator: "1463",
+    });
+    assert.equal(second?.lowPriceEngagementRisk, undefined);
+    assert.deepEqual(second?.priceBaseScore, {
+      numerator: "7500",
+      denominator: "77",
+    });
+    assert.deepEqual(second?.qualityScore, {
+      numerator: "100",
+      denominator: "1",
+    });
+  });
+
   it("stores default 60/40 weights and a reproducible server result", () => {
     const snapshot = build([quote("a"), quote("b", {}, "20000000")]);
     assert.equal(snapshot.weights.qualityWeightPercent, 60);
@@ -189,6 +339,23 @@ describe("NH audit report-specific evaluation snapshot", () => {
     );
   });
 
+  it("includes a complete 비제휴 견적 in ranking instead of excluding it by id", () => {
+    const partner = quote("eligible");
+    const external = quote("external_complete", {}, "11000000");
+    const snapshot = build([partner, external]);
+    assert.ok(snapshot.includedQuoteIds.includes("external_complete"));
+    assert.equal(
+      snapshot.quoteResults.find(({ quoteId }) => quoteId === "external_complete")
+        ?.eligibilityStatus,
+      "ELIGIBLE",
+    );
+    assert.notEqual(
+      snapshot.quoteResults.find(({ quoteId }) => quoteId === "external_complete")
+        ?.rank,
+      null,
+    );
+  });
+
   it("does not mutate source quotes or trust extra client score fields", () => {
     const quotes = [quote("immutable")];
     const before = structuredClone(quotes);
@@ -251,13 +418,122 @@ describe("NH audit report-specific evaluation snapshot", () => {
     assert.deepEqual(
       summary.blocks.map(({ id }) => id),
       [
+        "nh-audit-final-result",
+        "nh-audit-final-result-guidance",
         "nh-audit-report-summary",
         "nh-audit-weight-guidance",
       ],
     );
-    assert.equal(detail.blocks[0]?.id, "nh-audit-quality-detail");
+    assert.match(JSON.stringify(summary), /1위 회계법인/u);
+    assert.match(JSON.stringify(summary), /최종 종합점수/u);
+    assert.match(JSON.stringify(summary), /예상 총부담액/u);
+    assert.match(
+      JSON.stringify(summary),
+      /감사인 선임 안건을 검토할 때 이 회계법인의 점수와 예상 총부담액을 우선 참고/u,
+    );
+    const finalResult = summary.blocks.find(
+      ({ id }) => id === "nh-audit-final-result",
+    );
+    assert.equal(finalResult?.type, "KEY_VALUES");
+    if (finalResult?.type === "KEY_VALUES") {
+      assert.equal(finalResult.items[0]?.label, "1위 회계법인");
+      assert.match(finalResult.items[0]?.value ?? "", /회계법인 report/u);
+      assert.equal(finalResult.items[1]?.label, "최종 종합점수");
+      assert.equal(finalResult.items[2]?.label, "예상 총부담액");
+      assert.match(finalResult.items[2]?.value ?? "", /원/u);
+    }
+    assert.equal(detail.blocks[0]?.id, "nh-audit-quality-detail-input");
+    assert.equal(detail.blocks[1]?.id, "nh-audit-quality-detail-score");
+    assert.equal(
+      viewModel.sections.some(({ id }) => id === "appendix"),
+      false,
+    );
+    assert.equal(
+      viewModel.sections.find(({ id }) => id === "overall-opinion")?.title,
+      "계산 방법",
+    );
+    assert.doesNotMatch(JSON.stringify(viewModel), /저가격견적 표시 정책/u);
+    assert.doesNotMatch(
+      JSON.stringify(viewModel),
+      /안전마진|가격 기초점수/u,
+    );
+    assert.match(
+      JSON.stringify(viewModel),
+      /Prego AI가 최소 필수 투입 시간 등 원가를 고려해 검증/u,
+    );
+    assert.match(
+      JSON.stringify(viewModel),
+      /만점기준은 적격 견적 중 최저 예상 총부담액입니다/u,
+    );
+    assert.match(
+      JSON.stringify(viewModel),
+      /저가부실수임 우려 견적은 품질점수에서 감점 반영합니다/u,
+    );
+    assert.match(
+      JSON.stringify(viewModel),
+      /귀 농협이 설정한 배점과 가격과 품질 가중치를 반영한 최종 종합점수/u,
+    );
+    assert.match(JSON.stringify(viewModel), /회계법인 수행역량 비교/u);
+    assert.doesNotMatch(
+      JSON.stringify(viewModel),
+      /적격 회계법인 수행역량 입력값 비교/u,
+    );
+    assert.doesNotMatch(JSON.stringify(viewModel), /선정 검토 안내/u);
+    assert.doesNotMatch(
+      JSON.stringify(viewModel),
+      /만점기준은 Prego AI가 최소 필수 투입 시간/u,
+    );
+    const rebuilt = rebuildNhAuditReportViewModel({
+      reportRun: {
+        ...fixture.reportRun,
+        status: "COMPLETED",
+        generatedAt: REPORT_FIXTURE_NOW,
+        nhAuditEvaluationSnapshot: snapshot,
+      },
+      evaluationCase: fixture.evaluationCase,
+      storedViewModel: viewModel,
+    });
+    assert.doesNotMatch(JSON.stringify(rebuilt), /안전마진|가격 기초점수/u);
+    assert.match(
+      JSON.stringify(rebuilt),
+      /Prego AI가 최소 필수 투입 시간 등 원가를 고려해 검증/u,
+    );
+    const cover = viewModel.sections.find(({ id }) => id === "cover");
+    const purpose = viewModel.sections.find(({ id }) => id === "purpose-scope");
+    assert.doesNotMatch(
+      JSON.stringify(cover),
+      /보고서 ID|평가기준 버전|보고서 버전|"센터"|문의/u,
+    );
+    assert.match(JSON.stringify(purpose), /회계법인이 제공한 견적서/u);
+    assert.match(JSON.stringify(purpose), /총비용기준/u);
+    assert.doesNotMatch(
+      JSON.stringify(purpose),
+      /대표 비용값|지원자료 성격|확정본 기준|고객 확정 보고서별 평가 스냅샷/u,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(summary),
+      /적용 평가기준 버전|기본값 사용 여부/u,
+    );
+    if (detail.blocks[0]?.type === "TABLE") {
+      const namedRows = detail.blocks[0].rows.filter(
+        (row) => (row[0] ?? "").trim().length > 0,
+      );
+      if (detail.blocks[0].rows.length > namedRows.length) {
+        assert.ok(
+          detail.blocks[0].rows.some((row) => (row[0] ?? "") === ""),
+        );
+        assert.ok(
+          !detail.blocks[0].rows.some(
+            (row, index) =>
+              index > 0 &&
+              (row[0] ?? "") === "미확인" &&
+              (detail.blocks[0] as { rows: string[][] }).rows[index - 1]?.[0],
+          ),
+        );
+      }
+    }
     assert.match(JSON.stringify(viewModel), /기본 평가배점 적용/u);
-    assert.match(viewModel.metadata.downloadFilename, /테스트농협-FY2027/u);
+    assert.match(viewModel.metadata.downloadFilename, /테스트농협_FY2027 감사인견적평가보고서\.pdf$/u);
     const preview = nhAuditReportPreviewFromSnapshot(snapshot);
     assert.equal(
       adminView.cost?.expectedTotalBurdenWon,
@@ -402,6 +678,7 @@ describe("NH audit report-specific evaluation snapshot", () => {
         maximumTotalText: 2_000_000,
       });
       const pdfText = extracted.pages.map(({ text }) => text).join("\n");
+      assert.doesNotMatch(pdfText, /열 묶음/u, `${scenario.name}: no column groups`);
       assert.match(
         pdfText,
         scenario.expectedPdfText,
@@ -429,7 +706,7 @@ describe("NH audit report-specific evaluation snapshot", () => {
       );
       const comparison = viewModel.sections
         .flatMap(({ blocks }) => blocks)
-        .find(({ id }) => id === "nh-audit-composite-comparison");
+        .find(({ id }) => id === "nh-audit-composite-comparison-rank");
       assert.equal(comparison?.type, "TABLE");
       if (comparison?.type === "TABLE") {
         assert.equal(comparison.rows.length, eligible.length);
@@ -547,9 +824,46 @@ describe("NH audit report API and responsive UI contracts", () => {
     assert.match(component, /resetCompositeWeightsLabel/u);
     assert.match(component, /resetQualityWeightsLabel/u);
     assert.match(component, /disabled=\{!valid \|\| !preview \|\| busy\}/u);
+    assert.match(component, /is-frozen-1/u);
+    assert.match(component, /is-frozen-2 is-total-burden/u);
+    assert.match(component, /is-frozen-3 is-total-burden/u);
+    assert.match(
+      component,
+      /overallScoreLabel[\s\S]*totalBurdenLabel[\s\S]*finalRankLabel/u,
+    );
+    assert.match(
+      css,
+      /\.nh-audit-report-preview \.is-frozen-3[\s\S]*position: sticky/u,
+    );
+    assert.match(css, /--nh-freeze-firm:\s*10\.25rem/u);
+    assert.match(css, /--nh-freeze-score:\s*5\.15rem/u);
+    assert.match(css, /--nh-freeze-burden:\s*7rem/u);
+    assert.match(
+      css,
+      /\.audit-report-block dl > div:first-child[\s\S]*border-top:/u,
+    );
+    assert.match(css, /\.audit-report-block--result/u);
+    assert.match(component, /audit-report-block--result/u);
     assert.match(
       css,
       /@media \(max-width: 760px\)[\s\S]*\.nh-audit-report-settings__criteria/u,
+    );
+    const pdf = readFileSync(
+      path.join(root, "lib/audit-evaluation/report-pdf.tsx"),
+      "utf8",
+    );
+    assert.match(pdf, /keyValueRowFirst/u);
+    assert.match(pdf, /nh-audit-final-result/u);
+    assert.match(component, /reportTableCellClassName/u);
+    assert.match(css, /\.audit-report-table-wrap \.is-audit-count/u);
+    assert.match(css, /\.audit-report-table-wrap \.is-nowrap/u);
+    const reportPage = readFileSync(
+      path.join(root, "components/AuditEvaluationCustomerPage.tsx"),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      reportPage,
+      /event\.auditQuoteEvaluationReport",\s*"disclaimer"/u,
     );
   });
 });

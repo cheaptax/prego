@@ -6,6 +6,8 @@ export type PublicAuditQuoteConfig = {
   channel: string;
   pagePath: string;
   privacyPolicyHref: string;
+  /** Fixed intake fiscal year; applicants cannot change this value. */
+  fixedFiscalYear: number;
   guaranteeMinQuotes: boolean;
   showPointsBenefit: boolean;
   pointsBenefitBaseLabel: string | null;

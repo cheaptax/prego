@@ -27,6 +27,8 @@ export type AuditQuoteRequestRecord = {
   phone?: string;
   /** Required for schema v3 records; absent on legacy requests. */
   targetCooperativeName?: string;
+  /** Optional master cooperative id (schema v3+). */
+  targetCooperativeId?: string;
   fiscalYear?: number;
   status: AuditQuoteStatus;
   quoteCount: number;
@@ -57,6 +59,7 @@ export type SubmitAuditQuoteInput = {
   email: string;
   contactName: string;
   phone: string;
+  targetCooperativeId: string;
   targetCooperativeName: string;
   fiscalYear: number;
   privacyConsent: boolean;

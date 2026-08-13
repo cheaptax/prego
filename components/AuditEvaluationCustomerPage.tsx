@@ -6,10 +6,14 @@ import { useEffect, useState } from "react";
 import { AuditEvaluationReportWorkspace } from "@/components/AuditEvaluationReportWorkspace";
 import { AuditQuoteReviewWorkspace } from "@/components/AuditQuoteReviewWorkspace";
 import { AuditQuoteUploader } from "@/components/AuditQuoteUploader";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getCmsMessage, getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPageKey } from "@/lib/cms/constants";
-import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
-import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
 type CustomerPageState =
@@ -26,39 +30,11 @@ type CustomerPageState =
       reportAvailable: boolean;
     };
 
-type EditingProps = {
+type EditingProps = CmsSectionEditingOptions & {
   previewMode?: boolean;
-  editing?: boolean;
-  selectedSectionId?: string;
-  onSelectSection?: (sectionId: string) => void;
 };
 
-function editableSectionProps(
-  section: CmsSection,
-  className: string,
-  options: EditingProps,
-) {
-  const root = cmsSectionRootProps(section, className);
-  return {
-    ...root,
-    className: [
-      root.className,
-      options.editing ? "cms-home-edit-section" : "",
-      options.editing && options.selectedSectionId === section.id
-        ? "is-selected"
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" "),
-    tabIndex: options.editing ? 0 : undefined,
-    onClick: options.editing
-      ? () => options.onSelectSection?.(section.id)
-      : undefined,
-    onFocus: options.editing
-      ? () => options.onSelectSection?.(section.id)
-      : undefined,
-  };
-}
+const editableSectionProps = cmsEditableSectionProps;
 
 export function AuditEvaluationStartPage({
   content,
@@ -332,6 +308,13 @@ export function AuditEvaluationStartPage({
           <p className="login-card__lede">{security.description}</p>
         </section>
       </section>
+      <CmsSupplementalSections
+        pageKey="event.auditQuoteEvaluate"
+        content={content}
+        editing={editingProps.editing}
+        selectedSectionId={editingProps.selectedSectionId}
+        onSelectSection={editingProps.onSelectSection}
+      />
     </main>
   );
 }
@@ -471,7 +454,12 @@ export function AuditEvaluationCasePage({
               </ol>
             </div>
           </section>
-          {[privacy, disclaimer].map((section) => (
+          {[
+            privacy,
+            ...(editingProps.editing || editingProps.previewMode
+              ? [disclaimer]
+              : []),
+          ].map((section) => (
             <section
               key={section.id}
               {...editableSectionProps(
@@ -496,6 +484,13 @@ export function AuditEvaluationCasePage({
           />
         </>
       )}
+      <CmsSupplementalSections
+        pageKey="event.auditQuoteEvaluation"
+        content={content}
+        editing={editingProps.editing}
+        selectedSectionId={editingProps.selectedSectionId}
+        onSelectSection={editingProps.onSelectSection}
+      />
     </main>
   );
 }
@@ -626,11 +621,6 @@ export function AuditEvaluationReportPage({
     "event.auditQuoteEvaluationReport",
     "report",
   );
-  const disclaimer = getCmsSection(
-    content,
-    "event.auditQuoteEvaluationReport",
-    "disclaimer",
-  );
   return (
     <main id="main" className="policy-page audit-evaluation-page">
       <section
@@ -685,18 +675,6 @@ export function AuditEvaluationReportPage({
           )}
         </div>
       </section>
-      <section
-        {...editableSectionProps(
-          disclaimer,
-          "policy-section",
-          editingProps,
-        )}
-      >
-        <div className="policy-section__inner">
-          <h2>{disclaimer.title}</h2>
-          <p>{disclaimer.description}</p>
-        </div>
-      </section>
       {state.kind === "authorized" ? (
         <SessionExitButton
           label={getCmsMessage(
@@ -707,6 +685,13 @@ export function AuditEvaluationReportPage({
           previewMode={editingProps.previewMode}
         />
       ) : null}
+      <CmsSupplementalSections
+        pageKey="event.auditQuoteEvaluationReport"
+        content={content}
+        editing={editingProps.editing}
+        selectedSectionId={editingProps.selectedSectionId}
+        onSelectSection={editingProps.onSelectSection}
+      />
     </main>
   );
 }

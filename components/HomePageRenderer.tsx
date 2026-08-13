@@ -6,10 +6,14 @@ import { Expertise } from "@/components/Expertise";
 import { FAQ } from "@/components/FAQ";
 import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/Hero";
+import { HomePromoFloat } from "@/components/HomePromoFloat";
 import { Process } from "@/components/Process";
 import { Services } from "@/components/Services";
 import { Topbar } from "@/components/Topbar";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
 import { useCmsGlobals } from "@/components/cms/CmsGlobalsProvider";
+import { cmsSectionSelectionProps } from "@/lib/cms/editable-section";
+import { getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPublicGlobals } from "@/lib/cms/public-content";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 
@@ -113,7 +117,21 @@ export function HomePageRenderer({
       ) : null}
       <main id={mainId ?? undefined}>
         {content.sections.map((section) => {
+          if (section.deleted && !editing) return null;
           if (!section.visible && !editing) return null;
+          if (
+            ![
+              "hero",
+              "about",
+              "expertise",
+              "services",
+              "process",
+              "caseStudies",
+              "faqPreview",
+            ].includes(section.id)
+          ) {
+            return null;
+          }
           const rendered = (
             <HomeSection
               section={section}
@@ -122,29 +140,38 @@ export function HomePageRenderer({
             />
           );
           if (!editing) return rendered;
+          const editableProps = cmsSectionSelectionProps(section, "", {
+            editing,
+            selectedSectionId,
+            onSelectSection,
+          });
           return (
             <div
-              className={`cms-home-edit-section${selectedSectionId === section.id ? " is-selected" : ""}${!section.visible ? " is-hidden" : ""}`}
+              {...editableProps}
               key={section.id}
-              onClick={() => onSelectSection?.(section.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onSelectSection?.(section.id);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              aria-label={`${section.title} 영역 편집 설정 열기`}
             >
               {rendered}
             </div>
           );
         })}
+        <CmsSupplementalSections
+          pageKey="home"
+          content={content}
+          assetUrls={combinedAssetUrls}
+          editing={editing}
+          selectedSectionId={selectedSectionId}
+          onSelectSection={onSelectSection}
+        />
       </main>
       {!overrides?.footer?.hidden ? (
         <Footer content={globals.footer} />
       ) : null}
+      <HomePromoFloat
+        section={getCmsSection(content, "home", "promoFloat")}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </div>
   );
 }

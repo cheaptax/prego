@@ -261,10 +261,159 @@ export class AuditEvaluationCustomerAccessService {
       input.now,
     );
     if (!eligible) return null;
-    const evaluationCase = await this.createOrGetEligibleCase(
+    return this.issueSessionForEligibleCase(
       eligible,
       { type: "FIREBASE_UID", uid: input.uid },
       input.now,
+    );
+  }
+
+  /**
+   * Quote-inbox bridge: ownership already proven by requireQuoteInboxMember +
+   * canCustomerReadQuoteRequest. Allows temporary quote members as well.
+   */
+  async createQuoteInboxCustomerSession(input: {
+    uid: string;
+    email: string;
+    auditQuoteRequestId: string;
+    now: string;
+  }): Promise<AuditEvaluationSessionGrant | null> {
+    assertAuditEvaluationCapabilityEnabled(
+      "customerEntryEnabled",
+      this.flags,
+    );
+    const source = await this.repository.getQuoteRequestById(
+      input.auditQuoteRequestId,
+    );
+    if (
+      !source ||
+      source.record.status === "closed" ||
+      source.record.status === "invalid"
+    ) {
+      return null;
+    }
+    const normalizedEmail = normalizeEmail(input.email);
+    const requestEmail = normalizeEmail(source.record.email ?? "");
+    const uidMatches = Boolean(
+      source.record.customerUid &&
+        source.record.customerUid === input.uid,
+    );
+    const emailMatches = Boolean(
+      normalizedEmail &&
+        requestEmail &&
+        normalizedEmail === requestEmail,
+    );
+    if (!uidMatches && !emailMatches) {
+      return null;
+    }
+    const config = await this.repository.getActiveEvaluationConfig(input.now);
+    if (!config) return null;
+    const standardQuotes =
+      await this.repository.listStandardQuotesForRequest(
+        source.record.requestId,
+      );
+    const hasQuote =
+      source.record.quoteCount > 0 || standardQuotes.length > 0;
+    if (
+      !hasQuote &&
+      !config.customerAccessPolicy.allowUploadWhenNoRegisteredQuotes
+    ) {
+      return null;
+    }
+    const eligible = {
+      source,
+      config,
+      standardQuotes,
+      mappingId: auditEvaluationCaseMappingId(
+        source.record.requestId,
+        this.accessSecret,
+      ),
+    };
+    return this.issueSessionForEligibleCase(
+      eligible,
+      { type: "FIREBASE_UID", uid: input.uid },
+      input.now,
+    );
+  }
+
+  async peekComparisonForAuditQuoteRequest(
+    auditQuoteRequestId: string,
+    now: string,
+  ): Promise<{
+    entryEnabled: boolean;
+    caseId: string | null;
+    status: string | null;
+    reportAvailable: boolean;
+    reportWorkspaceReady: boolean;
+  }> {
+    const entryEnabled = this.flags.enabled && this.flags.customerEntryEnabled;
+    if (!entryEnabled || !auditQuoteRequestId) {
+      return {
+        entryEnabled: false,
+        caseId: null,
+        status: null,
+        reportAvailable: false,
+        reportWorkspaceReady: false,
+      };
+    }
+    try {
+      const mappingId = auditEvaluationCaseMappingId(
+        auditQuoteRequestId,
+        this.accessSecret,
+      );
+      const existing = await this.repository.getCaseByMappingId(mappingId);
+      if (
+        !existing ||
+        existing.status === "DELETED" ||
+        existing.status === "EXPIRED" ||
+        Date.parse(existing.expiresAt) <= Date.parse(now)
+      ) {
+        return {
+          entryEnabled: true,
+          caseId: null,
+          status: null,
+          reportAvailable: false,
+          reportWorkspaceReady: false,
+        };
+      }
+      return {
+        entryEnabled: true,
+        caseId: existing.id,
+        status: existing.status,
+        reportAvailable:
+          this.flags.reportDownloadEnabled &&
+          existing.status === "COMPLETED",
+        reportWorkspaceReady:
+          this.flags.reportDownloadEnabled &&
+          (existing.status === "READY" ||
+            existing.status === "GENERATING" ||
+            existing.status === "COMPLETED"),
+      };
+    } catch {
+      return {
+        entryEnabled: false,
+        caseId: null,
+        status: null,
+        reportAvailable: false,
+        reportWorkspaceReady: false,
+      };
+    }
+  }
+
+  private async issueSessionForEligibleCase(
+    eligible: {
+      source: AuditQuoteAccessSource;
+      config: EvaluationConfig;
+      standardQuotes: StandardQuoteDocumentRecord[];
+      mappingId: string;
+    },
+    owner: CustomerAccessOwner,
+    now: string,
+  ): Promise<AuditEvaluationSessionGrant | null> {
+    const evaluationCase = await this.createOrGetEligibleCase(
+      eligible,
+      owner,
+      now,
     );
     if (!evaluationCase) return null;
 
@@ -275,11 +424,11 @@ export class AuditEvaluationCustomerAccessService {
         this.accessSecret,
       ),
       caseId: evaluationCase.id,
-      owner: { type: "FIREBASE_UID", uid: input.uid },
-      createdAt: input.now,
+      owner,
+      createdAt: now,
       expiresAt: earlierIso(
         addMinutes(
-          input.now,
+          now,
           eligible.config.customerAccessPolicy.sessionLifetimeMinutes,
         ),
         evaluationCase.expiresAt,
@@ -445,11 +594,13 @@ export class AuditEvaluationCustomerAccessService {
       id: createAuditEvaluationCaseId(),
       quoteRequestId: eligible.source.record.requestId,
       cooperativeId: null,
-      cooperativeNameSnapshot: "",
+      cooperativeNameSnapshot:
+        eligible.source.record.targetCooperativeName?.trim() ?? "",
       fiscalYear: inferFiscalYear(
         firstStandardQuote,
         eligible.config.effectiveFrom,
         now,
+        eligible.source.record.fiscalYear,
       ),
       customerAccessOwner: owner,
       status: "ACCESS_PENDING",
@@ -523,7 +674,16 @@ function inferFiscalYear(
   standardQuote: StandardQuoteDocumentRecord | null,
   effectiveFrom: string | null,
   now: string,
+  requestFiscalYear?: number,
 ) {
+  if (
+    Number.isInteger(requestFiscalYear) &&
+    requestFiscalYear !== undefined &&
+    requestFiscalYear >= 2_000 &&
+    requestFiscalYear <= 9_999
+  ) {
+    return requestFiscalYear;
+  }
   if (standardQuote) return standardQuote.fiscalYear;
   return new Date(effectiveFrom ?? now).getUTCFullYear();
 }

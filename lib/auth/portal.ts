@@ -31,6 +31,9 @@ export type AuthenticatedAccountContext = {
   partnerId?: string;
   permissions: AdminPermission[];
   defaultPortal: PortalType;
+  /** Present only for allowlisted multi-role test accounts. */
+  enabledPortals?: PortalType[];
+  multiRoleTestAccount?: boolean;
 };
 
 export type PortalAccessResult = {
@@ -85,30 +88,50 @@ export function getLoginPathForPortal(portal: PortalType) {
   return PORTAL_LOGIN_PATHS[portal];
 }
 
-export function getPostLoginPath(account: AuthenticatedAccountContext) {
+export function getPostLoginPath(
+  account: AuthenticatedAccountContext,
+  requestedPortal?: PortalType,
+) {
+  const portal =
+    requestedPortal && canAccessPortal(account, requestedPortal)
+      ? requestedPortal
+      : getDefaultPortal(account);
   if (
-    account.accountType === "CUSTOMER" &&
+    portal === "customer" &&
     account.customerAccessLevel === "QUOTE_ONLY"
   ) {
     return "/mypage/quotes";
   }
   if (
-    account.accountType === "CUSTOMER" &&
+    portal === "customer" &&
     account.status === "INVITED"
   ) {
     return "/pending-approval";
   }
-  return account.status === "ACTIVE" ? getPortalHomePath(account) : null;
+  if (account.status !== "ACTIVE" && !(portal === "customer" && account.status === "INVITED")) {
+    return null;
+  }
+  return PORTAL_HOME_PATHS[portal];
 }
 
 export function canAccessPortal(
   account: AuthenticatedAccountContext,
   portal: PortalType,
 ) {
-  return (
-    account.status === "ACTIVE" &&
-    getDefaultPortal(account) === portal
-  );
+  const approvalPending =
+    account.accountType === "CUSTOMER" && account.status === "INVITED";
+  const activeEnough =
+    account.status === "ACTIVE" ||
+    (portal === "customer" && approvalPending);
+  if (!activeEnough) return false;
+  if (
+    account.multiRoleTestAccount &&
+    account.enabledPortals &&
+    account.enabledPortals.length > 0
+  ) {
+    return account.enabledPortals.includes(portal);
+  }
+  return getDefaultPortal(account) === portal;
 }
 
 export function getPortalMismatchResult(
@@ -116,9 +139,10 @@ export function getPortalMismatchResult(
   requestedPortal: PortalType,
 ): PortalAccessResult {
   const defaultPortal = getDefaultPortal(account);
-  const redirectPath = getPostLoginPath(account);
+  const redirectPath = getPostLoginPath(account, requestedPortal);
   const approvalPending =
-    account.accountType === "CUSTOMER" &&
+    (account.accountType === "CUSTOMER" ||
+      Boolean(account.enabledPortals?.includes("customer"))) &&
     account.status === "INVITED";
 
   if (account.status !== "ACTIVE" && !approvalPending) {
@@ -131,23 +155,23 @@ export function getPortalMismatchResult(
     };
   }
 
-  if (defaultPortal !== requestedPortal) {
+  if (!canAccessPortal(account, requestedPortal)) {
     return {
       allowed: false,
       reason: "portal_mismatch",
       requestedPortal,
       defaultPortal,
-      redirectPath,
+      redirectPath: getPostLoginPath(account),
     };
   }
 
-  if (approvalPending) {
+  if (approvalPending && requestedPortal === "customer") {
     return {
       allowed: false,
       reason: "approval_pending",
       requestedPortal,
       defaultPortal,
-      redirectPath,
+      redirectPath: "/pending-approval",
     };
   }
 

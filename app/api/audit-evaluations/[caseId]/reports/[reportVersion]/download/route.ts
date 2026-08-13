@@ -6,6 +6,7 @@ import {
   ReportServiceError,
   reportServiceErrorStatus,
 } from "@/lib/audit-evaluation/report-service";
+import { buildAttachmentContentDisposition } from "@/lib/quotes/quote-pdf-filename";
 
 export const runtime = "nodejs";
 
@@ -32,14 +33,35 @@ export async function GET(request: NextRequest, { params }: Props) {
       { status: 404 },
     );
   }
+  const inline =
+    request.nextUrl.searchParams.get("inline") === "1" ||
+    request.nextUrl.searchParams.get("disposition") === "inline";
   try {
-    const download = await new AuditEvaluationReportService()
-      .createDownload({
+    const service = new AuditEvaluationReportService();
+    const now = new Date().toISOString();
+    if (inline) {
+      const pdf = await service.readCustomerPdf({
         caseId,
         reportVersion,
         actor: access.actor,
-        now: new Date().toISOString(),
+        now,
       });
+      return new NextResponse(Buffer.from(pdf.bytes), {
+        status: 200,
+        headers: {
+          "content-type": "application/pdf",
+          "content-disposition": inlineContentDisposition(pdf.fileName),
+          "cache-control": "private, no-store",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    }
+    const download = await service.createDownload({
+      caseId,
+      reportVersion,
+      actor: access.actor,
+      now,
+    });
     return NextResponse.redirect(download.url, {
       status: 307,
       headers: {
@@ -72,4 +94,11 @@ function attachmentContentDisposition(fileName: string, version: number) {
       `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
   return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
+}
+
+function inlineContentDisposition(fileName: string) {
+  return buildAttachmentContentDisposition(fileName).replace(
+    /^attachment;/u,
+    "inline;",
+  );
 }

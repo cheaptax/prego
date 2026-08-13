@@ -1,4 +1,5 @@
 import { adminStorage } from "@/lib/firebase/admin";
+import { buildAttachmentContentDisposition } from "@/lib/quotes/quote-pdf-filename";
 
 export async function saveQuotePdf(input: {
   quoteId: string;
@@ -57,15 +58,6 @@ export async function createQuoteDownloadUrl(input: {
   fileName: string;
   expiresAt: Date;
 }) {
-  const normalizedFileName = input.fileName
-    .normalize("NFKC")
-    .replace(/[^a-zA-Z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .slice(0, 100);
-  const safeFileName =
-    normalizedFileName.toLowerCase().endsWith(".pdf")
-      ? normalizedFileName
-      : `${normalizedFileName || "quote"}.pdf`;
   const [url] = await adminStorage()
     .bucket()
     .file(input.storagePath)
@@ -73,7 +65,7 @@ export async function createQuoteDownloadUrl(input: {
       version: "v4",
       action: "read",
       expires: input.expiresAt,
-      responseDisposition: `attachment; filename="${safeFileName}"`,
+      responseDisposition: buildAttachmentContentDisposition(input.fileName),
       responseType: "application/pdf",
     });
   return url;

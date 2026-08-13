@@ -8,6 +8,15 @@ export const PRIGO_TEST_SCENARIO_ID = "prigo-signup-v1";
 export const PREGO_COOPERATIVE_ID = "demo-prego-nh";
 export const PREGO_COOPERATIVE_INTERNAL_CODE = "DEMO_PREGO_NH";
 export const PREGO_TEST_SCENARIO_ID = "prego-prelaunch-dummy-v1";
+export const JAEGYEONG_COOPERATIVE_ID = "demo-jaegyeong-nh";
+export const JAEGYEONG_COOPERATIVE_INTERNAL_CODE = "DEMO_JAEGYEONG_NH";
+export const JAEGYEONG_TEST_SCENARIO_ID = "jaegyeong-signup-v1";
+export const SEONGMIN_COOPERATIVE_ID = "demo-seongmin-nh";
+export const SEONGMIN_COOPERATIVE_INTERNAL_CODE = "DEMO_SEONGMIN_NH";
+export const SEONGMIN_TEST_SCENARIO_ID = "seongmin-signup-v1";
+export const JIHYE_COOPERATIVE_ID = "demo-jihye-nh";
+export const JIHYE_COOPERATIVE_INTERNAL_CODE = "DEMO_JIHYE_NH";
+export const JIHYE_TEST_SCENARIO_ID = "jihye-signup-v1";
 export const DEMO_COOPERATIVE_SEED_ACTOR = "seed:demo-cooperative";
 
 export type DataClassification = "PRODUCTION" | "DEMO" | "TEST";
@@ -34,6 +43,27 @@ export const TEST_COOPERATIVE_DEFINITIONS = [
     internalCode: PREGO_COOPERATIVE_INTERNAL_CODE,
     testScenarioId: PREGO_TEST_SCENARIO_ID,
     address: "배포 전 더미 계정 통합용 가상 농협",
+  },
+  {
+    cooperativeId: JAEGYEONG_COOPERATIVE_ID,
+    cooperativeName: "재경농협",
+    internalCode: JAEGYEONG_COOPERATIVE_INTERNAL_CODE,
+    testScenarioId: JAEGYEONG_TEST_SCENARIO_ID,
+    address: "견적·회원가입 테스트용 가상 농협",
+  },
+  {
+    cooperativeId: SEONGMIN_COOPERATIVE_ID,
+    cooperativeName: "성민농협",
+    internalCode: SEONGMIN_COOPERATIVE_INTERNAL_CODE,
+    testScenarioId: SEONGMIN_TEST_SCENARIO_ID,
+    address: "견적·회원가입 테스트용 가상 농협",
+  },
+  {
+    cooperativeId: JIHYE_COOPERATIVE_ID,
+    cooperativeName: "지혜농협",
+    internalCode: JIHYE_COOPERATIVE_INTERNAL_CODE,
+    testScenarioId: JIHYE_TEST_SCENARIO_ID,
+    address: "견적·회원가입 테스트용 가상 농협",
   },
 ] as const;
 

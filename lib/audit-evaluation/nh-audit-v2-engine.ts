@@ -1,5 +1,6 @@
 import {
   normalizeWonAmount,
+  roundWonHalfUpToHundredThousand,
 } from "@/lib/audit-evaluation/money";
 import {
   NH_AUDIT_COUNT_RECOGNITION_BANDS,
@@ -35,6 +36,8 @@ import type { WonAmount } from "@/lib/audit-evaluation/types";
 const BASIS_POINTS = 10_000n;
 const PERCENT = 100n;
 const VAT_RATE_BASIS_POINTS = 1_000n;
+/** 가격 만점 기준 = 최저안전마진 − 10만원 */
+const PRICE_FULL_SCORE_UNDERCUT_WON = 100_000n;
 
 export class NhAuditEvaluationV2Error extends Error {
   readonly code: string;
@@ -129,6 +132,10 @@ export function calculateNhAuditExpectedCostV2(
 
 export function calculateNhAuditPriceBaseScoresV2(
   candidates: readonly NhAuditPriceCandidate[],
+  options?: {
+    excludeFromMinimumIds?: ReadonlySet<string>;
+    fullScoreReferenceBurdenWon?: bigint | null;
+  },
 ): NhAuditPriceScoreResult {
   assertUniqueCandidateIds(candidates);
   const eligible = candidates.flatMap((candidate) => {
@@ -147,13 +154,34 @@ export function calculateNhAuditPriceBaseScoresV2(
       scoresByCandidateId: {},
     };
   }
-  const minimum = eligible.reduce(
+  const excluded = options?.excludeFromMinimumIds ?? new Set<string>();
+  const referencePool = eligible.filter(
+    (candidate) => !excluded.has(candidate.candidateId),
+  );
+  const minAll = eligible.reduce(
     (current, candidate) =>
       candidate.total < current ? candidate.total : current,
     eligible[0].total,
   );
+  const minClean =
+    referencePool.length > 0
+      ? referencePool.reduce(
+          (current, candidate) =>
+            candidate.total < current ? candidate.total : current,
+          referencePool[0].total,
+        )
+      : minAll;
+  const configuredReference = options?.fullScoreReferenceBurdenWon;
+  const minimum =
+    configuredReference && configuredReference > 0n
+      ? configuredReference
+      : minClean;
   const scoresByCandidateId: Record<string, ExactScore> = {};
   for (const candidate of eligible) {
+    if (minimum >= candidate.total) {
+      scoresByCandidateId[candidate.candidateId] = exactScore(PERCENT, 1n);
+      continue;
+    }
     scoresByCandidateId[candidate.candidateId] = exactScore(
       PERCENT * minimum,
       candidate.total,
@@ -206,6 +234,7 @@ export function calculateNhAuditCompositeComponentsV2(
 export function evaluateNhAuditQuoteCandidatesV2(
   candidates: readonly PreparedNhAuditCandidate[],
   customerWeights: NhAuditCustomerWeightsV2,
+  options?: { safePriceMinWon?: string | null },
 ): NhAuditQuoteEvaluationResultV2[] {
   const weights = parseWeights(customerWeights);
   assertUniqueCandidateIds(candidates);
@@ -241,6 +270,13 @@ export function evaluateNhAuditQuoteCandidatesV2(
     } satisfies NhAuditQuoteEvaluationResultV2;
   });
 
+  const flaggedIds = new Set(
+    evaluated.flatMap((result) =>
+      isLowPriceEngagementRisk(result, options?.safePriceMinWon)
+        ? [result.candidateId]
+        : [],
+    ),
+  );
   const priceResult = calculateNhAuditPriceBaseScoresV2(
     evaluated.map((result) => ({
       candidateId: result.candidateId,
@@ -248,6 +284,12 @@ export function evaluateNhAuditQuoteCandidatesV2(
       expectedTotalBurdenWon:
         result.cost?.expectedTotalBurdenWon ?? null,
     })),
+    {
+      excludeFromMinimumIds: flaggedIds,
+      fullScoreReferenceBurdenWon: priceFullScoreReferenceBurdenWon(
+        options?.safePriceMinWon,
+      ),
+    },
   );
   const scored = evaluated.map((result) => {
     const priceBaseScore =
@@ -267,7 +309,17 @@ export function evaluateNhAuditQuoteCandidatesV2(
           : null,
     };
   });
-  return rankNhAuditEvaluationResultsV2(scored);
+  return rankNhAuditEvaluationResultsV2(
+    applyLowPriceEngagementPricePenalty(
+      capLowPriceEngagementPriceAtCleanMaximum(
+        scored,
+        flaggedIds,
+        weights,
+      ),
+      weights,
+      options,
+    ),
+  );
 }
 
 export function compareNhAuditRankKeysV2(
@@ -276,6 +328,157 @@ export function compareNhAuditRankKeysV2(
 ): number {
   return compareSpecifiedRankKeys(left, right) ||
     compareText(left.candidateId, right.candidateId);
+}
+
+/**
+ * 저가부실수임 우려 견적의 가격 원점수는 우려가 아닌 적격 법인 최고점을 넘지 않는다.
+ */
+function capLowPriceEngagementPriceAtCleanMaximum(
+  results: readonly NhAuditQuoteEvaluationResultV2[],
+  flaggedIds: ReadonlySet<string>,
+  weights: NhAuditCustomerWeightsV2,
+): NhAuditQuoteEvaluationResultV2[] {
+  if (flaggedIds.size === 0) return [...results];
+  const cleanScores = results.flatMap((result) =>
+    result.eligibilityStatus === "ELIGIBLE" &&
+      result.priceBaseScore &&
+      !flaggedIds.has(result.candidateId)
+      ? [result.priceBaseScore]
+      : [],
+  );
+  if (cleanScores.length === 0) return [...results];
+  const cleanMaximum = cleanScores.reduce((current, score) =>
+    compareExactScores(score, current) > 0 ? score : current
+  );
+  return results.map((result) => {
+    if (
+      !flaggedIds.has(result.candidateId) ||
+      !result.priceBaseScore ||
+      compareExactScores(result.priceBaseScore, cleanMaximum) <= 0
+    ) {
+      return result;
+    }
+    return {
+      ...result,
+      priceBaseScore: cleanMaximum,
+      overallScore:
+        result.quality
+          ? calculateNhAuditOverallScoreV2(
+              result.quality.qualityScore,
+              cleanMaximum,
+              weights,
+            )
+          : result.overallScore,
+    };
+  });
+}
+
+/**
+ * 저가부실수임 우려 견적의 품질 점수만 감점한다. 가격 원점수는 유지한다.
+ * A = 해당 기업 감사보수, B = 프리고 안전마진(최저안전가격).
+ * 감점조정율 = 1.05 − A/B, 최대 80%. A·B는 10만원 단위 반올림.
+ */
+function applyLowPriceEngagementPricePenalty(
+  results: readonly NhAuditQuoteEvaluationResultV2[],
+  weights: NhAuditCustomerWeightsV2,
+  options?: { safePriceMinWon?: string | null },
+): NhAuditQuoteEvaluationResultV2[] {
+  const safePriceMinWon = options?.safePriceMinWon?.trim() || null;
+  if (!safePriceMinWon) return [...results];
+  const roundedB = roundWonHalfUpToHundredThousand(BigInt(safePriceMinWon));
+  if (roundedB <= 0n) return [...results];
+
+  return results.map((result) => {
+    if (
+      !isLowPriceEngagementRisk(result, safePriceMinWon) ||
+      !result.priceBaseScore ||
+      !result.quality ||
+      !result.cost?.auditFeeWon
+    ) {
+      return result;
+    }
+    const roundedA = roundWonHalfUpToHundredThousand(
+      BigInt(result.cost.auditFeeWon),
+    );
+    if (roundedA <= 0n) return result;
+    const factor = lowPricePenaltyFactor(roundedA, roundedB);
+    if (!factor) return result;
+    const qualityScore = scaleExactScore(
+      result.quality.qualityScore,
+      factor,
+    );
+    return {
+      ...result,
+      quality: {
+        ...result.quality,
+        qualityScore,
+        criteria: result.quality.criteria.map((criterion) => ({
+          ...criterion,
+          earnedScore: scaleExactScore(criterion.earnedScore, factor),
+        })),
+      },
+      overallScore: calculateNhAuditOverallScoreV2(
+        qualityScore,
+        result.priceBaseScore,
+        weights,
+      ),
+    };
+  });
+}
+
+function priceFullScoreReferenceBurdenWon(safePriceMinWon?: string | null) {
+  const safeMin = safePriceMinWon?.trim();
+  if (!safeMin) return null;
+  const referenceFee = BigInt(safeMin) - PRICE_FULL_SCORE_UNDERCUT_WON;
+  if (referenceFee <= 0n) return null;
+  return expectedTotalBurdenFromAuditFee(referenceFee);
+}
+
+function expectedTotalBurdenFromAuditFee(auditFeeWon: bigint) {
+  const vat = divideHalfUp(
+    auditFeeWon * VAT_RATE_BASIS_POINTS,
+    BASIS_POINTS,
+  );
+  return auditFeeWon + vat;
+}
+
+function isLowPriceEngagementRisk(
+  result: NhAuditQuoteEvaluationResultV2,
+  safePriceMinWon?: string | null,
+) {
+  if (!safePriceMinWon || result.eligibilityStatus !== "ELIGIBLE") {
+    return false;
+  }
+  const auditFeeWon = result.cost?.auditFeeWon;
+  return (
+    auditFeeWon !== null &&
+    auditFeeWon !== undefined &&
+    BigInt(auditFeeWon) < BigInt(safePriceMinWon)
+  );
+}
+
+/**
+ * 감점조정율 = min(80%, max(0, 1.05 − A/B)).
+ * 적용배수 = 1 − 율 = max(20%, (20A − B) / (20B)).
+ */
+function lowPricePenaltyFactor(
+  roundedA: bigint,
+  roundedB: bigint,
+): { numerator: bigint; denominator: bigint } | null {
+  const numerator = 20n * roundedA - roundedB;
+  const denominator = 20n * roundedB;
+  if (numerator >= denominator) return null;
+  if (numerator <= 0n || 20n * roundedA <= 5n * roundedB) {
+    return { numerator: 1n, denominator: 5n };
+  }
+  return { numerator, denominator };
+}
+
+function scaleExactScore(
+  score: ExactScore,
+  factor: { numerator: bigint; denominator: bigint },
+) {
+  return multiplyExactScore(score, factor.numerator, factor.denominator);
 }
 
 export function rankNhAuditEvaluationResultsV2(
@@ -338,9 +541,22 @@ export function rankNhAuditEvaluationResultsV2(
     .sort((left, right) => {
       const leftRank = left.rank ?? Number.MAX_SAFE_INTEGER;
       const rightRank = right.rank ?? Number.MAX_SAFE_INTEGER;
-      return leftRank - rightRank ||
-        compareText(left.candidateId, right.candidateId);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      const statusDelta =
+        eligibilityDisplayOrder(left.eligibilityStatus) -
+        eligibilityDisplayOrder(right.eligibilityStatus);
+      if (statusDelta !== 0) return statusDelta;
+      return compareText(left.candidateId, right.candidateId);
     });
+}
+
+/** 순위 있는 적격 견적 다음, 부적격(감사반)은 최하단 */
+function eligibilityDisplayOrder(status: NhAuditEligibilityStatus) {
+  if (status === "ELIGIBLE") return 0;
+  if (status === "EXCLUDED") return 1;
+  if (status === "RESUBMISSION_REQUIRED") return 2;
+  if (status === "INELIGIBLE") return 3;
+  return 4;
 }
 
 export function compareExactScores(

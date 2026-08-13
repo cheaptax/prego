@@ -14,9 +14,11 @@ import {
   FirebaseAuditEvaluationReportStorage,
   type AuditEvaluationReportStorage,
 } from "@/lib/audit-evaluation/report-storage";
-import { safeReportDownloadFilename } from "@/lib/audit-evaluation/report-view-model";
-import type { AuditEvaluationActor } from "@/lib/audit-evaluation/types";
 import { nhAuditReportPreviewFromSnapshot } from "@/lib/audit-evaluation/nh-audit-report-snapshot";
+import {
+  rebuildNhAuditReportViewModel,
+  safeReportDownloadFilename,
+} from "@/lib/audit-evaluation/report-view-model";
 
 export class ReportServiceError extends Error {
   readonly code: string;
@@ -95,9 +97,21 @@ export class AuditEvaluationReportService {
         versions,
       };
     }
-    const viewModel = report.status === "COMPLETED"
+    const storedViewModel = report.status === "COMPLETED"
       ? await this.generationService.loadViewModel(report)
       : null;
+    let viewModel = storedViewModel;
+    if (report.status === "COMPLETED" && report.nhAuditEvaluationSnapshot) {
+      try {
+        viewModel = rebuildNhAuditReportViewModel({
+          reportRun: report,
+          evaluationCase: latest.evaluationCase,
+          storedViewModel,
+        });
+      } catch {
+        viewModel = storedViewModel;
+      }
+    }
     if (report.status === "COMPLETED" && !viewModel) {
       throw new ReportServiceError("report_payload_unavailable");
     }
@@ -131,6 +145,62 @@ export class AuditEvaluationReportService {
     actor: Extract<AuditEvaluationActor, { type: "CUSTOMER" }>;
     now: string;
   }) {
+    const access = await this.resolveCustomerPdfAccess(input);
+    const lifetimeSeconds = Math.min(
+      300,
+      Math.max(
+        30,
+        access.report.evaluationConfigSnapshot.reportRenderingPolicy
+          ?.downloadUrlLifetimeSeconds ?? 60,
+      ),
+    );
+    const expiresAt = new Date(
+      Date.parse(input.now) + lifetimeSeconds * 1_000,
+    ).toISOString();
+    const url = await this.storage.createDownloadUrl({
+      storagePath: access.storagePath,
+      expiresAt,
+      fileName: access.fileName,
+    });
+    await this.repository.recordDownload({
+      caseId: input.caseId,
+      reportVersion: input.reportVersion,
+      actor: input.actor,
+      downloadedAt: input.now,
+    });
+    return { url, expiresAt, fileName: access.fileName };
+  }
+
+  /** Same PDF bytes as download — for inline browser print (identical layout). */
+  async readCustomerPdf(input: {
+    caseId: string;
+    reportVersion: number;
+    actor: Extract<AuditEvaluationActor, { type: "CUSTOMER" }>;
+    now: string;
+  }) {
+    const access = await this.resolveCustomerPdfAccess(input);
+    const bytes = await this.storage.read(
+      access.storagePath,
+      20 * 1024 * 1024,
+    );
+    if (!bytes || bytes.byteLength === 0) {
+      throw new ReportServiceError("report_payload_unavailable");
+    }
+    await this.repository.recordDownload({
+      caseId: input.caseId,
+      reportVersion: input.reportVersion,
+      actor: input.actor,
+      downloadedAt: input.now,
+    });
+    return { bytes, fileName: access.fileName };
+  }
+
+  private async resolveCustomerPdfAccess(input: {
+    caseId: string;
+    reportVersion: number;
+    actor: Extract<AuditEvaluationActor, { type: "CUSTOMER" }>;
+    now: string;
+  }) {
     this.assertEnabled();
     const latest = await this.repository.getLatestReport(input.caseId);
     if (!latest) throw new ReportServiceError("report_not_found");
@@ -159,14 +229,6 @@ export class AuditEvaluationReportService {
     ) {
       throw new ReportServiceError("report_download_expired");
     }
-    const lifetimeSeconds = Math.min(
-      300,
-      Math.max(
-        30,
-        report.evaluationConfigSnapshot.reportRenderingPolicy
-          ?.downloadUrlLifetimeSeconds ?? 60,
-      ),
-    );
     const fileName = safeReportDownloadFilename(
       latest.evaluationCase.fiscalYear,
       report.reportVersion,
@@ -174,21 +236,11 @@ export class AuditEvaluationReportService {
       report.caseId,
       latest.evaluationCase.cooperativeNameSnapshot,
     );
-    const expiresAt = new Date(
-      Date.parse(input.now) + lifetimeSeconds * 1_000,
-    ).toISOString();
-    const url = await this.storage.createDownloadUrl({
-      storagePath: report.pdfStoragePath,
-      expiresAt,
+    return {
+      report,
       fileName,
-    });
-    await this.repository.recordDownload({
-      caseId: input.caseId,
-      reportVersion: input.reportVersion,
-      actor: input.actor,
-      downloadedAt: input.now,
-    });
-    return { url, expiresAt, fileName };
+      storagePath: report.pdfStoragePath,
+    };
   }
 
   private assertEnabled() {

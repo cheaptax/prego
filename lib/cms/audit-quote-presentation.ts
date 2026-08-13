@@ -92,6 +92,10 @@ export const CMS_AUDIT_QUOTE_SECTION_PRESENTATION: Record<
         label: "휴대폰 번호 도움말",
         help: "비워 두면 도움말을 표시하지 않습니다.",
       },
+      phoneVerifyHelp: {
+        label: "휴대폰 인증 안내",
+        help: "인증번호 받기 버튼 아래에 표시되는 안내입니다.",
+      },
       privacyConsentLabel: {
         label: "개인정보 수집·이용 동의 문구",
         help: "필수 여부는 보호되어 있으며 관리자가 바꿀 수 없습니다.",
@@ -171,6 +175,13 @@ export const CMS_AUDIT_QUOTE_SECTION_PRESENTATION: Record<
         label: "운영 안내 접근성 이름",
         help: "화면 읽기 프로그램에서 사용하는 영역 이름입니다.",
       },
+      regulationNote: {
+        label: "시행령 주석 제목",
+        help: "페이지 하단 주석 영역에 작게 표시됩니다.",
+      },
+    },
+    itemFields: {
+      title: "시행령 주석 항목",
     },
     legalWarning:
       "법적·운영상 필수 안내입니다. 문구 변경은 이력에 남으며 게시 전 경고가 표시됩니다. 이 영역은 숨기거나 삭제할 수 없습니다.",
@@ -211,7 +222,7 @@ export const CMS_AUDIT_QUOTE_MESSAGE_PRESENTATION: Record<
   },
   temporaryMemberSecurityNotice: {
     label: "임시회원 비밀번호 보안 안내",
-    help: "평문 임시비밀번호 대신 일회용 설정 링크를 사용한다는 안내입니다.",
+    help: "초기 비밀번호 규칙과 로그인 후 비밀번호 변경 권고 안내입니다.",
   },
   publicReferenceLabel: {
     label: "접수번호 이름",

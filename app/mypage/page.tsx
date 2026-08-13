@@ -3,6 +3,7 @@ import { MyPageDashboard } from "@/components/MyPageDashboard";
 import { requirePortalPageSession } from "@/lib/auth/portal-page-guard";
 import { cmsPageMetadata } from "@/lib/cms/metadata";
 import { loadPublishedCmsPage } from "@/lib/cms/public-content";
+import { buildPortalSitemap } from "@/lib/sitemap/portal-sitemap";
 
 export async function generateMetadata(): Promise<Metadata> {
   const bundle = await loadPublishedCmsPage("member.mypage");
@@ -20,10 +21,12 @@ export default async function MyPage({ searchParams }: Props) {
   await requirePortalPageSession("customer");
   const params = await searchParams;
   const { content } = await loadPublishedCmsPage("member.mypage");
+  const sitemap = buildPortalSitemap("customer");
   return (
     <main id="main" className="admin-app">
       <MyPageDashboard
         content={content}
+        sitemap={sitemap}
         initialTab={params?.tab}
         membershipConverted={params?.membership === "converted"}
       />

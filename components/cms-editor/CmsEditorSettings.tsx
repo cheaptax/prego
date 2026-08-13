@@ -1096,6 +1096,43 @@ function SectionSettings({
       size: "default",
       radius: "default",
     };
+  const unifiedAlignment =
+    section.style.title.alignment === section.style.body.alignment
+      ? section.style.title.alignment
+      : "mixed";
+  if (section.deleted) {
+    return (
+      <div className="cms-editor-settings">
+        <header className="cms-editor-settings__title">
+          <span>삭제한 화면 영역</span>
+          <h2>
+            {presentation?.name ?? (section.title || "제목 없는 영역")}
+          </h2>
+          <p>이 영역은 초안에 보관되어 있습니다. 복원한 뒤 다시 편집할 수 있습니다.</p>
+        </header>
+        <section className="cms-editor-settings-group">
+          <div className="cms-editor-deleted-item">
+            <div>
+              <strong>화면에서 삭제한 영역</strong>
+              <p>
+                게시 전에는 고객 화면이 바뀌지 않습니다. 복원하면 미리보기와
+                편집 설정이 다시 열립니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onChange({ ...section, deleted: false, visible: true })
+              }
+            >
+              영역 복원
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="cms-editor-settings">
       <header className="cms-editor-settings__title">
@@ -1119,7 +1156,7 @@ function SectionSettings({
           이 영역 표시
         </label>
         {section.locked ? (
-          <p className="cms-editor-help">서비스 운영에 필요한 필수 영역은 숨길 수 없습니다.</p>
+          <p className="cms-editor-help">서비스 운영에 필요한 필수 영역은 숨기거나 삭제할 수 없습니다.</p>
         ) : null}
         {presentation?.legalWarning ? (
           <div className="cms-editor-legal-warning" role="note">
@@ -1336,6 +1373,42 @@ function SectionSettings({
         presentation={presentation}
         onChange={onChange}
       />
+      <section className="cms-editor-settings-group">
+        <h3>콘텐츠 배치</h3>
+        <Field
+          label="콘텐츠 전체 정렬"
+          help="이 영역의 큰 제목과 본문을 한 번에 왼쪽, 가운데 또는 오른쪽으로 맞춥니다."
+        >
+          <select
+            value={unifiedAlignment}
+            onChange={(event) => {
+              const alignment = event.target
+                .value as CmsTypographyStyle["alignment"];
+              onChange({
+                ...section,
+                style: {
+                  ...section.style,
+                  title: { ...section.style.title, alignment },
+                  body: { ...section.style.body, alignment },
+                },
+              });
+            }}
+          >
+            {unifiedAlignment === "mixed" ? (
+              <option value="mixed" disabled>
+                제목·본문 정렬이 다름
+              </option>
+            ) : null}
+            <option value="left">왼쪽 정렬</option>
+            <option value="center">가운데 정렬</option>
+            <option value="right">오른쪽 정렬</option>
+          </select>
+        </Field>
+        <p className="cms-editor-help">
+          제목과 본문을 서로 다르게 배치하려면 아래의 개별 디자인 설정을
+          사용하세요.
+        </p>
+      </section>
       <TypographySettings
         label="큰 제목 디자인"
         value={section.style.title}

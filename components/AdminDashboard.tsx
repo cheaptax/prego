@@ -77,6 +77,7 @@ import {
   canShowAdminMenu,
 } from "@/lib/admin/menu-permissions";
 import { PartnerManagementPanel as PartnerManagementApiPanel } from "@/components/admin/PartnerManagementPanel";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
 import {
   MANAGEABLE_ADMIN_PERMISSIONS,
   OPERATOR_PAGE_SIZE_OPTIONS,
@@ -96,6 +97,7 @@ import {
   ADMIN_FAQ_CATEGORIES,
   ADMIN_FAQ_DISPLAY_FILTERS,
   ADMIN_FAQ_PUBLIC_FILTERS,
+  ADMIN_OPERATION_TAB_SECTION_IDS,
   ADMIN_REQUEST_STATUS_FILTERS,
   ADMIN_VISIBILITY_FILTERS,
   createAdminOperationsCopy,
@@ -103,10 +105,18 @@ import {
   type AdminOperationsCopy,
 } from "@/lib/cms/admin-operations-content";
 import { ADMIN_OPERATIONS_PREVIEW_DATA } from "@/lib/cms/admin-operations-preview";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
+import { getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import type { CooperativeSearchItem } from "@/lib/cooperatives/demo-cooperative";
 import { partitionAdminDashboardData } from "@/lib/admin/dashboard-classification";
 import { CooperativeMasterPanel } from "@/components/admin/CooperativeMasterPanel";
+import { CooperativeQuotePriceMasterPanel } from "@/components/admin/CooperativeQuotePriceMasterPanel";
+import { PortalSitemap } from "@/components/PortalSitemap";
+import type { PortalSitemapModel } from "@/lib/sitemap/portal-sitemap";
 
 const AdminAuditEvaluationPanel = dynamic(
   () =>
@@ -118,6 +128,11 @@ const AdminAuditEvaluationPanel = dynamic(
 type State = "loading" | "ready" | "denied" | "error";
 
 type TabKey = AdminOperationTabId;
+const EMPTY_ADMIN_SITEMAP: PortalSitemapModel = {
+  role: "admin",
+  groups: [],
+  routeCount: 0,
+};
 type MemberSubtab = "members" | "operators" | "cooperatives";
 type OperatorEditorState = {
   mode: "create" | "edit";
@@ -549,15 +564,20 @@ function VisibilityPill({ value }: { value?: string }) {
 
 export function AdminDashboard({
   content,
+  sitemap = EMPTY_ADMIN_SITEMAP,
   previewMode = false,
   auditEvaluationAdminEnabled = previewMode,
   canManageTestData = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
+  sitemap?: PortalSitemapModel;
   previewMode?: boolean;
   auditEvaluationAdminEnabled?: boolean;
   canManageTestData?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const router = useRouter();
   const copy = useMemo(() => createAdminOperationsCopy(content), [content]);
   const FEATURE_TABS = useMemo(
@@ -569,6 +589,7 @@ export function AdminDashboard({
     [auditEvaluationAdminEnabled, copy.tabs],
   );
   const inquiryCopy = copy.section("inquiries");
+  const sitemapCopy = copy.section("sitemap");
   const faqCategoryOptions = ADMIN_FAQ_CATEGORIES.map((option) => ({
     value: option.value,
     label: inquiryCopy.item(`faqCategory.${option.id}`),
@@ -2281,11 +2302,26 @@ export function AdminDashboard({
   }
 
   // -- Render ---------------------------------------------------------------
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
+  const navigationSection = getCmsSection(
+    content,
+    "admin.operations",
+    "navigation",
+  );
+  const activeContentSection = getCmsSection(
+    content,
+    "admin.operations",
+    ADMIN_OPERATION_TAB_SECTION_IDS[tab],
+  );
   return (
     <AdminOperationsCopyContext.Provider value={copy}>
     <div className="admin-shell">
       <aside
-        className="admin-sidebar"
+        {...cmsEditableSectionProps(
+          navigationSection,
+          "admin-sidebar",
+          editingOptions,
+        )}
         aria-label={copy.section("navigation").text("navigationAriaLabel")}
       >
         <div className="admin-brand">
@@ -2353,7 +2389,13 @@ export function AdminDashboard({
         </div>
       </aside>
 
-      <section className="admin-main">
+      <section
+        {...cmsEditableSectionProps(
+          activeContentSection,
+          "admin-main",
+          editingOptions,
+        )}
+      >
         <header className="admin-topbar">
           <div>
             <p className="admin-topbar__crumb">
@@ -3502,6 +3544,13 @@ export function AdminDashboard({
           />
         )}
 
+        {tab === "quotePriceMaster" && (
+          <CooperativeQuotePriceMasterPanel
+            canWrite={canShowAdminAction(adminContext, "auditQuotes:write")}
+            onMessage={setActionMessage}
+          />
+        )}
+
         {auditEvaluationAdminEnabled && tab === "auditEvaluations" && (
           <AdminAuditEvaluationPanel
             onMessage={setActionMessage}
@@ -3790,6 +3839,22 @@ export function AdminDashboard({
           </div>
         )}
 
+        {tab === "sitemap" && (
+          <PortalSitemap
+            sitemap={sitemap}
+            copy={{
+              title: sitemapCopy.title,
+              description: sitemapCopy.description,
+              publicGroupTitle: sitemapCopy.text("publicGroupTitle"),
+              roleGroupTitle: sitemapCopy.text("roleGroupTitle"),
+              countPrefix: sitemapCopy.text("countPrefix"),
+              countSuffix: sitemapCopy.text("countSuffix"),
+              automaticUpdateLabel: sitemapCopy.text("automaticUpdateLabel"),
+              openLabel: sitemapCopy.text("openLabel"),
+            }}
+          />
+        )}
+
         {tab === "audit" && (
           <div className="admin-grid">
             <div className="admin-card admin-card--span-2">
@@ -3998,6 +4063,13 @@ export function AdminDashboard({
           }
         />
       )}
+      <CmsSupplementalSections
+        pageKey="admin.operations"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </div>
     </AdminOperationsCopyContext.Provider>
   );

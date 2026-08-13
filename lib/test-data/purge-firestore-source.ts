@@ -52,6 +52,8 @@ const CUSTOMER_GRAPH_COLLECTIONS = [
   "auditQuoteEmailDedup",
   "auditQuoteRateLimits",
   "auditQuoteNotifications",
+  "phoneVerificationChallenges",
+  "phoneVerificationRateLimits",
   "auditEvaluationCases",
   "auditEvaluationCaseByQuoteRequest",
   "auditEvaluationAccessTokens",

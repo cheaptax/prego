@@ -6,6 +6,19 @@ import type { CmsPageKey } from "@/lib/cms/constants";
 import { CMS_AUDIT_QUOTE_SECTION_PRESENTATION } from "@/lib/cms/audit-quote-presentation";
 import { CMS_HOME_SECTION_PRESENTATION } from "@/lib/cms/home-presentation";
 import { CMS_ROUTE_SECTION_PRESENTATION } from "@/lib/cms/route-presentation";
+import { canSoftDeleteCmsSection } from "@/lib/cms/section-lifecycle";
+
+function sectionDisplayName(pageKey: CmsPageKey, sectionId: string, title: string) {
+  if (pageKey === "home") {
+    return CMS_HOME_SECTION_PRESENTATION[sectionId]?.name ?? title;
+  }
+  if (pageKey === "event.auditQuote") {
+    return CMS_AUDIT_QUOTE_SECTION_PRESENTATION[sectionId]?.name ?? title;
+  }
+  return (
+    CMS_ROUTE_SECTION_PRESENTATION[pageKey]?.[sectionId]?.name ?? title
+  ) || "제목 없는 영역";
+}
 
 export function CmsEditorSidebar({
   pageName,
@@ -14,6 +27,10 @@ export function CmsEditorSidebar({
   selection,
   onSelect,
   onReorderSections,
+  onAddSection,
+  onDuplicateSection,
+  onRequestDeleteSection,
+  onRestoreSection,
 }: {
   pageName: string;
   pageKey: CmsPageKey;
@@ -21,8 +38,13 @@ export function CmsEditorSidebar({
   selection: string;
   onSelect: (selection: string) => void;
   onReorderSections: (from: number, to: number) => void;
+  onAddSection: () => void;
+  onDuplicateSection: (sectionId: string) => void;
+  onRequestDeleteSection: (sectionId: string) => void;
+  onRestoreSection: (sectionId: string) => void;
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const activeCount = content.sections.filter((section) => !section.deleted).length;
   const dropSection = (event: DragEvent, index: number) => {
     event.preventDefault();
     if (draggedIndex !== null) onReorderSections(draggedIndex, index);
@@ -63,83 +85,137 @@ export function CmsEditorSidebar({
       <div className="cms-editor-sidebar__heading">
         <div>
           <strong>화면 영역</strong>
-          <small>끌어서 순서 변경</small>
+          <small>추가·삭제·순서 변경</small>
         </div>
-        <span>{content.sections.length}개</span>
+        <span>{activeCount}개</span>
+      </div>
+      <div className="cms-editor-sidebar__section-actions">
+        <button type="button" onClick={onAddSection}>
+          영역 추가
+        </button>
       </div>
       <ol className="cms-editor-section-tree">
-        {content.sections.map((section, index) => (
-          <li
-            className={[
-              selection === section.id ? "is-selected" : "",
-              !section.visible ? "is-hidden" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            key={section.id}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => dropSection(event, index)}
-          >
-            <button
-              className="cms-editor-section-tree__drag"
-              type="button"
-              draggable
-              onDragStart={() => setDraggedIndex(index)}
-              onDragEnd={() => setDraggedIndex(null)}
-              aria-label={`${section.title} 영역 순서 끌어서 바꾸기`}
-              title="끌어서 순서를 바꿉니다."
+        {content.sections.map((section, index) => {
+          const name = sectionDisplayName(pageKey, section.id, section.title);
+          const canDelete = canSoftDeleteCmsSection(content, section.id);
+          return (
+            <li
+              className={[
+                selection === section.id ? "is-selected" : "",
+                !section.visible ? "is-hidden" : "",
+                section.deleted ? "is-deleted" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              key={section.id}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => dropSection(event, index)}
             >
-              ⠿
-            </button>
-            <button
-              className="cms-editor-section-tree__select"
-              type="button"
-              onClick={() => onSelect(section.id)}
-            >
-              <span>{index + 1}</span>
-              <div>
-                <strong>
-                  {pageKey === "home"
-                    ? CMS_HOME_SECTION_PRESENTATION[section.id]?.name ??
-                      section.title
-                    : pageKey === "event.auditQuote"
-                      ? CMS_AUDIT_QUOTE_SECTION_PRESENTATION[section.id]?.name ??
-                        section.title
-                    : (CMS_ROUTE_SECTION_PRESENTATION[pageKey]?.[section.id]
-                        ?.name ?? section.title) || "제목 없는 영역"}
-                </strong>
-                <small>
-                  {section.visible ? "화면에 표시" : "현재 숨김"}
-                  {section.items.length > 0
-                    ? ` · 목록 ${section.items.length}개`
-                    : ""}
-                </small>
-              </div>
-            </button>
-            <span className="cms-editor-section-tree__move">
               <button
+                className="cms-editor-section-tree__drag"
                 type="button"
-                onClick={() => onReorderSections(index, index - 1)}
-                disabled={index === 0}
-                aria-label={`${section.title} 영역 위로 이동`}
+                draggable={!section.deleted}
+                onDragStart={() => setDraggedIndex(index)}
+                onDragEnd={() => setDraggedIndex(null)}
+                aria-label={`${name} 영역 순서 끌어서 바꾸기`}
+                title="끌어서 순서를 바꿉니다."
+                disabled={section.deleted}
               >
-                ↑
+                ⠿
               </button>
               <button
+                className="cms-editor-section-tree__select"
                 type="button"
-                onClick={() => onReorderSections(index, index + 1)}
-                disabled={index === content.sections.length - 1}
-                aria-label={`${section.title} 영역 아래로 이동`}
+                onClick={() => onSelect(section.id)}
               >
-                ↓
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{name}</strong>
+                  <small>
+                    {section.deleted
+                      ? "삭제됨 · 복원 가능"
+                      : section.visible
+                        ? "화면에 표시"
+                        : "현재 숨김"}
+                    {section.locked ? " · 필수" : ""}
+                    {!section.deleted && section.items.length > 0
+                      ? ` · 목록 ${section.items.length}개`
+                      : ""}
+                  </small>
+                </div>
               </button>
-            </span>
-          </li>
-        ))}
+              <span
+                className={[
+                  "cms-editor-section-tree__move",
+                  section.deleted ? "is-restore" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {section.deleted ? (
+                  <button
+                    type="button"
+                    onClick={() => onRestoreSection(section.id)}
+                    aria-label={`${name} 영역 복원`}
+                    title="영역 복원"
+                  >
+                    ↩
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onReorderSections(index, index - 1)}
+                      disabled={index === 0}
+                      aria-label={`${name} 영역 위로 이동`}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onReorderSections(index, index + 1)}
+                      disabled={index === content.sections.length - 1}
+                      aria-label={`${name} 영역 아래로 이동`}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDuplicateSection(section.id)}
+                      aria-label={`${name} 영역 복제`}
+                      title="영역 복제"
+                    >
+                      ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="is-delete"
+                      onClick={() => onRequestDeleteSection(section.id)}
+                      disabled={!canDelete}
+                      aria-label={
+                        section.locked
+                          ? `${name} 필수 영역은 삭제할 수 없습니다`
+                          : `${name} 영역 삭제`
+                      }
+                      title={
+                        section.locked
+                          ? "필수 영역은 삭제할 수 없습니다"
+                          : "영역 삭제하고 보관"
+                      }
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+              </span>
+            </li>
+          );
+        })}
       </ol>
       <p className="cms-editor-sidebar__help">
-        필수 영역은 숨길 수 없습니다. 영역을 선택하면 오른쪽에서 문구와 디자인을
-        바꿀 수 있습니다.
+        필수 영역은 삭제하거나 숨길 수 없습니다. 삭제한 영역은 게시 전까지
+        복원할 수 있으며, 영역을 선택하면 오른쪽에서 문구와 디자인을 바꿀 수
+        있습니다.
       </p>
     </aside>
   );

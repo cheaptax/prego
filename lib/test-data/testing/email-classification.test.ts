@@ -22,7 +22,9 @@ describe("customer email data classification", () => {
       assert.equal(isAllowedCustomerEmail(` ${email.toUpperCase()} `), true);
     }
     assert.equal(isAllowedCustomerEmail("someone@example.com"), false);
-    assert.equal(isAllowedCustomerEmail("prego.ceo+test@gmail.com"), false);
+    assert.equal(isAllowedCustomerEmail("prego.ceo+pwtest1@gmail.com"), true);
+    assert.equal(classifyCustomerEmail("prego.ceo+pwtest1@gmail.com"), "TEST");
+    assert.equal(isAllowedCustomerEmail("random+test@gmail.com"), false);
   });
 
   it("exempts an approved test email or phone from signup count limits", () => {

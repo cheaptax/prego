@@ -1,7 +1,49 @@
+import Link from "next/link";
 import { HeroArt } from "./HeroArt";
 import { ConsultRequestLink } from "./ConsultRequestLink";
-import type { CmsSection } from "@/lib/cms/schemas";
+import type { CmsLink, CmsSection } from "@/lib/cms/schemas";
 import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+
+function heroActionClassName(appearance: CmsLink["appearance"]) {
+  if (appearance === "primary") return "cta cta--solid";
+  if (appearance === "secondary") return "cta cta--ghost";
+  return "cta cta--text";
+}
+
+function HeroAction({ action }: { action: CmsLink }) {
+  const className = heroActionClassName(action.appearance);
+  const isConsult =
+    action.id === "startConsult" || action.href === "/consult";
+  if (isConsult) {
+    return (
+      <ConsultRequestLink className={className}>
+        {action.label}
+      </ConsultRequestLink>
+    );
+  }
+  if (action.linkType === "internal") {
+    return (
+      <Link
+        className={className}
+        href={action.href}
+        target={action.openInNewWindow ? "_blank" : undefined}
+        rel={action.openInNewWindow ? "noopener noreferrer" : undefined}
+      >
+        {action.label}
+      </Link>
+    );
+  }
+  return (
+    <a
+      className={className}
+      href={action.href}
+      target={action.openInNewWindow ? "_blank" : undefined}
+      rel={action.openInNewWindow ? "noopener noreferrer" : undefined}
+    >
+      {action.label}
+    </a>
+  );
+}
 
 export function Hero({
   section,
@@ -16,7 +58,6 @@ export function Hero({
     )?.items.filter(
       (item) => item.visible && !item.deleted,
     ) ?? [];
-  const [consultAction, servicesAction] = section.actions;
   return (
     <section {...cmsSectionRootProps(section, "hero")}>
       <div className="hero__inner">
@@ -44,16 +85,9 @@ export function Hero({
         </p>
 
         <div className="hero__actions">
-          {consultAction ? (
-            <ConsultRequestLink className="cta cta--solid">
-              {consultAction.label}
-            </ConsultRequestLink>
-          ) : null}
-          {servicesAction ? (
-            <a className="cta cta--ghost" href={servicesAction.href}>
-              {servicesAction.label}
-            </a>
-          ) : null}
+          {section.actions.map((action) => (
+            <HeroAction action={action} key={action.id} />
+          ))}
         </div>
       </div>
 

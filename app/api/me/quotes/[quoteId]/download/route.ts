@@ -8,6 +8,7 @@ import {
 } from "@/lib/firebase/server";
 import type { QuoteRecord, QuoteRequestRecord } from "@/lib/firebase/schema";
 import { canCustomerReadQuote } from "@/lib/quotes/quote-access";
+import { quotePdfFileNameFromRecords } from "@/lib/quotes/quote-pdf-filename";
 import { createQuoteDownloadUrl } from "@/lib/quotes/quote-storage";
 
 export const runtime = "nodejs";
@@ -52,9 +53,10 @@ export async function GET(req: Request, { params }: Params) {
       { status: 403 },
     );
   }
+  const fileName = quotePdfFileNameFromRecords(quote, quoteRequest);
   const url = await createQuoteDownloadUrl({
     storagePath: quote.pdfPath,
-    fileName: quote.pdfFileName ?? "quote.pdf",
+    fileName,
     expiresAt: new Date(Date.now() + 5 * 60 * 1000),
   });
   await addAuditLog(db, {

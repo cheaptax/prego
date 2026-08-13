@@ -14,6 +14,7 @@ import type {
 } from "@/lib/firebase/schema";
 import { isPartnerActive } from "@/lib/partners";
 import { isPartnerEligibleForAuditQuote } from "@/lib/quotes/audit-quote-assignment";
+import { notifyPartnerQuoteAssignment } from "@/lib/quotes/partner-assignment-email";
 
 export const runtime = "nodejs";
 
@@ -122,6 +123,33 @@ export async function POST(req: Request, { params }: Params) {
       { status: result.error.endsWith("_not_found") ? 404 : 400 },
     );
   }
+
+  const quoteRequestSnapshot = await quoteRequestRef.get();
+  const quoteRequest = quoteRequestSnapshot.exists
+    ? (quoteRequestSnapshot.data() as QuoteRequestRecord)
+    : null;
+  const partnerSnapshot = await partnerRef.get();
+  const partner = partnerSnapshot.exists
+    ? ({
+        ...(partnerSnapshot.data() as PartnerRecord),
+        id: partnerId,
+      } satisfies PartnerRecord)
+    : null;
+  if (quoteRequest && partner) {
+    void notifyPartnerQuoteAssignment({
+      db,
+      partner,
+      quoteRequest: { ...quoteRequest, id: quoteRequestId },
+      assignmentId: result.assignment.id,
+    }).catch((error: unknown) => {
+      console.error("[quote-assignment] notify_unhandled", {
+        quoteRequestId,
+        partnerId,
+        error: error instanceof Error ? error.message : "notify_failed",
+      });
+    });
+  }
+
   return NextResponse.json({ ok: true, assignment: result.assignment });
 }
 

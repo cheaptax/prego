@@ -1,8 +1,12 @@
 import { ConsultForm } from "@/components/ConsultForm";
 import { ConsultSteps } from "@/components/ConsultSteps";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getCmsSection } from "@/lib/cms/runtime";
-import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
-import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+import type { CmsPageContent } from "@/lib/cms/schemas";
 
 export function ConsultPageRenderer({
   content,
@@ -14,66 +18,53 @@ export function ConsultPageRenderer({
 }: {
   content: CmsPageContent;
   mainId?: string | null;
-  editing?: boolean;
   previewMode?: boolean;
-  selectedSectionId?: string;
-  onSelectSection?: (sectionId: string) => void;
-}) {
+} & CmsSectionEditingOptions) {
   const steps = getCmsSection(content, "public.consult", "steps");
   const hero = getCmsSection(content, "public.consult", "hero");
-
-  function sectionProps(section: CmsSection, className: string) {
-    const root = cmsSectionRootProps(section, className);
-    return {
-      ...root,
-      className: [
-        root.className,
-        editing ? "cms-home-edit-section" : "",
-        selectedSectionId === section.id ? "is-selected" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      tabIndex: editing ? 0 : undefined,
-      onClick: editing ? () => onSelectSection?.(section.id) : undefined,
-      onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
-    };
-  }
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
 
   return (
     <main
       id={mainId ?? undefined}
       className="consult-page consult-page--compact"
     >
-      <div {...sectionProps(steps, "consult-steps-cms-root")}>
+      <div
+        {...cmsEditableSectionProps(
+          steps,
+          "consult-steps-cms-root",
+          editingOptions,
+        )}
+      >
         <ConsultSteps section={steps} />
       </div>
       <section className="consult-shell">
-        <header {...sectionProps(hero, "consult-shell__head")}>
+        <header
+          {...cmsEditableSectionProps(
+            hero,
+            "consult-shell__head",
+            editingOptions,
+          )}
+        >
           <span className="consult-shell__eyebrow">
             <span className="dot" aria-hidden="true" />
             {hero.eyebrow}
           </span>
           <h1 className="consult-shell__title">{hero.title}</h1>
         </header>
-        <div
-          className={
-            editing &&
-            selectedSectionId &&
-            ["categorySelector", "visibilitySelector", "requestFields"].includes(
-              selectedSectionId,
-            )
-              ? "cms-home-edit-section is-selected"
-              : undefined
-          }
-          onClick={
-            editing
-              ? () => onSelectSection?.("requestFields")
-              : undefined
-          }
-        >
-          <ConsultForm content={content} previewMode={previewMode} />
-        </div>
+        <ConsultForm
+          content={content}
+          previewMode={previewMode}
+          {...editingOptions}
+        />
       </section>
+      <CmsSupplementalSections
+        pageKey="public.consult"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </main>
   );
 }

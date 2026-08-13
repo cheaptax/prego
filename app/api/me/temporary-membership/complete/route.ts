@@ -5,7 +5,6 @@ import {
 } from "@/lib/audit-evaluation/api-security";
 import { resolveSignupCooperative } from "@/lib/cooperatives/server";
 import { adminDb } from "@/lib/firebase/admin";
-import type { UserRecord } from "@/lib/firebase/schema";
 import {
   addAuditLog,
   authErrorCode,
@@ -44,13 +43,12 @@ export async function POST(request: Request) {
       cooperativeId?: unknown;
       position?: unknown;
       duty?: unknown;
-      consents?: Partial<UserRecord["consents"]>;
+      conversionConsent?: unknown;
     };
     if (
       typeof body.cooperativeId !== "string" ||
       typeof body.position !== "string" ||
-      typeof body.duty !== "string" ||
-      !body.consents
+      typeof body.duty !== "string"
     ) {
       return NextResponse.json(
         { ok: false, error: "missing_fields" },
@@ -76,14 +74,8 @@ export async function POST(request: Request) {
         cooperativeId: body.cooperativeId,
         position: body.position,
         duty: body.duty,
-        consents: {
-          terms: body.consents.terms === true,
-          privacy: body.consents.privacy === true,
-          marketing: body.consents.marketing === true,
-          email: body.consents.email === true,
-          sms: body.consents.sms === true,
-          kakao: body.consents.kakao === true,
-        },
+        conversionConsent: body.conversionConsent === true,
+        existingConsents: session.profile.consents,
       },
     });
     await addAuditLog(adminDb(), {

@@ -27,13 +27,54 @@ import type {
   UserRecord,
 } from "@/lib/firebase/schema";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getCmsSection } from "@/lib/cms/runtime";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import { PortalSitemap } from "@/components/PortalSitemap";
+import type { PortalSitemapModel } from "@/lib/sitemap/portal-sitemap";
 
 type State = "loading" | "ready" | "error";
 
-type TabKey = "overview" | "inquiries" | "points" | "profile";
+type TabKey = "overview" | "inquiries" | "points" | "profile" | "sitemap";
 
-const TAB_KEYS: TabKey[] = ["overview", "inquiries", "points", "profile"];
+const TAB_KEYS: TabKey[] = [
+  "overview",
+  "inquiries",
+  "points",
+  "profile",
+  "sitemap",
+];
+
+/** Sidebar order: 견적함 sits directly under 문의 내역. */
+const NAV_ITEM_ORDER = [
+  "overview",
+  "inquiries",
+  "quotes",
+  "points",
+  "profile",
+  "sitemap",
+] as const;
+
+const NAV_LINK_HREFS: Partial<Record<(typeof NAV_ITEM_ORDER)[number], string>> =
+  {
+    quotes: "/mypage/quotes",
+  };
+
+const FALLBACK_QUOTES_NAV_ITEM = {
+  id: "quotes",
+  title: "견적함",
+  description: "제휴사가 발송한 견적서 확인·다운로드",
+  visible: true,
+  deleted: false,
+} as const;
+const EMPTY_CUSTOMER_SITEMAP: PortalSitemapModel = {
+  role: "customer",
+  groups: [],
+  routeCount: 0,
+};
 
 function normalizeTab(value?: string | string[]) {
   const tabValue = Array.isArray(value) ? value[0] : value;
@@ -219,13 +260,18 @@ export function MyPageDashboard({
   content,
   initialTab,
   membershipConverted = false,
+  sitemap = EMPTY_CUSTOMER_SITEMAP,
   previewMode = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
   initialTab?: string | string[];
   membershipConverted?: boolean;
+  sitemap?: PortalSitemapModel;
   previewMode?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const router = useRouter();
   const navigationCopy = getCmsSection(
     content,
@@ -236,9 +282,30 @@ export function MyPageDashboard({
   const inquiriesCopy = getCmsSection(content, "member.mypage", "inquiries");
   const pointsCopy = getCmsSection(content, "member.mypage", "points");
   const profileCopy = getCmsSection(content, "member.mypage", "profile");
+  const sitemapCopy = getCmsSection(content, "member.mypage", "sitemap");
   const messages = content.messages;
-  const tabs = navigationCopy.items.flatMap((item) =>
-    TAB_KEYS.includes(item.id as TabKey) && item.visible && !item.deleted
+  const navItems = useMemo(() => {
+    const byId = new Map(
+      navigationCopy.items
+        .filter((item) => item.visible && !item.deleted)
+        .map((item) => [item.id, item]),
+    );
+    if (!byId.has("quotes")) {
+      byId.set("quotes", { ...FALLBACK_QUOTES_NAV_ITEM });
+    }
+    const ordered = NAV_ITEM_ORDER.flatMap((id) => {
+      const item = byId.get(id);
+      return item ? [item] : [];
+    });
+    for (const item of byId.values()) {
+      if (!NAV_ITEM_ORDER.includes(item.id as (typeof NAV_ITEM_ORDER)[number])) {
+        ordered.push(item);
+      }
+    }
+    return ordered;
+  }, [navigationCopy.items]);
+  const tabs = navItems.flatMap((item) =>
+    TAB_KEYS.includes(item.id as TabKey)
       ? [
           {
             key: item.id as TabKey,
@@ -343,6 +410,11 @@ export function MyPageDashboard({
       setCurrentUser(user);
       try {
         const tokenResult = await user.getIdTokenResult(true);
+        if (tokenResult.claims.multiRole === true) {
+          await fetchOverview();
+          setState("ready");
+          return;
+        }
         if (tokenResult.claims.admin === true) {
           router.replace("/admin");
           return;
@@ -544,6 +616,14 @@ export function MyPageDashboard({
     tab === "inquiries"
       ? overviewCopy.text.inquiriesTopbarDescription
       : activeTab?.description;
+  const activeContentSection = {
+    overview: overviewCopy,
+    inquiries: inquiriesCopy,
+    points: pointsCopy,
+    profile: profileCopy,
+    sitemap: sitemapCopy,
+  }[tab];
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
 
   return (
     <div
@@ -551,7 +631,11 @@ export function MyPageDashboard({
       onClickCapture={previewMode ? preventPreviewLinkNavigation : undefined}
     >
       <aside
-        className="admin-sidebar"
+        {...cmsEditableSectionProps(
+          navigationCopy,
+          "admin-sidebar",
+          editingOptions,
+        )}
         aria-label={navigationCopy.text.navigationAriaLabel}
       >
         <div className="admin-brand">
@@ -565,17 +649,44 @@ export function MyPageDashboard({
         </div>
 
         <nav className="admin-nav">
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`admin-nav__item${tab === item.key ? " is-active" : ""}`}
-              onClick={() => setTab(item.key)}
-            >
-              <span className="admin-nav__label">{item.label}</span>
-              <span className="admin-nav__desc">{item.description}</span>
-            </button>
-          ))}
+          {navItems.map((item) => {
+            const href =
+              NAV_LINK_HREFS[item.id as (typeof NAV_ITEM_ORDER)[number]];
+            if (href) {
+              return (
+                <Link
+                  key={item.id}
+                  className="admin-nav__item"
+                  href={href}
+                  onClick={(event) => {
+                    if (previewMode) {
+                      event.preventDefault();
+                    }
+                  }}
+                >
+                  <span className="admin-nav__label">{item.title}</span>
+                  <span className="admin-nav__desc">
+                    {item.description ?? ""}
+                  </span>
+                </Link>
+              );
+            }
+            if (!TAB_KEYS.includes(item.id as TabKey)) return null;
+            const key = item.id as TabKey;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`admin-nav__item${tab === key ? " is-active" : ""}`}
+                onClick={() => setTab(key)}
+              >
+                <span className="admin-nav__label">{item.title}</span>
+                <span className="admin-nav__desc">
+                  {item.description ?? ""}
+                </span>
+              </button>
+            );
+          })}
         </nav>
 
         <div className="admin-sidebar__footer">
@@ -622,7 +733,13 @@ export function MyPageDashboard({
         </div>
       </aside>
 
-      <section className="admin-main">
+      <section
+        {...cmsEditableSectionProps(
+          activeContentSection,
+          "admin-main",
+          editingOptions,
+        )}
+      >
         <header className="admin-topbar">
           <div>
             <p className="admin-topbar__crumb">
@@ -655,9 +772,6 @@ export function MyPageDashboard({
             </button>
             <Link className="admin-btn admin-btn--primary" href="/consult">
               {navigationCopy.text.newInquiryLabel}
-            </Link>
-            <Link className="admin-btn" href="/mypage/quotes">
-              견적함
             </Link>
           </div>
         </header>
@@ -1150,6 +1264,23 @@ export function MyPageDashboard({
           </div>
         )}
 
+        {tab === "sitemap" && (
+          <PortalSitemap
+            sitemap={sitemap}
+            copy={{
+              title: sitemapCopy.title,
+              description: sitemapCopy.description ?? "",
+              publicGroupTitle: sitemapCopy.text.publicGroupTitle ?? "",
+              roleGroupTitle: sitemapCopy.text.roleGroupTitle ?? "",
+              countPrefix: sitemapCopy.text.countPrefix ?? "",
+              countSuffix: sitemapCopy.text.countSuffix ?? "",
+              automaticUpdateLabel:
+                sitemapCopy.text.automaticUpdateLabel ?? "",
+              openLabel: sitemapCopy.text.openLabel ?? "",
+            }}
+          />
+        )}
+
         {tab === "profile" && (
           <div className="admin-grid">
             <div className="admin-card">
@@ -1406,6 +1537,13 @@ export function MyPageDashboard({
           </div>
         )}
       </section>
+      <CmsSupplementalSections
+        pageKey="member.mypage"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </div>
   );
 }

@@ -407,6 +407,10 @@ describe("NH audit quote authorization, compatibility and revision policy", () =
       ),
       "utf8",
     );
+    const finalizeCore = readFileSync(
+      path.join(root, "lib/quotes/finalize-partner-quote-delivery.ts"),
+      "utf8",
+    );
     const adminRoute = readFileSync(
       path.join(root, "app/api/admin/quotes/route.ts"),
       "utf8",
@@ -428,10 +432,12 @@ describe("NH audit quote authorization, compatibility and revision policy", () =
     );
     const rules = readFileSync(path.join(root, "firestore.rules"), "utf8");
     assert.match(partnerRoute, /requirePartner\(/u);
-    assert.match(partnerRoute, /canPartnerMutateQuoteAssignment/u);
-    assert.match(partnerRoute, /existingQuote\.exists/u);
-    assert.match(partnerRoute, /duplicate_quote_submission/u);
-    assert.match(partnerRoute, /storageKey: randomUUID\(\)/u);
+    assert.match(partnerRoute, /partnerQuoteFinalizeBlockReason/u);
+    assert.match(partnerRoute, /partnerQuoteMutationBlockReason/u);
+    assert.match(finalizeCore, /existingQuote\.exists/u);
+    assert.match(finalizeCore, /duplicate_quote_submission/u);
+    assert.match(finalizeCore, /storageKey: randomUUID\(\)/u);
+    assert.match(finalizeCore, /canPartnerFinalizeQuoteAssignment/u);
     assert.doesNotMatch(
       partnerRoute,
       /if \(getTransactionalEmailConfigurationError\(\)\) \{\s*return NextResponse\.json/u,

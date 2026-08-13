@@ -1,4 +1,5 @@
 import { adminStorage } from "@/lib/firebase/admin";
+import { buildAttachmentContentDisposition } from "@/lib/quotes/quote-pdf-filename";
 
 export interface AuditEvaluationReportStorage {
   save(input: {
@@ -16,6 +17,9 @@ export interface AuditEvaluationReportStorage {
     fileName: string;
   }): Promise<string>;
 }
+
+const SAFE_REPORT_DOWNLOAD_FILENAME =
+  /^(?:audit-evaluation-report-(?:(?:[\p{L}\p{N}][\p{L}\p{N}._-]{0,47}-)?FY[0-9]{4}|case-[a-zA-Z0-9][a-zA-Z0-9._-]{0,63})-v[0-9]+\.pdf|[\p{L}\p{N}][\p{L}\p{N} ._-]{0,79}_FY[0-9]{4} 감사인견적평가보고서(?:_v[1-9][0-9]*)?\.pdf)$/u;
 
 export class FirebaseAuditEvaluationReportStorage
   implements AuditEvaluationReportStorage
@@ -69,7 +73,10 @@ export class FirebaseAuditEvaluationReportStorage
     expiresAt: string;
     fileName: string;
   }) {
-    if (!/^[a-zA-Z0-9._-]{1,120}\.pdf$/.test(input.fileName)) {
+    if (
+      !SAFE_REPORT_DOWNLOAD_FILENAME.test(input.fileName) ||
+      /[\r\n"\\/:]/u.test(input.fileName)
+    ) {
       throw new Error("invalid_report_download_filename");
     }
     const [url] = await adminStorage()
@@ -80,7 +87,7 @@ export class FirebaseAuditEvaluationReportStorage
         action: "read",
         expires: new Date(input.expiresAt),
         responseType: "application/pdf",
-        responseDisposition: `attachment; filename="${input.fileName}"`,
+        responseDisposition: buildAttachmentContentDisposition(input.fileName),
       });
     return url;
   }

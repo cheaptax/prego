@@ -3,6 +3,16 @@ import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 
 const PAGE_KEY = "event.auditQuote" as const;
 const REQUIRED_SECTION_IDS = ["intakeForm", "legalNotice"] as const;
+const STALE_FISCAL_YEAR_HELP = new Set([
+  "회계감사 대상 사업연도 4자리를 입력해 주세요.",
+  "이번 접수는 2027년도로 고정되어 있으며 변경할 수 없습니다.",
+  "농협법 개정에 따라 2026년말 기준 자산총액 500억원 이상 농협은 2027년도의 재무제표에 대한 외부회계감사를 수감해야 합니다",
+  "농협법 개정에 따라 2026년말 기준 자산총액 500억원 이상 농협은 2027년도의 재무제표에 대한 외부회계감사를 수감해야 합니다.",
+]);
+
+const STALE_REGULATION_NOTES = new Set([
+  "농업협동조합법 시행령 입법예고 기준.",
+]);
 
 export function normalizeAuditQuoteCmsContent(
   input: CmsPageContent,
@@ -20,12 +30,25 @@ export function normalizeAuditQuoteCmsContent(
     const required = (REQUIRED_SECTION_IDS as readonly string[]).includes(
       fallback.id,
     );
+    const mergedText = { ...fallback.text, ...current.text };
+    if (
+      fallback.id === "intakeForm" &&
+      STALE_FISCAL_YEAR_HELP.has(mergedText.fiscalYearHelp ?? "")
+    ) {
+      mergedText.fiscalYearHelp = fallback.text.fiscalYearHelp;
+    }
+    if (
+      fallback.id === "legalNotice" &&
+      STALE_REGULATION_NOTES.has(mergedText.regulationNote ?? "")
+    ) {
+      mergedText.regulationNote = fallback.text.regulationNote;
+    }
     return {
       ...fallback,
       ...current,
       visible: required ? true : current.visible,
       locked: required ? true : current.locked,
-      text: { ...fallback.text, ...current.text },
+      text: mergedText,
       items:
         fallback.items.length > 0 && current.items.length === 0
           ? structuredClone(fallback.items)

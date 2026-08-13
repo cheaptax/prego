@@ -16,6 +16,8 @@ import { isTemporaryQuoteMember } from "@/lib/members/temporary-quote-member";
 import { hasUnlimitedTestSignup } from "@/lib/test-data/email-classification";
 import { buildSignupRootMetadata } from "@/lib/test-data/root-metadata";
 
+export { pickQuotedCooperative } from "@/lib/members/quoted-cooperative";
+
 const ALLOWED_DUTIES = new Set([
   "accounting",
   "tax",
@@ -30,7 +32,8 @@ export type TemporaryMemberConversionInput = {
   cooperativeId: string;
   position: string;
   duty: string;
-  consents: UserRecord["consents"];
+  conversionConsent: boolean;
+  existingConsents?: UserRecord["consents"] | null;
 };
 
 export function validateTemporaryMemberConversion(
@@ -42,20 +45,21 @@ export function validateTemporaryMemberConversion(
   if (!cooperativeId) throw new Error("missing_cooperative");
   if (!position || position.length > 100) throw new Error("invalid_position");
   if (!ALLOWED_DUTIES.has(duty)) throw new Error("invalid_duty");
-  if (input.consents.terms !== true || input.consents.privacy !== true) {
+  if (input.conversionConsent !== true) {
     throw new Error("consent_required");
   }
+  const existing = input.existingConsents;
   return {
     cooperativeId,
     position,
     duty,
     consents: {
       terms: true,
-      privacy: true,
-      marketing: input.consents.marketing === true,
-      email: input.consents.email === true,
-      sms: input.consents.sms === true,
-      kakao: input.consents.kakao === true,
+      privacy: existing?.privacy !== false,
+      marketing: existing?.marketing === true,
+      email: existing?.email === true,
+      sms: existing?.sms === true,
+      kakao: existing?.kakao === true,
     } satisfies UserRecord["consents"],
   };
 }
@@ -91,10 +95,7 @@ export async function convertTemporaryMember(input: {
         walletBalance: 0,
       };
     }
-    if (
-      !isTemporaryQuoteMember(user) ||
-      !user.temporaryMember?.activatedAt
-    ) {
+    if (!isTemporaryQuoteMember(user)) {
       throw new Error("temporary_membership_required");
     }
 
@@ -172,11 +173,21 @@ export async function convertTemporaryMember(input: {
         cooperativeName: input.cooperative.cooperative_name,
         position: conversion.position,
         duty: conversion.duty,
-        consents: conversion.consents,
+        consents: {
+          terms: true,
+          privacy: user.consents?.privacy !== false,
+          marketing: user.consents?.marketing === true,
+          email: user.consents?.email === true,
+          sms: user.consents?.sms === true,
+          kakao: user.consents?.kakao === true,
+        },
         ...testMetadata,
         status: "active",
         temporaryMember: {
           ...user.temporaryMember,
+          ...(user.temporaryMember?.activatedAt
+            ? {}
+            : { activatedAt: now }),
           convertedAt: now,
         },
         updatedAt: now,

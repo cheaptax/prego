@@ -164,7 +164,7 @@ describe("audit evaluation API security boundary", () => {
     );
     assert.match(
       cooperativeFilename,
-      /^audit-evaluation-report-긴-이름-농협-본점-FY2026-v2\.pdf$/u,
+      /^긴 이름 농협본점_FY2026 감사인견적평가보고서_v2\.pdf$/u,
     );
     assert.equal(/[\r\n"\\/:]/.test(cooperativeFilename), false);
     assert.throws(() =>

@@ -20,6 +20,12 @@ import {
   type AdminConsolePageFilter,
 } from "@/lib/cms/admin-console-content";
 import { ADMIN_CONSOLE_PREVIEW_OVERVIEW } from "@/lib/cms/admin-console-preview";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
+import { getCmsSection } from "@/lib/cms/runtime";
 import type {
   CmsAdminActivity,
   CmsAdminIssue,
@@ -958,11 +964,14 @@ export function CmsAdminConsole({
   content,
   previewMode = false,
   canManageTestData = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
   canManageTestData?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const router = useRouter();
   const copy = useMemo(() => createAdminConsoleCopy(content), [content]);
   const [state, setState] = useState<ConsoleState>(
@@ -1117,9 +1126,27 @@ export function CmsAdminConsole({
     activeMenu === "globals" ? "commonAreas" : activeMenu,
   );
   const shell = copy.section("shell");
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
+  const shellSection = getCmsSection(content, "admin.console", "shell");
+  const navigationSection = getCmsSection(
+    content,
+    "admin.console",
+    "navigation",
+  );
+  const activeContentSection = getCmsSection(
+    content,
+    "admin.console",
+    activeMenu === "globals" ? "commonAreas" : activeMenu,
+  );
   return (
     <div className="cms-console-shell">
-      <aside className="cms-console-sidebar">
+      <aside
+        {...cmsEditableSectionProps(
+          navigationSection,
+          "cms-console-sidebar",
+          editingOptions,
+        )}
+      >
         {previewMode ? (
           <div
             className="cms-console-brand"
@@ -1203,8 +1230,21 @@ export function CmsAdminConsole({
         </div>
       </aside>
 
-      <main id="main" className="cms-console-main">
-        <header className="cms-console-topbar">
+      <main
+        {...cmsEditableSectionProps(
+          activeContentSection,
+          "cms-console-main",
+          editingOptions,
+        )}
+        id="main"
+      >
+        <header
+          {...cmsEditableSectionProps(
+            shellSection,
+            "cms-console-topbar",
+            editingOptions,
+          )}
+        >
           <div>
             <p>{shell.text("breadcrumb")}</p>
             <h1>{activeSection.title}</h1>
@@ -1294,6 +1334,13 @@ export function CmsAdminConsole({
           copy={copy}
         />
       ) : null}
+      <CmsSupplementalSections
+        pageKey="admin.console"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </div>
   );
 }

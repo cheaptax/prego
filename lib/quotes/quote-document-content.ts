@@ -16,6 +16,7 @@ export type QuoteDocumentCopy = {
   supplierContactLabel: string;
   contactLabel: string;
   missingValue: string;
+  logoMissing: string;
   sealMissing: string;
   quoteIntro: string;
   itemHeader: string;
@@ -51,8 +52,39 @@ export type QuoteDocumentCopy = {
   yesLabel: string;
   noLabel: string;
   footerStatement: string;
+  documentKindLabel: string;
+  issueDateLabel: string;
+  customerRefLabel: string;
+  phoneLabel: string;
+  emailLabel: string;
+  credentialsTitle: string;
+  credentialsHelp: string;
+  evaluationFactsTitle: string;
+  evaluationFactsHelp: string;
+  engagementPartnerLabel: string;
+  proposerTypeLabel: string;
+  proposerAccountingFirmLabel: string;
+  proposerAuditGroupLabel: string;
+  cpaCountLabel: string;
+  localAuditCountLabel: string;
+  cooperativeTypeLocalAgri: string;
+  cooperativeTypeLocalLivestock: string;
+  cooperativeTypeItem: string;
+  cooperativeTypeGinseng: string;
+  noneTypesLabel: string;
+  taxRateLabel: string;
+  taxRateValue: string;
+  comparisonQrTitle: string;
+  comparisonQrHelp: string;
+  thankYouStatement: string;
+  acceptanceTitle: string;
+  acceptanceHint: string;
+  printNameLabel: string;
+  questionsContactLabel: string;
   emailSubjectTemplate: string;
   emailArrivalTemplate: string;
+  emailRevisionSubjectTemplate: string;
+  emailRevisionArrivalTemplate: string;
   emailTemporaryAccountNotice: string;
   emailAccountIdLabel: string;
   emailActivationLinkLabel: string;
@@ -81,6 +113,7 @@ const COPY_KEYS = [
   "supplierContactLabel",
   "contactLabel",
   "missingValue",
+  "logoMissing",
   "sealMissing",
   "quoteIntro",
   "itemHeader",
@@ -116,8 +149,39 @@ const COPY_KEYS = [
   "yesLabel",
   "noLabel",
   "footerStatement",
+  "documentKindLabel",
+  "issueDateLabel",
+  "customerRefLabel",
+  "phoneLabel",
+  "emailLabel",
+  "credentialsTitle",
+  "credentialsHelp",
+  "evaluationFactsTitle",
+  "evaluationFactsHelp",
+  "engagementPartnerLabel",
+  "proposerTypeLabel",
+  "proposerAccountingFirmLabel",
+  "proposerAuditGroupLabel",
+  "cpaCountLabel",
+  "localAuditCountLabel",
+  "cooperativeTypeLocalAgri",
+  "cooperativeTypeLocalLivestock",
+  "cooperativeTypeItem",
+  "cooperativeTypeGinseng",
+  "noneTypesLabel",
+  "taxRateLabel",
+  "taxRateValue",
+  "thankYouStatement",
+  "comparisonQrTitle",
+  "comparisonQrHelp",
+  "acceptanceTitle",
+  "acceptanceHint",
+  "printNameLabel",
+  "questionsContactLabel",
   "emailSubjectTemplate",
   "emailArrivalTemplate",
+  "emailRevisionSubjectTemplate",
+  "emailRevisionArrivalTemplate",
   "emailTemporaryAccountNotice",
   "emailAccountIdLabel",
   "emailActivationLinkLabel",
@@ -126,6 +190,10 @@ const COPY_KEYS = [
   "emailDownloadLinkLabel",
   "emailDownloadTextLabel",
 ] as const satisfies readonly (keyof QuoteDocumentCopy)[];
+
+const OPTIONAL_EMPTY_COPY_KEYS = new Set<keyof QuoteDocumentCopy>([
+  "credentialsHelp",
+]);
 
 export function quoteDocumentContentFromCms(
   content: CmsPageContent = CMS_PAGE_DEFAULTS["partner.portal"],
@@ -137,10 +205,13 @@ export function quoteDocumentContentFromCms(
     "quoteDocument",
   );
   const copy = Object.fromEntries(
-    COPY_KEYS.map((key) => [
-      key,
-      section.text[key]?.trim() || fallback.text[key]?.trim() || key,
-    ]),
+    COPY_KEYS.map((key) => {
+      const value =
+        section.text[key]?.trim() ||
+        fallback.text[key]?.trim() ||
+        (OPTIONAL_EMPTY_COPY_KEYS.has(key) ? "" : key);
+      return [key, value];
+    }),
   ) as QuoteDocumentCopy;
   return { copy, style: section.style };
 }

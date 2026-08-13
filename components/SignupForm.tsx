@@ -30,6 +30,10 @@ import {
   normalizeKrMobilePhone,
   toKrMobilePhoneE164,
 } from "@/lib/phone";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
 import { isAllowedCustomerEmail } from "@/lib/test-data/email-classification";
@@ -232,10 +236,13 @@ const DUTY_VALUES: Record<string, string> = {
 export function SignupForm({
   content,
   previewMode = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const router = useRouter();
   const identityCopy = getCmsSection(content, "auth.signup", "identity");
   const organizationCopy = getCmsSection(
@@ -249,6 +256,7 @@ export function SignupForm({
   const benefitsCopy = getCmsSection(content, "auth.signup", "benefits");
   const submitCopy = getCmsSection(content, "auth.signup", "submit");
   const messages = content.messages;
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
   const termsAction = consentsCopy.actions.find(
     (action) => action.id === "terms",
   );
@@ -977,7 +985,13 @@ export function SignupForm({
 
   return (
     <form className="auth-form" onSubmit={submit} noValidate>
-        <section className="auth-stage">
+        <section
+          {...cmsEditableSectionProps(
+            identityCopy,
+            "auth-stage",
+            editingOptions,
+          )}
+        >
           <h2>{identityCopy.title}</h2>
           <div className="auth-grid">
             <label className="auth-field">
@@ -1215,7 +1229,13 @@ export function SignupForm({
           </div>
         </section>
 
-        <section className="auth-stage">
+        <section
+          {...cmsEditableSectionProps(
+            organizationCopy,
+            "auth-stage",
+            editingOptions,
+          )}
+        >
           <h2>{organizationCopy.title}</h2>
           <div className="auth-grid">
             <label className="auth-field auth-field--wide">
@@ -1294,7 +1314,9 @@ export function SignupForm({
           )}
         </section>
 
-        <section className="auth-stage">
+        <section
+          {...cmsEditableSectionProps(workCopy, "auth-stage", editingOptions)}
+        >
           <h2>{workCopy.title}</h2>
           <div className="auth-grid">
             <label className="auth-field">
@@ -1330,7 +1352,13 @@ export function SignupForm({
               )}
             </label>
           </div>
-          <div className="auth-field">
+          <div
+            {...cmsEditableSectionProps(
+              cardCopy,
+              "auth-field",
+              editingOptions,
+            )}
+          >
             <span className="auth-field__label">{cardCopy.title}</span>
             <input
               ref={businessCardInputRef}
@@ -1394,7 +1422,13 @@ export function SignupForm({
           </div>
         </section>
 
-        <section className="auth-stage">
+        <section
+          {...cmsEditableSectionProps(
+            consentsCopy,
+            "auth-stage",
+            editingOptions,
+          )}
+        >
           <h2>{consentsCopy.title}</h2>
 
           <label className="auth-check auth-check--all">
@@ -1497,7 +1531,13 @@ export function SignupForm({
           )}
         </section>
 
-        <div className="auth-points-panel">
+        <div
+          {...cmsEditableSectionProps(
+            benefitsCopy,
+            "auth-points-panel",
+            editingOptions,
+          )}
+        >
           <strong>{benefitsCopy.title}</strong>
           <ul>
             {benefitsCopy.items
@@ -1514,11 +1554,13 @@ export function SignupForm({
           </p>
         )}
 
+        <div {...cmsEditableSectionProps(submitCopy, "", editingOptions)}>
         <button className="cta cta--solid cta--block" type="submit" disabled={submitting}>
           {submitting
             ? submitCopy.text.submittingLabel
             : submitCopy.text.submitLabel}
         </button>
+        </div>
     </form>
   );
 }

@@ -9,6 +9,7 @@ import {
   ADMIN_FAQ_DISPLAY_FILTERS,
   ADMIN_FAQ_PUBLIC_FILTERS,
   ADMIN_OPERATION_TAB_IDS,
+  ADMIN_OPERATION_TAB_SECTION_IDS,
   ADMIN_REQUEST_STATUS_FILTERS,
   ADMIN_VISIBILITY_FILTERS,
   createAdminOperationsCopy,
@@ -27,6 +28,27 @@ const root = path.resolve(
 );
 
 describe("admin operations CMS safety contract", () => {
+  it("maps every operations tab to an existing CMS section", () => {
+    const sectionIds = new Set(
+      CMS_PAGE_DEFAULTS["admin.operations"].sections.map(
+        (section) => section.id,
+      ),
+    );
+    for (const tabId of ADMIN_OPERATION_TAB_IDS) {
+      const sectionId = ADMIN_OPERATION_TAB_SECTION_IDS[tabId];
+      assert.ok(
+        sectionIds.has(sectionId),
+        `tab ${tabId} maps to missing CMS section ${sectionId}`,
+      );
+    }
+
+    const dashboard = readFileSync(
+      path.join(root, "components/AdminDashboard.tsx"),
+      "utf8",
+    );
+    assert.match(dashboard, /ADMIN_OPERATION_TAB_SECTION_IDS\[tab\]/);
+  });
+
   it("keeps section copy references stable across React renders", () => {
     const copy = createAdminOperationsCopy(
       structuredClone(CMS_PAGE_DEFAULTS["admin.operations"]),
@@ -184,7 +206,7 @@ describe("admin operations CMS safety contract", () => {
     );
     assert.match(
       preview,
-      /<AdminDashboard content=\{content\} previewMode \/>/,
+      /<AdminDashboard \{\.\.\.shared\} \/>/,
     );
   });
 

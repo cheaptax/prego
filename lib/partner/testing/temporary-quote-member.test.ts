@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { Auth } from "firebase-admin/auth";
 import type { Firestore } from "firebase-admin/firestore";
 import { resolveAccountContextFromRecords } from "@/lib/auth/account-context";
@@ -7,10 +10,23 @@ import { getPostLoginPath } from "@/lib/auth/portal";
 import type { UserRecord } from "@/lib/firebase/schema";
 import {
   activateTemporaryMemberPassword,
+  buildTemporaryQuoteMemberInitialPassword,
   createTemporaryMemberActivationLink,
   provisionTemporaryQuoteMember,
 } from "@/lib/members/temporary-quote-member";
-import { validateTemporaryMemberConversion } from "@/lib/members/temporary-member-conversion";
+import {
+  pickQuotedCooperative,
+  validateTemporaryMemberConversion,
+} from "@/lib/members/temporary-member-conversion";
+import {
+  displayQuotedPhone,
+  pickQuotedContact,
+} from "@/lib/members/quoted-cooperative";
+
+const root = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
 
 class MemorySnapshot {
   private readonly value: unknown;
@@ -107,15 +123,29 @@ function temporaryProfile(uid = "temporary-user"): UserRecord {
 }
 
 describe("temporary quote membership", () => {
+  it("builds the initial password from the last four phone digits", () => {
+    assert.equal(
+      buildTemporaryQuoteMemberInitialPassword("010-1234-5678"),
+      "nh56785678",
+    );
+    assert.equal(
+      buildTemporaryQuoteMemberInitialPassword("01012345678"),
+      "nh56785678",
+    );
+    assert.equal(buildTemporaryQuoteMemberInitialPassword("123"), null);
+  });
+
   it("provisions an email-login identity and links both quote documents", async () => {
     const db = new MemoryDb();
+    let createdPassword = "";
     const auth = {
       async getUserByEmail() {
         throw Object.assign(new Error("missing"), {
           code: "auth/user-not-found",
         });
       },
-      async createUser() {
+      async createUser(payload: { password: string }) {
+        createdPassword = payload.password;
         return { uid: "temporary-user" };
       },
     } as unknown as Auth;
@@ -133,6 +163,9 @@ describe("temporary quote membership", () => {
     });
 
     assert.equal(result.uid, "temporary-user");
+    assert.equal(result.initialPasswordIssued, true);
+    assert.equal(result.initialPassword, "nh56785678");
+    assert.equal(createdPassword, "nh56785678");
     assert.equal(
       (db.values.get("users/temporary-user") as UserRecord).status,
       "temporary_quote_member",
@@ -150,6 +183,71 @@ describe("temporary quote membership", () => {
       ).customerUid,
       "temporary-user",
     );
+  });
+
+  it("resets only unactivated temporary members to the deterministic initial password", async () => {
+    const db = new MemoryDb();
+    db.values.set("users/temporary-user", temporaryProfile());
+    let updatedPassword = "";
+    const auth = {
+      async getUserByEmail() {
+        return { uid: "temporary-user" };
+      },
+      async updateUser(uid: string, update: { password: string }) {
+        assert.equal(uid, "temporary-user");
+        updatedPassword = update.password;
+        return { uid };
+      },
+    } as unknown as Auth;
+
+    const result = await provisionTemporaryQuoteMember({
+      db: db as unknown as Firestore,
+      auth,
+      requestId: "request-2",
+      quoteRequestId: "audit_quote_request-2",
+      email: "quote@example.com",
+      contactName: "견적 고객",
+      phone: "010-1234-5678",
+      marketingConsent: false,
+      now: "2026-07-24T00:00:00.000Z",
+    });
+
+    assert.equal(result.initialPasswordIssued, true);
+    assert.equal(result.initialPassword, "nh56785678");
+    assert.equal(updatedPassword, "nh56785678");
+  });
+
+  it("does not reset passwords for full members", async () => {
+    const db = new MemoryDb();
+    db.values.set("users/full-user", {
+      ...temporaryProfile("full-user"),
+      status: "active",
+      temporaryMember: undefined,
+    } satisfies UserRecord);
+    const auth = {
+      async getUserByEmail() {
+        return { uid: "full-user" };
+      },
+      async updateUser() {
+        throw new Error("must_not_reset_password");
+      },
+    } as unknown as Auth;
+
+    const result = await provisionTemporaryQuoteMember({
+      db: db as unknown as Firestore,
+      auth,
+      requestId: "request-3",
+      quoteRequestId: "audit_quote_request-3",
+      email: "quote@example.com",
+      contactName: "견적 고객",
+      phone: "010-1234-5678",
+      marketingConsent: false,
+      now: "2026-07-24T00:00:00.000Z",
+    });
+
+    assert.equal(result.profileStatus, "active");
+    assert.equal(result.initialPasswordIssued, false);
+    assert.equal(result.initialPassword, null);
   });
 
   it("uses a one-time activation link without exposing a temporary password", async () => {
@@ -218,24 +316,29 @@ describe("temporary quote membership", () => {
     assert.equal(getPostLoginPath(account), "/mypage/quotes");
   });
 
-  it("requires complete remaining membership fields and explicit consent", () => {
+  it("requires remaining membership fields and a single conversion consent", () => {
     const valid = {
       cooperativeId: "cooperative-1",
       position: "과장",
       duty: "accounting",
-      consents: {
-        terms: true,
+      conversionConsent: true,
+      existingConsents: {
+        terms: false,
         privacy: true,
-        marketing: false,
-        email: false,
+        marketing: true,
+        email: true,
         sms: false,
         kakao: false,
       },
     };
-    assert.equal(
-      validateTemporaryMemberConversion(valid).cooperativeId,
-      "cooperative-1",
-    );
+    assert.deepEqual(validateTemporaryMemberConversion(valid).consents, {
+      terms: true,
+      privacy: true,
+      marketing: true,
+      email: true,
+      sms: false,
+      kakao: false,
+    });
     assert.throws(
       () =>
         validateTemporaryMemberConversion({
@@ -248,9 +351,79 @@ describe("temporary quote membership", () => {
       () =>
         validateTemporaryMemberConversion({
           ...valid,
-          consents: { ...valid.consents, privacy: false },
+          conversionConsent: false,
         }),
       /consent_required/u,
     );
+  });
+
+  it("asks only for conversion consent on the membership conversion screen", () => {
+    const form = readFileSync(
+      path.join(root, "components/TemporaryMemberConversionForm.tsx"),
+      "utf8",
+    );
+    assert.equal((form.match(/type="checkbox"/g) ?? []).length, 1);
+    assert.match(form, /conversionConsent: true/);
+    assert.equal(form.includes("marketingConsent"), false);
+    assert.equal(form.includes("termsConsent"), false);
+    assert.match(form, /className="login-page"/);
+    assert.match(form, /temporaryConversionQuotedNameLabel/);
+    assert.match(form, /temporaryConversionQuotedPhoneLabel/);
+    assert.match(form, /quotedContact\.customerName/);
+    assert.match(form, /quotedContact\.customerPhone/);
+  });
+
+  it("reuses the latest quoted cooperative and contact instead of asking again", () => {
+    assert.deepEqual(
+      pickQuotedCooperative([
+        {
+          cooperativeId: "old",
+          cooperativeName: "이전농협",
+          customerName: "이전 담당자",
+          customerPhone: "010-0000-0000",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+        {
+          cooperativeId: "quoted",
+          cooperativeName: "재경농협",
+          customerName: "김농협",
+          customerPhone: "+821012345678",
+          updatedAt: "2026-08-13T00:00:00.000Z",
+        },
+      ]),
+      {
+        cooperativeId: "quoted",
+        cooperativeName: "재경농협",
+        customerName: "김농협",
+        customerPhone: "+821012345678",
+      },
+    );
+  });
+
+  it("formats quoted phones so customers can confirm the number they submitted", () => {
+    assert.equal(displayQuotedPhone("+821012345678"), "010-1234-5678");
+    assert.equal(displayQuotedPhone("01012345678"), "010-1234-5678");
+    assert.deepEqual(
+      pickQuotedContact([
+        {
+          customerName: "김농협",
+          customerPhone: "010-1234-5678",
+          updatedAt: "2026-08-13T00:00:00.000Z",
+        },
+      ]),
+      { customerName: "김농협", customerPhone: "010-1234-5678" },
+    );
+  });
+
+  it("lets customers confirm quote-request identity on the inbox before conversion", () => {
+    const page = readFileSync(
+      path.join(root, "components/CustomerQuotesPage.tsx"),
+      "utf8",
+    );
+    assert.match(page, /requestInfoTitle/);
+    assert.match(page, /requestNameLabel/);
+    assert.match(page, /requestPhoneLabel/);
+    assert.match(page, /requestCooperativeLabel/);
+    assert.match(page, /displayQuotedPhone/);
   });
 });

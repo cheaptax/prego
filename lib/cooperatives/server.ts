@@ -1,6 +1,7 @@
 import {
   DEMO_COOPERATIVE_COLLECTION,
   TEST_COOPERATIVE_DEFINITIONS,
+  createTestCooperativeMaster,
   parseTestCooperativeMaster,
   searchCooperativeCatalog,
   toDemoCooperativeSearchItem,
@@ -37,6 +38,7 @@ export function isDemoCooperativeSignupEnabled() {
 
 async function readTestMasters(): Promise<DemoCooperativeMasterRecord[]> {
   if (!isDemoCooperativeSignupEnabled()) return [];
+  const now = new Date().toISOString();
   const snapshots = await Promise.all(
     TEST_COOPERATIVE_DEFINITIONS.map((definition) =>
       adminDb()
@@ -45,10 +47,14 @@ async function readTestMasters(): Promise<DemoCooperativeMasterRecord[]> {
         .get(),
     ),
   );
-  return snapshots.flatMap((snapshot) => {
-    if (!snapshot.exists) return [];
-    const record = parseTestCooperativeMaster(snapshot.data(), snapshot.id);
-    return record ? [record] : [];
+  return TEST_COOPERATIVE_DEFINITIONS.map((definition, index) => {
+    const snapshot = snapshots[index];
+    if (snapshot.exists) {
+      const record = parseTestCooperativeMaster(snapshot.data(), snapshot.id);
+      if (record) return record;
+    }
+    // Firestore에 아직 시드되지 않아도 검색·선택 가능하도록 정의 기반으로 합성
+    return createTestCooperativeMaster(definition, now);
   });
 }
 
@@ -99,12 +105,22 @@ export async function resolveSignupCooperative(
   const demo = (await readTestMasters()).find(
     (record) => record.cooperativeId === cooperativeId,
   );
-  return demo
-    ? {
-        ...toDemoCooperativeSearchItem(demo),
-        masterSource: "DEMO_FIRESTORE",
-      }
-    : null;
+  if (demo) {
+    return {
+      ...toDemoCooperativeSearchItem(demo),
+      masterSource: "DEMO_FIRESTORE",
+    };
+  }
+  const definition = TEST_COOPERATIVE_DEFINITIONS.find(
+    (item) => item.cooperativeId === cooperativeId,
+  );
+  if (!definition) return null;
+  return {
+    ...toDemoCooperativeSearchItem(
+      createTestCooperativeMaster(definition, new Date().toISOString()),
+    ),
+    masterSource: "DEMO_FIRESTORE",
+  };
 }
 
 export async function searchSignupCooperatives(

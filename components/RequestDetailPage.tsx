@@ -21,10 +21,15 @@ import type {
   OrganizationRecord,
   UserRecord,
 } from "@/lib/firebase/schema";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
 
-type Props = {
+type Props = CmsSectionEditingOptions & {
   requestId: string;
   content: CmsPageContent;
   previewMode?: boolean;
@@ -115,6 +120,9 @@ export function RequestDetailPage({
   requestId,
   content,
   previewMode = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: Props) {
   const router = useRouter();
   const summaryCopy = getCmsSection(
@@ -140,6 +148,7 @@ export function RequestDetailPage({
   );
   const ratingCopy = getCmsSection(content, "member.requestDetail", "rating");
   const dialogsCopy = getCmsSection(content, "member.requestDetail", "dialogs");
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
   const messages = content.messages;
   const [state, setState] = useState<State>(previewMode ? "ready" : "loading");
   const [overview, setOverview] = useState<Overview | null>(
@@ -508,7 +517,13 @@ export function RequestDetailPage({
           </span>
         </div>
 
-        <div className="wallet-hero wallet-hero--compact request-detail-hero">
+        <div
+          {...cmsEditableSectionProps(
+            summaryCopy,
+            "wallet-hero wallet-hero--compact request-detail-hero",
+            editingOptions,
+          )}
+        >
           <div>
             <span className="kicker">{summaryCopy.eyebrow}</span>
             <h2>{request.subject}</h2>
@@ -533,7 +548,13 @@ export function RequestDetailPage({
           </dl>
         </div>
 
-        <article className="portal-card">
+        <article
+          {...cmsEditableSectionProps(
+            requestCopy,
+            "portal-card",
+            editingOptions,
+          )}
+        >
           <span className="tag tag--gold">{requestCopy.eyebrow}</span>
           <h3>{request.subject}</h3>
           <p>{request.message}</p>
@@ -544,7 +565,13 @@ export function RequestDetailPage({
         </article>
 
         {(request.attachments?.length ?? 0) > 0 && (
-          <article className="portal-card">
+          <article
+            {...cmsEditableSectionProps(
+              attachmentsCopy,
+              "portal-card",
+              editingOptions,
+            )}
+          >
             <span className="tag tag--gold">{attachmentsCopy.eyebrow}</span>
             <h3>
               {attachmentsCopy.title} {request.attachments?.length ?? 0}
@@ -564,7 +591,13 @@ export function RequestDetailPage({
           </article>
         )}
 
-        <article className="portal-card">
+        <article
+          {...cmsEditableSectionProps(
+            answerCopy,
+            "portal-card",
+            editingOptions,
+          )}
+        >
           <span className="tag tag--gold">{answerCopy.eyebrow}</span>
           <h3>{answer ? answerCopy.title : answerCopy.description}</h3>
           {answer && visibleAnswer ? (
@@ -600,7 +633,13 @@ export function RequestDetailPage({
         </article>
 
         {visibleAnswer && (
-          <article className="portal-card request-actions-card">
+          <article
+            {...cmsEditableSectionProps(
+              followupCopy,
+              "portal-card request-actions-card",
+              editingOptions,
+            )}
+          >
             <span className="tag tag--gold">{followupCopy.eyebrow}</span>
             <h3>{followupCopy.title}</h3>
             <p>{followupCopy.description}</p>
@@ -639,7 +678,14 @@ export function RequestDetailPage({
             </div>
 
             {(completionRatingOpen || hasRating) && !isCompleted && (
-              <div className="answer-rating-box" id="answer-rating-section">
+              <div
+                {...cmsEditableSectionProps(
+                  ratingCopy,
+                  "answer-rating-box",
+                  editingOptions,
+                )}
+                id="answer-rating-section"
+              >
                 <div>
                   <h4>
                     {ratingCopy.title}{" "}
@@ -827,6 +873,13 @@ export function RequestDetailPage({
           </div>
         </div>
       )}
+      <CmsSupplementalSections
+        pageKey="member.requestDetail"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </section>
   );
 }

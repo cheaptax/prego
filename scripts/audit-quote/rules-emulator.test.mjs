@@ -48,6 +48,8 @@ describe("audit-quote firestore rules (static contract)", () => {
       "auditQuoteEmailDedup",
       "auditQuoteRateLimits",
       "auditQuoteNotifications",
+      "phoneVerificationChallenges",
+      "phoneVerificationRateLimits",
     ]) {
       assert.match(rules, new RegExp(`match /${name}/`));
     }

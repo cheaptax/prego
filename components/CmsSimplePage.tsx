@@ -1,9 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
+import { getCmsKnownSectionIds } from "@/lib/cms/section-lifecycle";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
-import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
 
-type Props = {
+type Props = CmsSectionEditingOptions & {
   pageKey:
     | "auth.pendingApproval"
     | "auth.portalAccessDenied"
@@ -14,10 +19,7 @@ type Props = {
     | "framework.notFound";
   content: CmsPageContent;
   mainId?: string | null;
-  editing?: boolean;
   previewMode?: boolean;
-  selectedSectionId?: string;
-  onSelectSection?: (sectionId: string) => void;
   cardActions?: ReactNode;
 };
 
@@ -52,26 +54,14 @@ export function CmsSimplePage({
   onSelectSection,
   cardActions,
 }: Props) {
-  function sectionProps(section: CmsSection, className: string) {
-    const root = cmsSectionRootProps(section, className);
-    return {
-      ...root,
-      className: [
-        root.className,
-        editing ? "cms-home-edit-section" : "",
-        editing && selectedSectionId === section.id ? "is-selected" : "",
-        editing && !section.visible ? "is-hidden" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      tabIndex: editing ? 0 : undefined,
-      onClick: editing ? () => onSelectSection?.(section.id) : undefined,
-      onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
-    };
-  }
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
+  const knownIds = getCmsKnownSectionIds(pageKey);
 
   const sections = content.sections.filter(
-    (section) => section.visible || editing,
+    (section) =>
+      (!section.deleted || editing) &&
+      (section.visible || editing) &&
+      knownIds.has(section.id),
   );
   const isLoginLayout =
     pageKey === "auth.pendingApproval" ||
@@ -86,8 +76,10 @@ export function CmsSimplePage({
     return (
       <main id={mainId ?? undefined} className="login-page">
         <section className="login-shell">
-          {sections.length > 1 ? (
-            <header {...sectionProps(hero, "login-head")}>
+          {sections.length > 1 && hero ? (
+            <header
+              {...cmsEditableSectionProps(hero, "login-head", editingOptions)}
+            >
               {hero.eyebrow ? (
                 <span className="login-head__eyebrow">
                   <span className="dot" aria-hidden="true" />
@@ -107,42 +99,52 @@ export function CmsSimplePage({
               ) : null}
             </header>
           ) : null}
-          <section
-            {...sectionProps(
-              card,
-              pageKey === "framework.notFound"
-                ? "login-card login-card--not-found"
-                : "login-card",
-            )}
-          >
-            {card.eyebrow ? (
-              <span className="login-card__tag">{card.eyebrow}</span>
-            ) : null}
-            <h2 className="login-card__title">{card.title}</h2>
-            {card.description ? (
-              <p className="login-card__lede">{card.description}</p>
-            ) : null}
-            {cardActions ??
-              card.actions.map((action, index) => (
-                <Link
-                  className={
-                    index === 0
-                      ? "login-card__primary"
-                      : "login-card__ghost"
-                  }
-                  href={action.href}
-                  key={action.id}
-                  onClick={
-                    editing || previewMode
-                      ? (event) => event.preventDefault()
-                      : undefined
-                  }
-                >
-                  {action.label}
-                </Link>
-              ))}
-          </section>
+          {card ? (
+            <section
+              {...cmsEditableSectionProps(
+                card,
+                pageKey === "framework.notFound"
+                  ? "login-card login-card--not-found"
+                  : "login-card",
+                editingOptions,
+              )}
+            >
+              {card.eyebrow ? (
+                <span className="login-card__tag">{card.eyebrow}</span>
+              ) : null}
+              <h2 className="login-card__title">{card.title}</h2>
+              {card.description ? (
+                <p className="login-card__lede">{card.description}</p>
+              ) : null}
+              {cardActions ??
+                card.actions.map((action, index) => (
+                  <Link
+                    className={
+                      index === 0
+                        ? "login-card__primary"
+                        : "login-card__ghost"
+                    }
+                    href={action.href}
+                    key={action.id}
+                    onClick={
+                      editing || previewMode
+                        ? (event) => event.preventDefault()
+                        : undefined
+                    }
+                  >
+                    {action.label}
+                  </Link>
+                ))}
+            </section>
+          ) : null}
         </section>
+        <CmsSupplementalSections
+          pageKey={pageKey}
+          content={content}
+          editing={editing}
+          selectedSectionId={selectedSectionId}
+          onSelectSection={onSelectSection}
+        />
       </main>
     );
   }
@@ -152,9 +154,10 @@ export function CmsSimplePage({
       {sections.map((section, index) => (
         <section
           key={section.id}
-          {...sectionProps(
+          {...cmsEditableSectionProps(
             section,
             index === 0 ? "policy-hero" : "policy-section",
+            editingOptions,
           )}
         >
           <div className="policy-section__inner">
@@ -187,6 +190,13 @@ export function CmsSimplePage({
           </div>
         </section>
       ))}
+      <CmsSupplementalSections
+        pageKey={pageKey}
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </main>
   );
 }

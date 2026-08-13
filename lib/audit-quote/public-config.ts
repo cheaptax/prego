@@ -1,4 +1,5 @@
 import { getAuditQuoteConfig } from "@/lib/audit-quote/config";
+import { AUDIT_QUOTE_FIXED_FISCAL_YEAR } from "@/lib/audit-quote/fiscal-year";
 import type { PublicAuditQuoteConfig } from "@/lib/audit-quote/public-types";
 
 export type { PublicAuditQuoteConfig };
@@ -40,6 +41,7 @@ export function getPublicAuditQuoteConfig(
     channel: "event_page",
     pagePath: base.pagePath,
     privacyPolicyHref: env.AUDIT_QUOTE_PRIVACY_POLICY_HREF?.trim() || "/signup",
+    fixedFiscalYear: AUDIT_QUOTE_FIXED_FISCAL_YEAR,
     guaranteeMinQuotes: readBool(env, "AUDIT_QUOTE_GUARANTEE_MIN_QUOTES", false),
     showPointsBenefit,
     pointsBenefitBaseLabel: showPointsBenefit ? pointsLabel : null,

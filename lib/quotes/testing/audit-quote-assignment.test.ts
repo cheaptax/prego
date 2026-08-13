@@ -5,7 +5,11 @@ import {
   isPartnerEligibleForAuditQuote,
   resolveExpectedAuditQuoteCount,
 } from "@/lib/quotes/audit-quote-assignment";
-import { quoteRequestIdFor } from "@/lib/quotes/quote-requests";
+import { quoteAutomationPlanLookupIds, quoteRequestIdFor } from "@/lib/quotes/quote-requests";
+import {
+  quoteRequestIdsForSafePriceRewrite,
+  recipientEmailForQuoteRewrite,
+} from "@/lib/quotes/safe-price-rewrite-helpers";
 
 describe("audit quote partner assignment", () => {
   it("accepts partners with audit field or accounting professions", () => {
@@ -53,6 +57,37 @@ describe("audit quote partner assignment", () => {
     assert.equal(
       quoteRequestIdFor("audit_quote", "abc123"),
       "audit_quote_abc123",
+    );
+  });
+
+  it("looks up automation presets from either inbox or raw request ids", () => {
+    assert.deepEqual(quoteAutomationPlanLookupIds("abc123"), [
+      "audit_quote_abc123",
+      "abc123",
+    ]);
+    assert.deepEqual(quoteAutomationPlanLookupIds("audit_quote_abc123"), [
+      "audit_quote_abc123",
+    ]);
+  });
+
+  it("resolves quote request docs and customer email for safe-price rewrites", () => {
+    assert.deepEqual(
+      quoteRequestIdsForSafePriceRewrite("abc123", "audit_quote_abc123"),
+      ["audit_quote_abc123", "abc123"],
+    );
+    assert.equal(
+      recipientEmailForQuoteRewrite(
+        { customerEmail: "" },
+        { customerEmail: "coop@nonghyup.com" },
+      ),
+      "coop@nonghyup.com",
+    );
+    assert.equal(
+      recipientEmailForQuoteRewrite(
+        { customerEmail: "quote@nonghyup.com" },
+        { customerEmail: "coop@nonghyup.com" },
+      ),
+      "quote@nonghyup.com",
     );
   });
 });

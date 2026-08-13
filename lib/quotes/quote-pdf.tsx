@@ -14,15 +14,26 @@ import {
   quoteConditionRows,
   quoteDisplayNumber,
   quoteDocumentTitle,
+  quoteEvaluationCapacityRows,
+  quoteIssueDate,
+  quotePartnerCredentialRows,
+  quotePartnerEvaluationFactRows,
   quoteRecipient,
 } from "@/lib/quotes/quote-presentation";
+import { formatQuoteVersionLabel } from "@/lib/quotes/quote-revision";
+import { quoteComparisonReportUrl } from "@/lib/quotes/quote-comparison-link";
 import {
   quoteDocumentContentFromCms,
   type QuoteDocumentContent,
-  type QuoteDocumentCopy,
 } from "@/lib/quotes/quote-document-content";
+import { renderQuoteComparisonQrDataUri } from "@/lib/quotes/quote-pdf-qr";
 
 const FONT_FAMILY = "NH-Pretendard-Quote";
+const NAVY = "#1B365D";
+const NAVY_SOFT = "#E8EEF5";
+const RULE = "#D7DEE8";
+const MUTED = "#5B6B7C";
+const INK = "#1A2332";
 const PRETENDARD_PACKAGE_ROOT = path.join(
   process.cwd(),
   "node_modules",
@@ -49,66 +60,311 @@ Font.register({
 
 const styles = StyleSheet.create({
   page: {
-    padding: 36,
-    paddingBottom: 64,
+    paddingTop: 50,
+    paddingHorizontal: 32,
+    paddingBottom: 58,
     fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    color: "#111827",
+    fontSize: 9.5,
+    color: INK,
   },
-  header: {
+  runningHeader: {
+    position: "absolute",
+    top: 18,
+    left: 32,
+    right: 32,
+    height: 22,
+    borderBottomWidth: 1.5,
+    borderBottomColor: NAVY,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    paddingBottom: 4,
+  },
+  runningBrand: {
+    color: NAVY,
+    fontSize: 8,
+    fontWeight: 700,
+    letterSpacing: 0.4,
+  },
+  runningMeta: {
+    color: MUTED,
+    fontSize: 7.5,
+  },
+  brandRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 18,
+    marginBottom: 10,
   },
-  logo: { width: 96, height: 40, objectFit: "contain" },
-  title: {
-    fontSize: 18,
-    fontWeight: 700,
-    lineHeight: 1.35,
+  brandBlock: {
+    flexGrow: 1,
+    paddingRight: 16,
+    maxWidth: "62%",
+  },
+  logo: { width: 92, height: 34, objectFit: "contain", marginBottom: 8 },
+  logoPlaceholder: {
+    color: MUTED,
+    fontSize: 7.5,
     marginBottom: 8,
   },
-  muted: { color: "#6b7280" },
-  section: { marginTop: 18 },
-  sectionTitle: { fontSize: 13, fontWeight: 700, marginBottom: 8 },
-  supplierBox: {
-    border: "1px solid #d1d5db",
+  companyName: {
+    fontSize: 15,
+    fontWeight: 700,
+    color: NAVY,
+    marginBottom: 4,
+  },
+  brandLine: {
+    color: MUTED,
+    fontSize: 8,
+    lineHeight: 1.45,
+  },
+  quoteMeta: {
+    width: 196,
+    alignItems: "flex-end",
+  },
+  documentKind: {
+    fontSize: 22,
+    fontWeight: 700,
+    color: "#7A93B2",
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  metaTable: {
+    width: 196,
+    borderWidth: 1,
+    borderColor: RULE,
+  },
+  metaRow: {
     flexDirection: "row",
-    minHeight: 96,
+    borderBottomWidth: 1,
+    borderBottomColor: RULE,
   },
-  supplierDetails: { flexGrow: 1, padding: 12 },
-  supplierName: { fontSize: 16, fontWeight: 700, marginBottom: 8 },
-  supplierLine: { lineHeight: 1.55 },
-  sealBox: {
-    width: 104,
-    borderLeft: "1px solid #d1d5db",
-    alignItems: "center",
-    justifyContent: "center",
+  metaLabel: {
+    width: 78,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    backgroundColor: NAVY_SOFT,
+    color: NAVY,
+    fontSize: 7.5,
+    fontWeight: 700,
+  },
+  metaValue: {
+    flexGrow: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    fontSize: 8,
+    textAlign: "right",
+  },
+  subject: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: NAVY,
+    marginBottom: 12,
+    lineHeight: 1.4,
+  },
+  sectionBar: {
+    backgroundColor: NAVY,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    marginBottom: 0,
+  },
+  sectionBarText: {
+    color: "#ffffff",
+    fontSize: 8.5,
+    fontWeight: 700,
+    letterSpacing: 0.6,
+  },
+  panel: {
+    borderWidth: 1,
+    borderColor: RULE,
+    borderTopWidth: 0,
     padding: 8,
+    marginBottom: 10,
   },
-  seal: { width: 72, height: 72, objectFit: "contain" },
-  sealPlaceholder: { color: "#9ca3af", fontSize: 9 },
-  quoteIntro: { marginTop: 24, marginBottom: 10, fontSize: 11 },
-  row: { flexDirection: "row", borderBottom: "1px solid #e5e7eb" },
-  th: { padding: 7, fontWeight: 700, backgroundColor: "#f9fafb" },
-  td: { padding: 7 },
-  colName: { width: "42%" },
-  colQty: { width: "14%", textAlign: "right" },
-  colMoney: { width: "22%", textAlign: "right" },
-  totalBox: { marginTop: 12, marginLeft: "auto", width: 220 },
-  totalRow: { flexDirection: "row", justifyContent: "space-between", padding: 4 },
-  grandTotal: { fontSize: 14, fontWeight: 700 },
-  note: { lineHeight: 1.5 },
+  twoCol: {
+    flexDirection: "row",
+  },
+  col: { flexGrow: 1, flexBasis: 0, paddingRight: 10 },
+  factRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 4,
+    borderBottomWidth: 0.6,
+    borderBottomColor: "#EEF2F6",
+  },
+  factRowLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 0,
+  },
+  factLabel: {
+    width: 108,
+    color: MUTED,
+    fontSize: 8,
+    flexShrink: 0,
+  },
+  factValue: {
+    flexGrow: 1,
+    fontSize: 9,
+    fontWeight: 600,
+    color: INK,
+    textAlign: "right",
+  },
+  help: {
+    color: MUTED,
+    fontSize: 7.5,
+    marginBottom: 8,
+    lineHeight: 1.4,
+  },
+  supplierRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  supplierFacts: {
+    flexGrow: 1,
+    flexShrink: 1,
+    paddingRight: 16,
+  },
+  sealBox: {
+    width: 72,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  seal: { width: 68, height: 68, objectFit: "contain" },
+  sealPlaceholder: { color: MUTED, fontSize: 8, textAlign: "center" },
+  intro: {
+    marginBottom: 8,
+    fontSize: 10,
+    fontWeight: 600,
+  },
+  tableHeader: {
+    flexDirection: "row",
+    backgroundColor: NAVY,
+  },
+  tableRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: RULE,
+  },
+  tableRowAlt: {
+    backgroundColor: "#F5F7FA",
+  },
+  th: {
+    color: "#ffffff",
+    fontWeight: 700,
+    fontSize: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+  },
+  td: {
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    fontSize: 8.5,
+  },
+  itemName: { fontWeight: 600 },
+  itemDesc: { color: MUTED, fontSize: 7.5, marginTop: 2 },
+  colName: { width: "46%" },
+  colQty: { width: "12%", textAlign: "right" },
+  colMoney: { width: "21%", textAlign: "right" },
+  bottomRow: {
+    flexDirection: "row",
+    marginTop: 12,
+    alignItems: "flex-start",
+    width: "100%",
+  },
+  termsCol: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    paddingRight: 16,
+    minWidth: 0,
+  },
+  termLine: {
+    fontSize: 8,
+    lineHeight: 1.5,
+    marginBottom: 3,
+  },
+  totals: {
+    width: 210,
+    flexShrink: 0,
+    borderWidth: 1,
+    borderColor: RULE,
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: RULE,
+  },
+  grandTotal: {
+    backgroundColor: NAVY_SOFT,
+    borderBottomWidth: 0,
+  },
+  grandTotalText: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: NAVY,
+  },
+  comparison: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    borderWidth: 1,
+    borderColor: RULE,
+    paddingVertical: 8,
+    paddingLeft: 8,
+    paddingRight: 12,
+    width: "100%",
+  },
+  qrImage: {
+    width: 56,
+    height: 56,
+    marginRight: 8,
+    flexShrink: 0,
+  },
+  comparisonCopy: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    paddingRight: 4,
+  },
+  comparisonTitle: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: NAVY,
+    marginBottom: 4,
+  },
+  comparisonHelp: {
+    color: MUTED,
+    fontSize: 7.5,
+    lineHeight: 1.5,
+  },
   footer: {
     position: "absolute",
-    left: 36,
-    right: 36,
-    bottom: 24,
-    borderTop: "1px solid #d1d5db",
-    paddingTop: 8,
+    left: 32,
+    right: 32,
+    bottom: 18,
+    borderTopWidth: 1,
+    borderTopColor: RULE,
+    paddingTop: 6,
+    alignItems: "center",
+  },
+  footerLine: {
+    color: MUTED,
+    fontSize: 7.5,
     textAlign: "center",
-    color: "#4b5563",
-    fontSize: 8.5,
+    lineHeight: 1.4,
+  },
+  thankYou: {
+    marginTop: 3,
+    fontSize: 9,
+    fontWeight: 700,
+    color: NAVY,
+    textAlign: "center",
   },
 });
 
@@ -122,7 +378,14 @@ export async function renderQuotePdf(input: {
   sealDataUri?: string;
   documentContent?: QuoteDocumentContent;
 }) {
-  return renderToBuffer(<QuotePdfDocument {...input} />);
+  const comparisonUrl = quoteComparisonReportUrl({
+    quote: input.quote,
+    quoteRequest: input.quoteRequest,
+  });
+  const qrDataUri = await renderQuoteComparisonQrDataUri(comparisonUrl);
+  return renderToBuffer(
+    <QuotePdfDocument {...input} qrDataUri={qrDataUri} />,
+  );
 }
 
 function QuotePdfDocument({
@@ -130,12 +393,14 @@ function QuotePdfDocument({
   quoteRequest,
   logoDataUri,
   sealDataUri,
+  qrDataUri,
   documentContent = quoteDocumentContentFromCms(),
 }: {
   quote: QuoteRecord;
   quoteRequest: QuoteRequestRecord;
   logoDataUri?: string;
   sealDataUri?: string;
+  qrDataUri: string;
   documentContent?: QuoteDocumentContent;
 }) {
   const { copy, style: cmsStyle } = documentContent;
@@ -143,9 +408,17 @@ function QuotePdfDocument({
   const displayNumber = quoteDisplayNumber(quote, quoteRequest);
   const recipient = quoteRecipient(quoteRequest, copy);
   const conditionRows = quoteConditionRows(quote, copy);
+  const credentialRows = quotePartnerCredentialRows(quote, copy);
+  const evaluationFactRows = quotePartnerEvaluationFactRows(quote, copy);
+  const capacityRows = quoteEvaluationCapacityRows(quote, copy);
+  const issueDate = quoteIssueDate(quote) || copy.missingValue;
+  const contactLine = [quote.supplierContactName, quote.supplierContactPhone, quote.supplierContactEmail]
+    .filter(Boolean)
+    .join(" · ");
   const titleStyle = cmsTitleStyle(cmsStyle);
   const bodyStyle = cmsBodyStyle(cmsStyle);
   const sectionStyle = cmsSectionStyle(cmsStyle);
+
   return (
     <Document
       title={documentTitle}
@@ -153,51 +426,90 @@ function QuotePdfDocument({
       subject={quoteRequest.subject}
     >
       <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          <View>
-            <Text style={[styles.title, titleStyle]}>{documentTitle}</Text>
-            <Text style={styles.muted}>
-              {copy.quoteNumberLabel}: {displayNumber} /{" "}
-              {copy.documentVersionLabel}: {quote.version}
+        <View style={styles.brandRow} wrap={false}>
+          <View style={styles.brandBlock}>
+            {logoDataUri ? (
+              // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image does not expose an alt prop.
+              <Image src={logoDataUri} style={styles.logo} />
+            ) : (
+              <Text style={styles.logoPlaceholder}>
+                {copy.logoMissing || "제휴사 로고 미등록"}
+              </Text>
+            )}
+            <Text style={[styles.companyName, titleStyle]}>
+              {quote.supplierName}
+            </Text>
+            <Text style={styles.brandLine}>
+              {copy.addressLabel}: {quote.supplierAddress || copy.missingValue}
+            </Text>
+            <Text style={styles.brandLine}>
+              {copy.phoneLabel}: {quote.supplierContactPhone || copy.missingValue}
+              {"  "}
+              {copy.emailLabel}: {quote.supplierContactEmail || copy.missingValue}
             </Text>
           </View>
-          {logoDataUri ? (
-            // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image does not expose an alt prop.
-            <Image src={logoDataUri} style={styles.logo} />
+          <View style={styles.quoteMeta}>
+            <Text style={styles.documentKind}>{copy.documentKindLabel}</Text>
+            <View style={styles.metaTable}>
+              <MetaRow label={copy.issueDateLabel} value={issueDate} />
+              <MetaRow label={copy.quoteNumberLabel} value={displayNumber} />
+              <MetaRow
+                label={copy.customerRefLabel}
+                value={
+                  quoteRequest.cooperativeName ||
+                  quoteRequest.customerName ||
+                  copy.missingValue
+                }
+              />
+              <MetaRow
+                label={copy.validUntilLabel}
+                value={quote.validUntil?.trim() || copy.missingValue}
+                last
+              />
+            </View>
+          </View>
+        </View>
+
+        <Text style={[styles.subject, titleStyle]}>{documentTitle}</Text>
+
+        <SectionBar title={copy.recipientSectionTitle} />
+        <View style={styles.panel} wrap={false}>
+          <View style={styles.twoCol}>
+            <View style={styles.col}>
+              <FactList
+                rows={[
+                  [copy.customerRefLabel, recipient.name],
+                  [copy.recipientEmailLabel, recipient.email],
+                ]}
+              />
+            </View>
+            <View style={styles.col}>
+              <FactList
+                rows={[
+                  [
+                    copy.phoneLabel,
+                    quoteRequest.customerPhone || copy.missingValue,
+                  ],
+                  [
+                    copy.documentVersionLabel,
+                    formatQuoteVersionLabel(quote.version),
+                  ],
+                ]}
+              />
+            </View>
+          </View>
+          {quoteRequest.subject ? (
+            <Text style={[styles.help, { marginBottom: 0, marginTop: 4 }, bodyStyle]}>
+              {quoteRequest.subject}
+            </Text>
           ) : null}
         </View>
 
-        <View style={[styles.section, sectionStyle]}>
-          <Text style={styles.sectionTitle}>{copy.recipientSectionTitle}</Text>
-          <Text style={bodyStyle}>{recipient.name}</Text>
-          <Text style={styles.muted}>
-            {copy.recipientEmailLabel}: {recipient.email}
-          </Text>
-          <Text style={styles.muted}>{quoteRequest.subject}</Text>
-        </View>
-
-        <View style={[styles.section, sectionStyle]}>
-          <Text style={styles.sectionTitle}>{copy.supplierSectionTitle}</Text>
-          <View style={styles.supplierBox} wrap={false}>
-            <View style={styles.supplierDetails}>
-              <Text style={styles.supplierName}>{quote.supplierName}</Text>
-              <Text style={styles.supplierLine}>
-                {copy.businessNumberLabel}:{" "}
-                {quote.supplierBusinessRegistrationNumber || copy.missingValue}
-              </Text>
-              <Text style={styles.supplierLine}>
-                {copy.addressLabel}: {quote.supplierAddress || copy.missingValue}
-              </Text>
-              <Text style={styles.supplierLine}>
-                {copy.supplierContactLabel}:{" "}
-                {quote.supplierContactName || copy.missingValue}
-              </Text>
-              <Text style={styles.supplierLine}>
-                {copy.contactLabel}:{" "}
-                {[quote.supplierContactPhone, quote.supplierContactEmail]
-                  .filter(Boolean)
-                  .join(" / ") || copy.missingValue}
-              </Text>
+        <SectionBar title={copy.credentialsTitle || copy.supplierSectionTitle} />
+        <View style={styles.panel} wrap={false}>
+          <View style={styles.supplierRow}>
+            <View style={styles.supplierFacts}>
+              <FactList rows={credentialRows} />
             </View>
             <View style={styles.sealBox}>
               {sealDataUri ? (
@@ -210,17 +522,25 @@ function QuotePdfDocument({
           </View>
         </View>
 
-        <View style={[styles.section, sectionStyle]}>
-          <Text style={styles.quoteIntro}>{copy.quoteIntro}</Text>
-          <View style={styles.row}>
+        <View style={sectionStyle}>
+          <Text style={styles.intro}>{copy.quoteIntro}</Text>
+          <View style={styles.tableHeader}>
             <Text style={[styles.th, styles.colName]}>{copy.itemHeader}</Text>
             <Text style={[styles.th, styles.colQty]}>{copy.quantityHeader}</Text>
             <Text style={[styles.th, styles.colMoney]}>{copy.unitPriceHeader}</Text>
             <Text style={[styles.th, styles.colMoney]}>{copy.supplyAmountHeader}</Text>
           </View>
-          {quote.lineItems.map((item) => (
-            <View key={item.id} style={styles.row}>
-              <Text style={[styles.td, styles.colName]}>{item.name}</Text>
+          {quote.lineItems.map((item, index) => (
+            <View
+              key={item.id}
+              style={[styles.tableRow, index % 2 === 1 ? styles.tableRowAlt : {}]}
+            >
+              <View style={[styles.td, styles.colName]}>
+                <Text style={styles.itemName}>{item.name}</Text>
+                {item.description ? (
+                  <Text style={styles.itemDesc}>{item.description}</Text>
+                ) : null}
+              </View>
               <Text style={[styles.td, styles.colQty]}>{item.quantity}</Text>
               <Text style={[styles.td, styles.colMoney]}>
                 {money(item.unitPrice, copy.currencySuffix)}
@@ -230,158 +550,265 @@ function QuotePdfDocument({
               </Text>
             </View>
           ))}
-          <View style={styles.totalBox}>
+        </View>
+
+        <View style={styles.bottomRow} wrap={false}>
+          <View style={styles.termsCol}>
+            <SectionBar title={copy.conditionsTitle} />
+            <View style={styles.panel}>
+              {conditionRows.length > 0 ? (
+                conditionRows.map(([label, value], index) => (
+                  <Text key={label} style={styles.termLine}>
+                    {index + 1}. {label}: {value}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.termLine}>
+                  1. {copy.validUntilLabel}: {quote.validUntil?.trim() || copy.missingValue}
+                </Text>
+              )}
+            </View>
+            <View style={styles.comparison}>
+              {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image does not expose an alt prop. */}
+              <Image src={qrDataUri} style={styles.qrImage} />
+              <View style={styles.comparisonCopy}>
+                <Text style={styles.comparisonTitle}>
+                  {copy.comparisonQrTitle}
+                </Text>
+                <Text style={styles.comparisonHelp} wrap>
+                  {copy.comparisonQrHelp}
+                </Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.totals}>
             <View style={styles.totalRow}>
               <Text>{copy.subtotalLabel}</Text>
               <Text>{money(quote.subtotal, copy.currencySuffix)}</Text>
+            </View>
+            <View style={styles.totalRow}>
+              <Text>{copy.taxRateLabel}</Text>
+              <Text>
+                {quote.taxAmount > 0 ? copy.taxRateValue : copy.noneTypesLabel}
+              </Text>
             </View>
             <View style={styles.totalRow}>
               <Text>{copy.vatLabel}</Text>
               <Text>{money(quote.taxAmount, copy.currencySuffix)}</Text>
             </View>
             <View style={[styles.totalRow, styles.grandTotal]}>
-              <Text>{copy.totalLabel}</Text>
-              <Text>{money(quote.totalAmount, copy.currencySuffix)}</Text>
+              <Text style={styles.grandTotalText}>{copy.totalLabel}</Text>
+              <Text style={styles.grandTotalText}>
+                {money(quote.totalAmount, copy.currencySuffix)}
+              </Text>
             </View>
           </View>
         </View>
 
-        {conditionRows.length > 0 ? (
-          <View style={[styles.section, sectionStyle]}>
-            <Text style={styles.sectionTitle}>{copy.conditionsTitle}</Text>
-            {conditionRows.map(([label, value]) => (
-              <Text key={label} style={styles.note}>
-                {label}: {value}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-
-        {quote.auditEvaluation ? (
-          <View style={[styles.section, sectionStyle]}>
-            <Text style={styles.sectionTitle}>{copy.evaluationTitle}</Text>
-            <Text style={styles.note}>
-              {copy.evaluationConfigLabel}: {quote.auditEvaluation.configName} v
-              {quote.auditEvaluation.configVersion}
-            </Text>
-            <Text style={styles.note}>
-              {copy.evaluationScoreLabel}:{" "}
-              {(quote.auditEvaluation.score.totalScoreBasisPoints / 100).toFixed(2)}
-              {copy.scoreSuffix}
-            </Text>
-            {quote.auditEvaluation.criteria.map((criterion) => (
-              <View key={criterion.id} style={styles.row}>
-                <Text style={[styles.td, styles.colName]}>
-                  {criterion.name}
-                </Text>
-                <Text style={[styles.td, styles.colMoney]}>
-                  {copy.criterionWeightLabel}{" "}
-                  {(criterion.weightBasisPoints / 100).toFixed(2)}
-                </Text>
-                <Text style={[styles.td, styles.colMoney]}>
-                  {copy.criterionScoreLabel}{" "}
-                  {(criterion.scoreBasisPoints / 100).toFixed(2)}
-                </Text>
-              </View>
-            ))}
-            {auditEvaluationSummary(quote, copy).map(([label, value]) => (
-              <Text key={label} style={styles.note}>
-                {label}: {value}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-        <View style={styles.footer} fixed>
-          <Text>
-            {copy.footerStatement}
-          </Text>
-        </View>
+        <QuotePdfChrome
+          supplierName={quote.supplierName}
+          documentKindLabel={copy.documentKindLabel}
+          displayNumber={displayNumber}
+          questionsContactLabel={copy.questionsContactLabel}
+          contactLine={contactLine || copy.missingValue}
+          footerStatement={copy.footerStatement}
+          thankYouStatement={copy.thankYouStatement}
+        />
       </Page>
+
+      {evaluationFactRows.length > 0 || quote.auditEvaluation ? (
+        <Page size="A4" style={styles.page}>
+          {evaluationFactRows.length > 0 ? (
+            <View wrap={false}>
+              <SectionBar title={copy.evaluationFactsTitle} />
+              <View style={styles.panel}>
+                {copy.evaluationFactsHelp ? (
+                  <Text style={styles.help}>{copy.evaluationFactsHelp}</Text>
+                ) : null}
+                <FactList rows={evaluationFactRows} />
+              </View>
+            </View>
+          ) : null}
+
+          {quote.auditEvaluation ? (
+            <View style={sectionStyle} wrap={false}>
+              <SectionBar title={copy.evaluationTitle} />
+              <View style={styles.panel}>
+                <Text style={styles.termLine}>
+                  {copy.evaluationConfigLabel}: {quote.auditEvaluation.configName} v
+                  {quote.auditEvaluation.configVersion}
+                </Text>
+                <Text style={styles.termLine}>
+                  {copy.evaluationScoreLabel}:{" "}
+                  {(quote.auditEvaluation.score.totalScoreBasisPoints / 100).toFixed(2)}
+                  {copy.scoreSuffix}
+                </Text>
+                {quote.auditEvaluation.criteria.map((criterion) => (
+                  <View key={criterion.id} style={styles.tableRow}>
+                    <Text style={[styles.td, styles.colName]}>{criterion.name}</Text>
+                    <Text style={[styles.td, styles.colMoney]}>
+                      {copy.criterionWeightLabel}{" "}
+                      {(criterion.weightBasisPoints / 100).toFixed(2)}
+                    </Text>
+                    <Text style={[styles.td, styles.colMoney]}>
+                      {copy.criterionScoreLabel}{" "}
+                      {(criterion.scoreBasisPoints / 100).toFixed(2)}
+                    </Text>
+                  </View>
+                ))}
+                {capacityRows.map(([label, value]) => (
+                  <Text key={label} style={styles.termLine}>
+                    {label}: {value}
+                  </Text>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          <QuotePdfChrome
+            supplierName={quote.supplierName}
+            documentKindLabel={copy.documentKindLabel}
+            displayNumber={displayNumber}
+            questionsContactLabel={copy.questionsContactLabel}
+            contactLine={contactLine || copy.missingValue}
+            footerStatement={copy.footerStatement}
+            thankYouStatement={copy.thankYouStatement}
+          />
+        </Page>
+      ) : null}
     </Document>
   );
 }
 
-function auditEvaluationSummary(
-  quote: QuoteRecord,
-  copy: QuoteDocumentCopy,
-): Array<[string, string]> {
-  const audit = quote.auditEvaluation?.normalizedQuote;
-  if (!audit) return [];
-  return [
-    [
-      copy.revenueLabel,
-      audit.accountingFirmRevenue
-        ? `${Number(audit.accountingFirmRevenue).toLocaleString("ko-KR")}${copy.currencySuffix}`
-        : "-",
-    ],
-    [
-      copy.recentAuditCountLabel,
-      `${audit.recentNonghyupAuditCount ?? 0}${copy.countSuffix}`,
-    ],
-    [copy.auditedTypesLabel, audit.auditedNonghyupTypes.join(", ") || "-"],
-    [
-      copy.taxExperienceLabel,
-      audit.taxAgencyExperience.hasExperience ? copy.yesLabel : copy.noLabel,
-    ],
-    [
-      copy.subsidyExperienceLabel,
-      audit.subsidySettlementExperience.hasExperience
-        ? copy.yesLabel
-        : copy.noLabel,
-    ],
-    [copy.totalHoursLabel, `${audit.totalPlannedHours ?? 0}${copy.hourSuffix}`],
-    [copy.partnerHoursLabel, `${audit.partnerHours ?? 0}${copy.hourSuffix}`],
-    [copy.teamCountLabel, `${audit.engagementTeam.length}${copy.peopleSuffix}`],
-  ];
+function QuotePdfChrome({
+  supplierName,
+  documentKindLabel,
+  displayNumber,
+  questionsContactLabel,
+  contactLine,
+  footerStatement,
+  thankYouStatement,
+}: {
+  supplierName: string;
+  documentKindLabel: string;
+  displayNumber: string;
+  questionsContactLabel: string;
+  contactLine: string;
+  footerStatement: string;
+  thankYouStatement: string;
+}) {
+  return (
+    <>
+      <View style={styles.runningHeader} fixed>
+        <Text style={styles.runningBrand}>{supplierName}</Text>
+        <Text style={styles.runningMeta}>
+          {documentKindLabel} · {displayNumber}
+        </Text>
+      </View>
+      <View style={styles.footer} fixed>
+        <Text style={styles.footerLine}>
+          {questionsContactLabel}: {contactLine}
+        </Text>
+        <Text style={styles.footerLine}>{footerStatement}</Text>
+        <Text style={styles.thankYou}>{thankYouStatement}</Text>
+      </View>
+    </>
+  );
+}
+
+function SectionBar({ title }: { title: string }) {
+  return (
+    <View style={styles.sectionBar}>
+      <Text style={styles.sectionBarText}>{title}</Text>
+    </View>
+  );
+}
+
+function MetaRow({
+  label,
+  value,
+  last = false,
+}: {
+  label: string;
+  value: string;
+  last?: boolean;
+}) {
+  return (
+    <View style={[styles.metaRow, last ? { borderBottomWidth: 0 } : {}]}>
+      <Text style={styles.metaLabel}>{label}</Text>
+      <Text style={styles.metaValue}>{value}</Text>
+    </View>
+  );
+}
+
+function FactList({ rows }: { rows: Array<[string, string]> }) {
+  return (
+    <View>
+      {rows.map(([label, value], index) => (
+        <View
+          key={label}
+          style={[
+            styles.factRow,
+            index === rows.length - 1 ? styles.factRowLast : {},
+          ]}
+        >
+          <Text style={styles.factLabel} wrap={false}>
+            {label}
+          </Text>
+          <Text style={styles.factValue}>{value}</Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 const PDF_COLORS: Record<string, string> = {
-  text: "#111827",
-  muted: "#6b7280",
-  primary: "#166534",
+  text: INK,
+  muted: MUTED,
+  primary: NAVY,
   accent: "#0f766e",
   surface: "#ffffff",
-  subtle: "#f9fafb",
+  subtle: NAVY_SOFT,
   inverse: "#ffffff",
 };
 
 function cmsTitleStyle(style: QuoteDocumentContent["style"]) {
   const presetSize = {
-    small: 16,
-    default: 18,
-    large: 22,
+    small: 13,
+    default: 15,
+    large: 18,
   }[style.title.sizePreset];
   return {
     fontSize: Math.min(
-      Math.max(style.title.customSizePx?.desktop ?? presetSize, 14),
-      28,
+      Math.max(style.title.customSizePx?.desktop ?? presetSize, 12),
+      22,
     ),
     fontWeight: Number(style.title.fontWeight) as 400 | 500 | 600 | 700 | 800,
     textAlign: style.title.alignment,
-    color: PDF_COLORS[style.title.color] ?? PDF_COLORS.text,
+    color: PDF_COLORS[style.title.color] ?? NAVY,
   };
 }
 
 function cmsBodyStyle(style: QuoteDocumentContent["style"]) {
   const presetSize = {
-    small: 9,
-    default: 10,
-    large: 12,
+    small: 8,
+    default: 9.5,
+    large: 11,
   }[style.body.sizePreset];
   return {
     fontSize: Math.min(
       Math.max(style.body.customSizePx?.desktop ?? presetSize, 8),
-      14,
+      13,
     ),
-    color: PDF_COLORS[style.body.color] ?? PDF_COLORS.text,
+    color: PDF_COLORS[style.body.color] ?? INK,
   };
 }
 
 function cmsSectionStyle(style: QuoteDocumentContent["style"]) {
   const marginTop = {
-    compact: 12,
-    default: 18,
-    relaxed: 24,
+    compact: 8,
+    default: 12,
+    relaxed: 16,
   }[style.container.spacing];
   return { marginTop };
 }

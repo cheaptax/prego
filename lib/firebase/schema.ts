@@ -39,6 +39,9 @@ export type UserRecord = {
     kakao: boolean;
   };
   role: "member" | "admin" | "partner";
+  /** Allowlisted test identities may keep multiple portals on one Auth user. */
+  multiRoleTestAccount?: boolean;
+  enabledPortals?: Array<"customer" | "partner" | "admin">;
   adminRole?: AdminRole;
   adminCapabilityAllow?: AdminPermission[];
   adminCapabilityDeny?: AdminPermission[];
@@ -328,6 +331,23 @@ export type PartnerRecord = {
   sealPath?: string;
   sealContentType?: string;
   sealUpdatedAt?: string;
+  /** Reused NH audit evaluation fields for new quote drafts. */
+  nhAuditEvaluationDefaults?: Pick<
+    NhAuditPartnerFormValues,
+    | "engagementPartnerName"
+    | "proposerType"
+    | "localNonghyupAuditCount2025"
+    | "certifiedPublicAccountantCount"
+    | "accountingFirmRevenueWon"
+    | "auditedNonghyupTypes2025"
+    | "noAuditedNonghyupTypes2025"
+    | "nonghyupTaxAgencyPerformed2025"
+    | "nonghyupSubsidySettlementPerformed2025"
+  >;
+  /** Partner consent for admins to finalize and send audit quotes on behalf of the firm. */
+  opsProxyQuoteSendConsent?: boolean;
+  opsProxyQuoteSendConsentAt?: string;
+  opsProxyQuoteSendConsentBy?: string;
   status: PartnerStatus;
   pointMin: number;
   pointMax: number;
@@ -530,8 +550,12 @@ export type QuoteRecord = {
   nhAuditDraft?: NhAuditPartnerFormValues;
   pdfPath?: string;
   pdfFileName?: string;
+  /** Previous sent quote this revision replaces (customer-visible latest only). */
+  supersedesQuoteId?: string;
   finalizedAt?: string;
   deliveredAt?: string;
+  voidedAt?: string;
+  voidReason?: string;
   createdBy: string;
   createdByEmail?: string;
   createdAt: string;

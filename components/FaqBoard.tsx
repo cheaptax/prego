@@ -1,10 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
 
-export function FaqBoard({ content }: { content: CmsPageContent }) {
+export function FaqBoard({
+  content,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
+}: { content: CmsPageContent } & CmsSectionEditingOptions) {
   const filtersCopy = getCmsSection(content, "public.faq", "filters");
   const listCopy = getCmsSection(content, "public.faq", "list");
   const faqs = useMemo(
@@ -21,6 +30,7 @@ export function FaqBoard({ content }: { content: CmsPageContent }) {
   );
   const [category, setCategory] = useState("");
   const [query, setQuery] = useState("");
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
 
   const categories = useMemo(
     () =>
@@ -49,7 +59,13 @@ export function FaqBoard({ content }: { content: CmsPageContent }) {
       className="faq-board"
       aria-label={filtersCopy.text.boardAriaLabel}
     >
-      <div className="inquiry-board__toolbar faq-board__toolbar">
+      <div
+        {...cmsEditableSectionProps(
+          filtersCopy,
+          "inquiry-board__toolbar faq-board__toolbar",
+          editingOptions,
+        )}
+      >
         <div>
           <strong>
             {filtersCopy.text.countPrefix}{" "}
@@ -82,9 +98,24 @@ export function FaqBoard({ content }: { content: CmsPageContent }) {
       </div>
 
       {filteredFaqs.length === 0 ? (
-        <div className="inquiry-board__state">{content.messages.empty}</div>
+        <div
+          {...cmsEditableSectionProps(
+            listCopy,
+            "inquiry-board__state",
+            editingOptions,
+          )}
+        >
+          {content.messages.empty}
+        </div>
       ) : (
-        <div className="faq-board__list" aria-label={listCopy.title}>
+        <div
+          {...cmsEditableSectionProps(
+            listCopy,
+            "faq-board__list",
+            editingOptions,
+          )}
+          aria-label={listCopy.title}
+        >
           {filteredFaqs.map((faq, index) => (
             <details className="faq-board__row" key={faq.id} open={index === 0}>
                   <summary>

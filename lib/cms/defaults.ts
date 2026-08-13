@@ -562,27 +562,41 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       error: "운영자가 등록한 FAQ가 준비 중입니다. 아래는 기본 안내입니다.",
     },
   ),
-  "auth.login": portalLoginPage({
-    seoTitle: "농협지원센터 로그인",
-    seoDescription: "견적 요청 내역과 평가보고서를 확인합니다.",
-    heroEyebrow: "농협지원센터",
-    heroTitle: "농협지원센터 로그인",
-    heroDescription: "견적 요청 내역과 평가보고서를 확인하세요.",
-    highlight: "로그인",
-    formEyebrow: "고객 로그인",
-    formTitle: "계정으로 로그인",
-    formDescription:
-      "가입한 이메일과 비밀번호를 입력해 상담 내역과 마이페이지를 확인하세요.",
-    secondaryAction: {
-      id: "signup",
-      label: "회원가입",
-      href: "/signup",
-    },
-    showEmailLookup: true,
-    hint: "농협 이메일(@nonghyup.com) 또는 승인된 테스트 계정으로 로그인해 주세요.",
-    accountUnavailable:
-      "현재 이 계정으로 로그인할 수 없습니다. 계정 상태를 확인하거나 고객지원에 문의해 주세요.",
-  }),
+  "auth.login": (() => {
+    const content = portalLoginPage({
+      seoTitle: "농협지원센터 로그인",
+      seoDescription: "견적 요청 내역과 평가보고서를 확인합니다.",
+      heroEyebrow: "농협지원센터",
+      heroTitle: "농협지원센터 로그인",
+      heroDescription: "견적 요청 내역과 평가보고서를 확인하세요.",
+      highlight: "로그인",
+      formEyebrow: "고객 로그인",
+      formTitle: "계정으로 로그인",
+      formDescription:
+        "가입한 이메일과 비밀번호를 입력해 상담 내역과 마이페이지를 확인하세요.",
+      secondaryAction: {
+        id: "signup",
+        label: "회원가입",
+        href: "/signup",
+      },
+      showEmailLookup: true,
+      hint: "농협 이메일(@nonghyup.com) 또는 승인된 테스트 계정으로 로그인해 주세요.",
+      accountUnavailable:
+        "현재 이 계정으로 로그인할 수 없습니다. 계정 상태를 확인하거나 고객지원에 문의해 주세요.",
+    });
+    content.sections.push(
+      section({
+        id: "promoFloat",
+        eyebrow: "기간 한정",
+        title: "2027년도 외부회계감사 견적 신청하기",
+        description: "안내를 눌러 바로 신청할 수 있습니다.",
+        actions: [
+          action("open", "견적 신청하기", "/events/audit-quote"),
+        ],
+      }),
+    );
+    return content;
+  })(),
   "auth.partnerLogin": portalLoginPage({
     seoTitle: "제휴사 로그인 · 농협지원센터",
     seoDescription: "등록된 제휴사 운영자 계정으로 로그인합니다.",
@@ -779,7 +793,18 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           temporaryActivationSubmittingLabel: "계정을 안전하게 준비하는 중...",
           temporaryConversionTitle: "정회원으로 전환하기",
           temporaryConversionDescription:
-            "남은 소속·담당 정보를 입력하면 즉시 정회원 기능과 가입 혜택을 이용할 수 있습니다.",
+            "견적 요청 때 입력한 이름·전화번호와 선택한 농협은 그대로 사용합니다. 직책과 담당업무만 보완하면 정회원 기능과 가입 혜택을 이용할 수 있습니다.",
+          temporaryConversionHelp:
+            "견적 요청 때 입력한 이름·전화번호와 선택한 농협, 개인정보 동의는 그대로 유지됩니다.",
+          temporaryConversionQuotedCooperativeLabel: "견적 요청 농협",
+          temporaryConversionQuotedNameLabel: "견적 요청 이름",
+          temporaryConversionQuotedPhoneLabel: "견적 요청 전화번호",
+          temporaryConversionQuotedMissingValue: "미등록",
+          temporaryConversionConsentLabel: "정회원 전환에 동의합니다",
+          temporaryConversionConsentHelp:
+            "이용약관에 동의하며, 견적 요청 시 동의한 개인정보 수집·이용은 그대로 유지됩니다.",
+          temporaryConversionConsentLinkLabel: "이용약관 보기",
+          temporaryConversionConsentRequired: "정회원 전환에 동의해 주세요.",
           temporaryConversionSubmitLabel: "정회원으로 전환",
           temporaryConversionSubmittingLabel: "정회원 혜택을 적용하는 중...",
         },
@@ -1307,9 +1332,9 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           formDescription: "",
           formAriaLabel: "견적 신청",
           targetCooperativeLabel: "대상 농협명",
-          targetCooperativePlaceholder: "예: 프리고농협",
+          targetCooperativePlaceholder: "농협명 검색 후 선택",
           targetCooperativeHelp:
-            "회계감사 견적을 받을 농협의 정식 명칭을 입력해 주세요.",
+            "마스터에 등록된 농협만 선택할 수 있습니다. 검색 결과에서 선택해 주세요.",
           fiscalYearLabel: "감사 대상 사업연도",
           fiscalYearPlaceholder: "2027",
           fiscalYearHelp:
@@ -1323,6 +1348,8 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           phoneLabel: "휴대폰 번호",
           phonePlaceholder: "010-0000-0000",
           phoneHelp: "",
+          phoneVerifyHelp:
+            "농협 담당자님의 휴대폰 문자 인증후 견적 요청이 가능합니다.",
           privacyConsentLabel: "[필수] 개인정보 수집·이용 동의",
           privacyConsentLinkLabel: "보기",
           marketingConsentLabel: "[선택] 이벤트·혜택 정보 수신 동의",
@@ -1429,14 +1456,14 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       successDescription:
         "담당자가 확인 후 입력하신 이메일로 다음 절차를 안내드려요.",
       temporaryMemberNotice:
-        "견적 요청 이메일을 아이디로 사용하는 임시회원 계정이 자동으로 준비됩니다. 견적이 도착하면 이메일의 일회용 비밀번호 설정 링크를 통해 로그인하고 견적함에서 확인할 수 있습니다.",
+        "견적 요청 이메일을 아이디로 사용하는 임시회원 계정이 자동으로 준비됩니다. 완료 메일의 초기 비밀번호로 로그인하면 견적함과 가격비교 기능을 바로 사용할 수 있습니다.",
       temporaryMemberSecurityNotice:
-        "보안을 위해 임시비밀번호를 이메일 본문에 표시하지 않습니다. 직접 비밀번호를 설정한 뒤 로그인해 주세요.",
+        "초기 비밀번호는 nh + 담당자 휴대폰 번호 뒷자리 4자리 두 번 반복입니다. 보안을 위해 로그인 후 비밀번호를 변경해 주세요.",
       publicReferenceLabel: "접수번호",
       resetLabel: "다른 담당자로 신청하기",
-      targetCooperativeRequired: "대상 농협명을 입력해 주세요.",
+      targetCooperativeRequired: "대상 농협을 검색해 선택해 주세요.",
       targetCooperativeInvalid:
-        "대상 농협명을 2자 이상 300자 이하로 입력해 주세요.",
+        "마스터에 있는 농협만 선택할 수 있습니다. 검색 결과에서 다시 선택해 주세요.",
       fiscalYearRequired: "감사 대상 사업연도가 준비되지 않았습니다.",
       fiscalYearInvalid: "이번 접수는 2027년도만 가능합니다.",
       emailRequired: "농협 이메일을 입력해 주세요.",
@@ -1587,7 +1614,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         id: "disclaimer",
         title: "의사결정 안내",
         description:
-          "평가보고서는 의사결정을 지원하는 참고자료입니다. 최종 감사인 선임 결정과 관련 확인 책임은 해당 농협에 있습니다.",
+          "평가보고서는 동일 기준으로 품질과 보수를 비교해, 농협이 감사인 선임을 검토하고 설명할 근거를 정리합니다.",
         locked: true,
       }),
     ],
@@ -1762,7 +1789,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         id: "guidance",
         title: "비교·평가 안내",
         description:
-          "제출된 견적정보를 동일 기준으로 비교하고 정량평가와 주요 고려사항을 제공합니다. 보고서는 감사인 선임 검토를 지원하는 자료이며, 최종 선임 판단과 의사결정은 우리 농협이 수행합니다.",
+          "제출된 견적정보를 동일 기준으로 비교하고 정량평가와 주요 고려사항을 제공합니다. 보고서는 농협이 감사인 선임 안건을 검토하고 설명할 근거를 정리합니다.",
         locked: true,
       }),
     ],
@@ -1800,17 +1827,18 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         eyebrow: "Evaluation Report",
         title: "감사인 견적 평가보고서",
         description:
-          "확정된 견적 자료와 평가 설정 스냅샷으로 생성된 보고서를 확인합니다.",
+          "제휴사 견적을 배점으로 비교·확정한 뒤, 내부 업무보고에 바로 쓸 수 있는 PDF 보고서를 내려받습니다.",
       }),
       section({
         id: "report",
-        title: "보고서 제공 상태",
+        title: "보고서 작성·다운로드",
         text: {
           fiscalYearLabel: "대상 사업연도",
-          readyLabel: "보고서가 준비되었습니다.",
-          pendingLabel: "아직 제공 가능한 보고서가 없습니다.",
-          downloadLabel: "평가보고서 다운로드",
+          readyLabel: "보고서가 준비되었습니다. PDF를 내려받거나 인쇄하세요.",
+          pendingLabel: "배점을 확인하고 보고서를 확정해 주세요.",
+          downloadLabel: "평가보고서 PDF 다운로드",
           downloadingLabel: "안전한 다운로드 준비 중",
+          printLabel: "인쇄하기",
           downloadExpiredLabel: "고객 다운로드 기간이 만료되었습니다.",
           versionLabel: "보고서 버전",
           retryLabel: "보고서 생성 다시 시도",
@@ -1854,13 +1882,15 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           accountingFirmLabel: "회계법인",
           totalBurdenLabel: "예상 총부담액",
           qualityRawScoreLabel: "품질 원점수",
-          priceBaseScoreLabel: "가격 기초점수",
+          priceBaseScoreLabel: "가격 원점수",
           weightedQualityScoreLabel: "품질 환산점수",
           weightedPriceScoreLabel: "가격 환산점수",
           overallScoreLabel: "최종 종합점수",
           finalRankLabel: "최종 순위",
           eligibilityStatusLabel: "적격 상태",
+          lowPriceEngagementRiskLabel: "저가부실수임 우려",
           eligibleStatusLabel: "적격",
+          eligibleLowPriceRiskStatusLabel: "우려",
           ineligibleStatusLabel: "부적격",
           resubmissionRequiredStatusLabel: "재제출 필요",
           excludedStatusLabel: "평가 제외",
@@ -1873,12 +1903,12 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         id: "disclaimer",
         title: "의사결정 안내",
         description:
-          "이 보고서는 의사결정 지원자료이며 최종 감사인 선임 결정은 해당 농협이 합니다.",
+          "동일 기준으로 회계법인의 품질과 감사보수를 비교해, 농협이 선임 안건을 검토하고 설명할 근거를 한눈에 보여줍니다.",
         locked: true,
       }),
     ],
     {
-      disabled: "현재 보고서 제공 기능이 닫혀 있습니다.",
+      disabled: "현재 보고서 제공 기능을 준비 중입니다. 잠시 후 다시 이용해 주세요.",
       denied: "보고서를 확인할 수 없습니다. 접속 권한을 다시 확인해 주세요.",
       notReady: "보고서가 아직 생성되지 않았습니다.",
       loading: "보고서 상태를 안전하게 확인하고 있습니다.",
@@ -1927,6 +1957,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         items: [
           item("overview", "이용 현황", "내 활동과 보유 포인트 요약"),
           item("inquiries", "문의 내역", "내가 등록한 문의와 답변"),
+          item("quotes", "견적함", "제휴사가 발송한 견적서 확인·다운로드"),
           item("points", "포인트", "농협 지갑 포인트 사용 내역"),
           item("profile", "내 정보", "내 소속과 계정 정보"),
           item("sitemap", "사이트맵", "고객이 이용할 수 있는 전체 페이지"),
@@ -2166,6 +2197,45 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       statusDelivered: "발송 완료",
       statusDeliveryPending: "발송 대기",
       statusVoid: "취소",
+      comparisonSectionTitle: "견적 비교·평가",
+      comparisonSectionHelp:
+        "동일 조건으로 받은 회계감사 견적을 비교·평가 화면에서 확인할 수 있습니다.",
+      comparisonOpenLabel: "견적 비교·평가 보기",
+      comparisonOpeningLabel: "비교 화면 여는 중...",
+      comparisonReportReadyLabel: "비교 보고서 보기",
+      comparisonNeedMoreQuotes:
+        "비교를 위해 견적이 2건 이상 도착해야 합니다.",
+      comparisonUnavailable:
+        "지금은 비교·평가 화면을 열 수 없습니다. 잠시 후 다시 시도해 주세요.",
+      comparisonFeatureDisabled:
+        "비교·평가 기능이 잠시 열려 있지 않습니다. 운영 안내를 확인해 주세요.",
+      comparisonQuoteCountSuffix: "건 수신",
+      credentialsTitle: "공급자 기본정보",
+      evaluationFactsTitle: "제휴사 평가정보",
+      businessNumberLabel: "사업자등록번호",
+      addressLabel: "사업장 주소",
+      supplierContactLabel: "견적 담당자",
+      contactLabel: "연락처",
+      engagementPartnerLabel: "담당회계사",
+      proposerTypeLabel: "제안 주체",
+      cpaCountLabel: "소속 공인회계사",
+      revenueLabel: "회계법인 매출액",
+      localAuditCountLabel: "2025년 지역농협 감사건수",
+      recentAuditCountLabel: "최근 농협 감사건수",
+      auditedTypesLabel: "감사 수행 농협 유형",
+      taxExperienceLabel: "농협 세무대리 경험",
+      subsidyExperienceLabel: "농협 보조금 정산 경험",
+      yesLabel: "있음",
+      noLabel: "없음",
+      missingValue: "미등록",
+      peopleSuffix: "명",
+      countSuffix: "건",
+      requestInfoTitle: "견적 신청 정보",
+      requestInfoHelp:
+        "견적 신청 때 입력한 이름, 전화번호, 농협명입니다. 전환 전에 한 번 확인해 주세요.",
+      requestNameLabel: "이름",
+      requestPhoneLabel: "전화번호",
+      requestCooperativeLabel: "농협명",
     },
   ),
   "member.quoteDetail": page(
@@ -2201,6 +2271,32 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       statusDelivered: "발송 완료",
       statusDeliveryPending: "발송 대기",
       statusVoid: "취소",
+      credentialsTitle: "공급자 기본정보",
+      evaluationFactsTitle: "제휴사 평가정보",
+      businessNumberLabel: "사업자등록번호",
+      addressLabel: "사업장 주소",
+      supplierContactLabel: "견적 담당자",
+      contactLabel: "연락처",
+      engagementPartnerLabel: "담당회계사",
+      proposerTypeLabel: "제안 주체",
+      cpaCountLabel: "소속 공인회계사",
+      revenueLabel: "회계법인 매출액",
+      localAuditCountLabel: "2025년 지역농협 감사건수",
+      recentAuditCountLabel: "최근 농협 감사건수",
+      auditedTypesLabel: "감사 수행 농협 유형",
+      taxExperienceLabel: "농협 세무대리 경험",
+      subsidyExperienceLabel: "농협 보조금 정산 경험",
+      yesLabel: "있음",
+      noLabel: "없음",
+      missingValue: "미등록",
+      peopleSuffix: "명",
+      countSuffix: "건",
+      requestInfoTitle: "견적 신청 정보",
+      requestInfoHelp:
+        "견적 신청 때 입력한 이름, 전화번호, 농협명입니다. 전환 전에 한 번 확인해 주세요.",
+      requestNameLabel: "이름",
+      requestPhoneLabel: "전화번호",
+      requestCooperativeLabel: "농협명",
     },
   ),
   "member.requestDetail": page(
@@ -2452,6 +2548,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           supplierContactLabel: "견적 담당자",
           contactLabel: "연락처",
           missingValue: "미등록",
+          logoMissing: "제휴사 로고 미등록",
           sealMissing: "회계법인 직인 미등록",
           quoteIntro: "아래와 같이 견적합니다.",
           itemHeader: "항목",
@@ -2488,9 +2585,41 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           noLabel: "없음",
           footerStatement:
             "(주)프리고 농협지원센터의 표준 견적양식을 준수하여 작성된 견적서입니다.",
+          documentKindLabel: "견적서",
+          issueDateLabel: "발행일",
+          customerRefLabel: "수신처",
+          phoneLabel: "전화",
+          emailLabel: "이메일",
+          credentialsTitle: "공급자 기본정보",
+          credentialsHelp: "",
+          evaluationFactsTitle: "제휴사 평가정보",
+          evaluationFactsHelp:
+            "농협 외부회계감사 선정 시 참고할 제휴사 실적·역량 정보입니다.",
+          engagementPartnerLabel: "담당회계사",
+          proposerTypeLabel: "제안 주체",
+          proposerAccountingFirmLabel: "회계법인",
+          proposerAuditGroupLabel: "감사반",
+          cpaCountLabel: "소속 공인회계사",
+          localAuditCountLabel: "2025년 지역농협 감사건수",
+          cooperativeTypeLocalAgri: "지역농협",
+          cooperativeTypeLocalLivestock: "지역축협",
+          cooperativeTypeItem: "품목농협·품목축협(원예농협 포함)",
+          cooperativeTypeGinseng: "인삼농협",
+          noneTypesLabel: "해당 없음",
+          taxRateLabel: "부가세율",
+          taxRateValue: "10%",
+          thankYouStatement: "이용해 주셔서 감사합니다.",
+          comparisonQrTitle: "가격 견적 비교 보고서",
+          comparisonQrHelp:
+            "QR코드를 스캔하면 다른 회계법인의 가격 견적과 비교 보고서를 확인할 수 있습니다.",
+          acceptanceTitle: "고객 확인",
+          acceptanceHint:
+            "본 견적 내용 확인 후 필요 시 담당자에게 회신해 주세요.",
+          printNameLabel: "성명",
+          questionsContactLabel: "문의",
           supplierFormLegend: "견적서 공급자 정보",
           supplierFormHelp:
-            "제휴사 등록정보가 기본값으로 적용됩니다. 이번 견적서에 맞게 수정할 수 있습니다.",
+            "제휴사 등록정보가 기본값으로 적용됩니다. 로고·직인을 등록하면 이후 견적서에도 자동 반영됩니다.",
           supplierNameInputLabel: "회계법인명 *",
           supplierBusinessNumberInputLabel: "사업자등록번호 *",
           supplierAddressInputLabel: "사업장 주소 *",
@@ -2498,6 +2627,10 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           supplierContactPhoneInputLabel: "견적 담당자 연락처 *",
           supplierContactEmailInputLabel: "견적 담당자 이메일 *",
           logoUploadLabel: "제휴사 로고(PNG/JPG, 2MB 이하)",
+          logoRegisteredHelp:
+            "등록된 로고가 견적서 상단 공급자 영역에 기본값으로 표시됩니다.",
+          logoRequiredHelp:
+            "로고를 등록하면 이후 견적서에 자동으로 반영됩니다.",
           sealUploadLabel: "회계법인 직인(PNG/JPG, 2MB 이하) *",
           sealRegisteredHelp: "등록된 직인이 견적서에 표시됩니다.",
           sealRequiredHelp: "최종확정 전에 직인을 등록해 주세요.",
@@ -2514,14 +2647,19 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           termsInputLabel: "조건",
           notesInputLabel: "비고",
           emailSubjectTemplate:
-            "[농협지원센터] {{partnerName}} 견적서가 도착했습니다",
-          emailArrivalTemplate: "{{partnerName}} 견적서가 도착했습니다.",
+            "{{partnerName}}의 농협 {{yearShort}}년도 외부회계감사 견적서가 도착했습니다.",
+          emailArrivalTemplate:
+            "안녕하십니까. 농협지원센터에서 {{partnerName}} 견적서가 도착했습니다. 확인 부탁드립니다.",
+          emailRevisionSubjectTemplate:
+            "{{partnerName}}의 농협 {{yearShort}}년도 외부회계감사 견적서가 도착했습니다.",
+          emailRevisionArrivalTemplate:
+            "안녕하십니까. 농협지원센터에서 {{partnerName}} 견적서가 {{versionLabel}}으로 수정되어 도착했습니다. 이전 견적서를 대체하니 확인 부탁드립니다.",
           emailTemporaryAccountNotice:
             "견적 요청 이메일로 임시회원 계정이 준비되었습니다.",
           emailAccountIdLabel: "아이디",
           emailActivationLinkLabel: "비밀번호 설정 후 견적서 확인",
           emailSecurityNotice:
-            "보안을 위해 임시비밀번호를 이메일로 보내지 않습니다. 위 일회용 링크에서 직접 비밀번호를 설정해 주세요.",
+            "견적요청 완료 메일의 초기 비밀번호로 로그인할 수 있습니다. 비밀번호를 변경했거나 다시 설정해야 하면 위 일회용 링크를 사용해 주세요.",
           emailExistingAccountPrefix: "이미 비밀번호를 설정했다면",
           emailDownloadLinkLabel: "로그인 후 견적서 다운로드",
           emailDownloadTextLabel: "다운로드",
@@ -2542,17 +2680,26 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         "게시된 운영 평가기준이 없어 기본 기준을 표시하고 있습니다. 운영자에게 평가기준 게시 상태를 확인해 주세요.",
       quoteSaveFailed: "견적서를 저장하지 못했습니다.",
       quoteAlreadyFinalized:
-        "이미 최종확정된 견적입니다. 같은 제휴사의 다른 계정에서도 다시 저장·발송할 수 없습니다.",
+        "이미 발송된 견적입니다. 보낸 견적함에서 확인하거나 개정 후 다시 발송할 수 있습니다.",
       quoteAlreadyFinalizedHint:
-        "이미 최종확정된 견적입니다. 미리보기로 저장된 PDF를 확인할 수 있으며, 같은 제휴사 계정으로는 다시 발송할 수 없습니다.",
+        "이미 발송된 견적입니다. 미리보기로 확인할 수 있으며, 가격 수정이 필요하면 개정 후 다시 발송할 수 있습니다.",
       quoteAlreadyFinalizedPreview:
-        "이미 최종확정된 견적서입니다. 저장된 PDF를 표시합니다.",
-      quoteAlreadyFinalizedSendDisabled: "이미 최종확정됨",
+        "발송된 견적서 PDF를 표시합니다.",
+      quoteAlreadyFinalizedSendDisabled: "이미 발송됨 · 개정 필요",
       quoteMutationLocked:
         "이 견적 요청은 현재 저장·발송할 수 없는 상태입니다.",
       quoteRequestClosed:
         "이 견적 요청은 마감되어 더 이상 저장·발송할 수 없습니다.",
-      quoteViewFinalizedButton: "확정 견적서 미리보기",
+      quoteViewFinalizedButton: "발송 견적서 미리보기",
+      quoteSentInboxHelp:
+        "발송한 견적서를 확인하고, 가격 조정 등이 필요하면 개정 후 다시 발송할 수 있습니다.",
+      quoteSentInboxEmpty: "아직 발송한 견적이 없습니다.",
+      quoteReviseButton: "가격 수정·재발송",
+      quoteReviseLoading: "개정 준비 중...",
+      quoteReviseStarted:
+        "이전 발송 내용을 불러왔습니다. 수정 후 다시 최종확정하면 고객에게 개정 견적이 발송됩니다.",
+      quoteReviseFailed: "견적 개정을 시작하지 못했습니다.",
+      quoteReviseNotFinalized: "발송된 견적만 개정할 수 있습니다.",
       quoteDraftSaved: "견적서 초안을 저장했습니다.",
       quoteFinalized:
         "견적서를 최종확정하고 고객에게 이메일로 발송했습니다.",
@@ -2926,6 +3073,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           partnersDescription: "제휴사 프로필, 계정과 배정 관리",
           inquiriesDescription: "문의 접수와 답변 처리",
           auditQuotesDescription: "FY27 회계감사 견적 접수 운영",
+          quotePriceMasterDescription: "농협별 제휴사 가격·안전가격 마스터",
           auditEvaluationsDescription:
             "감사평가 건·기준·보고서와 처리 이력 운영",
           pointsDescription: "농협 지갑과 포인트 정산",
@@ -2953,6 +3101,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           item("partners", "제휴사 관리"),
           item("inquiries", "상담 관리"),
           item("auditQuotes", "회계감사 견적"),
+          item("quotePriceMaster", "견적 가격 마스터"),
           item("auditEvaluations", "감사평가 운영"),
           item("points", "포인트 관리"),
           item("audit", "운영 작업 기록"),
@@ -3618,6 +3767,45 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           partnerSaveFailed: "제휴사 정보를 저장하지 못했습니다.",
           partnerRequestFailed:
             "서버 연결이 불안정해 저장 요청을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
+          businessRegistrationNumberLabel: "사업자등록번호",
+          businessAddressLabel: "사업장 주소",
+          businessRegistrationNumberPlaceholder: "000-00-00000",
+          businessRegistrationNumberInvalid:
+            "사업자등록번호 10자리를 확인해 주세요.",
+          businessRegistrationNumberRequired: "사업자등록번호를 입력해 주세요.",
+          businessAddressRequired: "사업장 주소를 입력해 주세요.",
+          quoteProfileTitle: "견적 발송 정보",
+          quoteProfileDescription:
+            "견적서 PDF와 운영자 대행 발송에 사용하는 공급자 정보, 로고, 직인, 평가 기본값입니다.",
+          quoteProfileReady:
+            "견적 발송에 필요한 제휴사 정보가 모두 등록되어 있습니다.",
+          quoteProfileMissingPrefix: "아직 부족한 항목",
+          quoteProfileLogoRecommended: "로고(권장)",
+          quoteProfileConsentRecommended: "대행 발송 동의 확인",
+          logoLabel: "회계법인 로고",
+          sealLabel: "회계법인 직인",
+          logoHelp: "PNG 또는 JPG, 2MB 이하. 견적서 상단에 표시됩니다.",
+          sealHelp: "PNG 또는 JPG, 2MB 이하. 견적서 직인란에 표시됩니다.",
+          assetRegistered: "등록됨",
+          assetMissing: "미등록",
+          logoUploadSuccess: "로고를 등록했습니다.",
+          logoUploadFailed: "로고를 등록하지 못했습니다.",
+          sealUploadSuccess: "직인을 등록했습니다.",
+          sealUploadFailed: "직인을 등록하지 못했습니다.",
+          proxyConsentLabel: "운영자 대행 발송 동의",
+          proxyConsentHelp:
+            "켜면 운영자가 이 제휴사 명의로 회계감사 견적서를 확정·발송할 수 있습니다.",
+          proxyConsentOn: "동의함",
+          proxyConsentOff: "동의하지 않음",
+          evaluationDefaultsTitle: "평가 기본값",
+          evaluationDefaultsDescription:
+            "담당회계사·수행실적 등 견적마다 재사용하는 값입니다. 감사보수와 제경비는 견적 가격 마스터에서 가져옵니다.",
+          evaluationDefaultsSave: "견적 기본정보 저장",
+          evaluationDefaultsSaved: "견적 기본정보를 저장했습니다.",
+          evaluationDefaultsSaveFailed: "견적 기본정보를 저장하지 못했습니다.",
+          evaluationDefaultsInvalid: "평가 기본값을 모두 입력해 주세요.",
+          quoteProfileTerminated:
+            "종료된 제휴사는 견적 정보를 수정할 수 없습니다.",
           partnerAssigned: "제휴사에 문의를 배정했습니다.",
           partnerAssignFailed: "제휴사 배정을 처리하지 못했습니다.",
           draftApproved: "제휴사 답변 초안을 게시 대기 상태로 승인했습니다.",
@@ -3772,6 +3960,14 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           item("faqCategory.settlement", "정산"),
           item("faqCategory.other", "기타"),
         ],
+      }),
+      section({
+        id: "quotePriceMaster",
+        title: "견적 가격 마스터",
+        description:
+          "농협별 제휴사 예정가, 안전가격, 선정예정 법인을 관리하는 화면입니다.",
+        locked: true,
+        text: {},
       }),
       section({
         id: "auditQuotes",
@@ -4121,7 +4317,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           guidanceLabel: "이용 안내 문구",
           guidanceHelp: "평가 결과를 해석할 때 함께 확인할 내용을 안내합니다.",
           disclaimerLabel: "면책 안내",
-          disclaimerHelp: "최종 의사결정 책임과 참고자료 성격을 안내합니다.",
+          disclaimerHelp: "보고서가 농협의 선임 검토를 어떻게 돕는지 안내합니다.",
           contactLabel: "문의처 문구",
           contactHelp: "보고서 하단에 표시할 고객지원 안내입니다.",
           logoAssetLabel: "게시된 로고 파일",
@@ -4756,12 +4952,25 @@ export const CMS_PROTECTED_PAGE_ITEM_IDS: Partial<
     ],
     visibilitySelector: ["public", "organization", "private"],
   },
+  "member.mypage": {
+    navigation: [
+      "overview",
+      "inquiries",
+      "quotes",
+      "points",
+      "profile",
+      "sitemap",
+    ],
+  },
 };
 
 export const CMS_PROTECTED_PAGE_ACTION_IDS: Partial<
   Record<CmsPageKey, Record<string, readonly string[]>>
 > = {
   home: {
+    promoFloat: ["open"],
+  },
+  "auth.login": {
     promoFloat: ["open"],
   },
   "auth.signup": {

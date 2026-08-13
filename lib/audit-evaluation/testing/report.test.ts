@@ -84,7 +84,10 @@ describe("audit evaluation report view model", () => {
       JSON.stringify(first.sections),
       /감사보수가 가장 낮다는 이유만으로 특정 회계법인을 추천하지 않습니다/,
     );
-    assert.match(JSON.stringify(first.sections), /최종 선임 판단과 의사결정/);
+    assert.match(
+      JSON.stringify(first.sections),
+      /농협이 선임 안건을 검토하고 설명할 수 있게 돕습니다/,
+    );
   });
 
   it("includes only correction history that belongs to the snapshot revision", () => {
@@ -167,7 +170,7 @@ describe("audit evaluation report view model", () => {
     assert.equal(viewModel.metadata.branding.logoDataUri, null);
     assert.equal(
       viewModel.metadata.downloadFilename,
-      "audit-evaluation-report-테스트농협-FY2027-v1.pdf",
+      "테스트농협_FY2027 감사인견적평가보고서.pdf",
     );
     assert.ok(viewModel.sections.some(({ id }) => id === "cover"));
     assert.ok(!viewModel.sections.some(({ id }) => id === "fee-analysis"));
@@ -511,7 +514,7 @@ describe("report delivery security", () => {
     assert.match(download.url, /^https:\/\/private\.example\//);
     assert.equal(
       download.fileName,
-      "audit-evaluation-report-테스트농협-FY2027-v1.pdf",
+      "테스트농협_FY2027 감사인견적평가보고서.pdf",
     );
     assert.equal(
       Date.parse(download.expiresAt) - Date.parse(REPORT_FIXTURE_NOW),

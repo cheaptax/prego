@@ -434,6 +434,11 @@ describe("NH audit eligibility, price, composite score, and ranking", () => {
       ["SERVER_VALIDATION_FAILED"],
     );
     assert.deepEqual(byId(results, "eligible").priceBaseScore, score(100));
+    assert.deepEqual(
+      results.map((result) => result.candidateId),
+      ["eligible", "invalid-low", "audit-group-low"],
+    );
+    assert.equal(byId(results, "audit-group-low").rank, null);
   });
 
   it("calculates the default weighted composite without intermediate rounding", () => {
@@ -524,6 +529,140 @@ describe("NH audit eligibility, price, composite score, and ranking", () => {
       ["NON_POSITIVE_TOTAL_BURDEN"],
     );
     assert.deepEqual(byId(results, "positive").priceBaseScore, score(100));
+  });
+
+  it("penalizes quality only for every 저가부실수임 firm and caps price at the clean eligible maximum", () => {
+    const results = evaluateNhAuditQuoteCandidatesV2(
+      [
+        candidate("low", rawSubmission({ auditFeeWon: "7500000" })),
+        candidate("second", rawSubmission({ auditFeeWon: "7700000" })),
+        candidate("high", rawSubmission({ auditFeeWon: "8500000" })),
+      ],
+      createDefaultNhAuditCustomerWeightsV2(),
+      { safePriceMinWon: "7600000" },
+    );
+    const low = byId(results, "low");
+    const second = byId(results, "second");
+    const high = byId(results, "high");
+    const cleanPriceCap = {
+      numerator: "7500",
+      denominator: "77",
+    };
+    assert.deepEqual(low.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(low.quality?.qualityScore, {
+      numerator: "1780",
+      denominator: "19",
+    });
+    assert.deepEqual(low.overallScore, {
+      numerator: "139236",
+      denominator: "1463",
+    });
+    assert.deepEqual(second.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(second.quality?.qualityScore, score(100));
+    assert.deepEqual(high.priceBaseScore, {
+      numerator: "1500",
+      denominator: "17",
+    });
+    assert.equal(second.rank, 1);
+    assert.ok((low.rank ?? 0) > 1);
+  });
+
+  it("applies a larger quality-only penalty when the quote is farther below 안전마진", () => {
+    const results = evaluateNhAuditQuoteCandidatesV2(
+      [
+        candidate("low-a", rawSubmission({ auditFeeWon: "7500000" })),
+        candidate("low-b", rawSubmission({ auditFeeWon: "7550000" })),
+        candidate("clean", rawSubmission({ auditFeeWon: "8500000" })),
+      ],
+      createDefaultNhAuditCustomerWeightsV2(),
+      { safePriceMinWon: "7600000" },
+    );
+    const lowA = byId(results, "low-a");
+    const lowB = byId(results, "low-b");
+    const clean = byId(results, "clean");
+    const cleanPriceCap = {
+      numerator: "1500",
+      denominator: "17",
+    };
+    assert.deepEqual(lowA.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(lowA.quality?.qualityScore, {
+      numerator: "1780",
+      denominator: "19",
+    });
+    assert.deepEqual(lowB.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(lowB.quality?.qualityScore, score(95));
+    assert.deepEqual(clean.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(clean.quality?.qualityScore, score(100));
+  });
+
+  it("does not pull other firms down when a 저가부실수임 quote is far below 안전마진", () => {
+    const results = evaluateNhAuditQuoteCandidatesV2(
+      [
+        candidate("low", rawSubmission({ auditFeeWon: "10000000" })),
+        candidate("second", rawSubmission({ auditFeeWon: "12000000" })),
+      ],
+      createDefaultNhAuditCustomerWeightsV2(),
+      { safePriceMinWon: "11300000" },
+    );
+    const low = byId(results, "low");
+    const cleanPriceCap = {
+      numerator: "280",
+      denominator: "3",
+    };
+    assert.deepEqual(low.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(low.quality?.qualityScore, {
+      numerator: "9435",
+      denominator: "113",
+    });
+    assert.deepEqual(low.overallScore, {
+      numerator: "29639",
+      denominator: "339",
+    });
+    assert.deepEqual(byId(results, "second").priceBaseScore, cleanPriceCap);
+    assert.deepEqual(byId(results, "second").quality?.qualityScore, score(100));
+  });
+
+  it("caps the 저가부실수임 quality penalty at 80% and the price score at the clean maximum", () => {
+    const results = evaluateNhAuditQuoteCandidatesV2(
+      [
+        candidate("low", rawSubmission({ auditFeeWon: "1000000" })),
+        candidate("second", rawSubmission({ auditFeeWon: "12000000" })),
+      ],
+      createDefaultNhAuditCustomerWeightsV2(),
+      { safePriceMinWon: "11300000" },
+    );
+    const low = byId(results, "low");
+    const cleanPriceCap = {
+      numerator: "280",
+      denominator: "3",
+    };
+    assert.deepEqual(low.priceBaseScore, cleanPriceCap);
+    assert.deepEqual(low.quality?.qualityScore, score(20));
+    assert.deepEqual(low.overallScore, {
+      numerator: "148",
+      denominator: "3",
+    });
+    assert.deepEqual(byId(results, "second").priceBaseScore, cleanPriceCap);
+  });
+
+  it("uses 최저안전마진 minus 10만원 as the price full-score reference", () => {
+    const results = evaluateNhAuditQuoteCandidatesV2(
+      [
+        candidate("at-reference", rawSubmission({ auditFeeWon: "7500000" })),
+        candidate("at-safe-min", rawSubmission({ auditFeeWon: "7600000" })),
+      ],
+      createDefaultNhAuditCustomerWeightsV2(),
+      { safePriceMinWon: "7600000" },
+    );
+    const cleanPriceCap = {
+      numerator: "1875",
+      denominator: "19",
+    };
+    assert.deepEqual(
+      byId(results, "at-reference").priceBaseScore,
+      cleanPriceCap,
+    );
+    assert.deepEqual(byId(results, "at-safe-min").priceBaseScore, cleanPriceCap);
   });
 });
 

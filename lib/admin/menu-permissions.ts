@@ -20,9 +20,11 @@ export const ADMIN_MENU_PERMISSION_REQUIREMENTS = {
   partners: ["partners:read"],
   inquiries: ["inquiries:read"],
   auditQuotes: ["auditQuotes:read"],
+  quotePriceMaster: ["auditQuotes:read"],
   auditEvaluations: ["auditEvaluations:read"],
   points: ["points:read"],
   audit: ["audit:read"],
+  sitemap: ["admin:access"],
   cms: ["cms:read"],
 } as const satisfies Record<string, readonly AdminPermission[]>;
 

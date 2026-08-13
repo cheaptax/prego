@@ -24,6 +24,11 @@ type Props = {
   heading?: string;
   description?: string;
   copy?: Record<string, string>;
+  /** 비제휴 비교용: 사실확인 숨김·필수표시 완화 */
+  variant?: "partner" | "external";
+  showFactsConfirmation?: boolean;
+  showCostFields?: boolean;
+  showRequestContext?: boolean;
   onChange: (values: NhAuditPartnerFormValues) => void;
   onClearError: (field: NhAuditPartnerFormField) => void;
 };
@@ -52,9 +57,14 @@ export function PartnerNhAuditQuoteForm({
   heading,
   description,
   copy = {},
+  variant = "partner",
+  showFactsConfirmation = true,
+  showCostFields = true,
+  showRequestContext = true,
   onChange,
   onClearError,
 }: Props) {
+  const isExternal = variant === "external";
   const costPreview = calculateNhAuditCostPreview(values);
   const fieldId = (field: NhAuditPartnerFormField) =>
     `${idPrefix}-${field}`;
@@ -77,49 +87,79 @@ export function PartnerNhAuditQuoteForm({
       <header className="admin-card__head">
         <div>
           <p className="admin-eyebrow">
-            {copy.eyebrow || "회계감사 견적 제출"}
+            {copy.eyebrow ||
+              (isExternal ? "회계감사 견적 평가정보" : "회계감사 견적 제출")}
           </p>
-          <h3>{heading || "회계감사 견적 정보"}</h3>
+          <h3>
+            {heading ||
+              (isExternal ? "회계감사 견적 평가정보" : "회계감사 견적 정보")}
+          </h3>
           <p className="admin-form__hint">
             {description ||
-              "정해진 항목을 입력하면 서버가 평가기준에 따라 검증하고 점수를 계산합니다."}
+              (isExternal
+                ? "알고 있는 항목만 선택적으로 입력하면 됩니다. 입력하지 않은 정보는 평가 시 0점으로 처리됩니다."
+                : "정해진 항목을 입력하면 서버가 평가기준에 따라 검증하고 점수를 계산합니다.")}
           </p>
         </div>
       </header>
 
       <fieldset className="admin-form__group">
         <legend>{copy.basicLegend || "기본정보"}</legend>
-        <dl className="admin-detail-list nh-audit-readonly-info">
-          <div>
-            <dt>{copy.accountingFirmLabel || "회계법인명"}</dt>
-            <dd>{accountingFirmName || "계정정보 확인 필요"}</dd>
-          </div>
-          <div>
-            <dt>{copy.targetCooperativeLabel || "대상 농협"}</dt>
-            <dd>{targetCooperativeName || "견적요청 정보 미등록"}</dd>
-          </div>
-          <div>
-            <dt>{copy.fiscalYearLabel || "사업연도"}</dt>
-            <dd>{fiscalYear ? `${fiscalYear}년` : "견적요청 정보 미등록"}</dd>
-          </div>
-          <div>
-            <dt>{copy.submittedAtLabel || "제출일시"}</dt>
-            <dd>{copy.submittedAtHelp || "최종 제출 시 서버가 자동 기록"}</dd>
-          </div>
-        </dl>
-        {!targetCooperativeName || !fiscalYear ? (
-          <p className="nh-audit-warning" role="alert">
-            {copy.requestContextMissing ||
-              "대상 농협 또는 사업연도가 견적요청에 등록되지 않았습니다. 운영자에게 요청정보 보완을 요청해 주세요."}
-          </p>
-        ) : null}
+        {showRequestContext ? (
+          <>
+            <dl className="admin-detail-list nh-audit-readonly-info">
+              <div>
+                <dt>{copy.accountingFirmLabel || "회계법인명"}</dt>
+                <dd>
+                  {accountingFirmName ||
+                    (isExternal
+                      ? "공급자 정보에서 입력"
+                      : "계정정보 확인 필요")}
+                </dd>
+              </div>
+              <div>
+                <dt>{copy.targetCooperativeLabel || "대상 농협"}</dt>
+                <dd>{targetCooperativeName || "견적요청 정보 미등록"}</dd>
+              </div>
+              <div>
+                <dt>{copy.fiscalYearLabel || "사업연도"}</dt>
+                <dd>{fiscalYear ? `${fiscalYear}년` : "견적요청 정보 미등록"}</dd>
+              </div>
+              <div>
+                <dt>{copy.submittedAtLabel || "제출일시"}</dt>
+                <dd>
+                  {copy.submittedAtHelp ||
+                    (isExternal
+                      ? "비교 추가 시 서버가 자동 기록"
+                      : "최종 제출 시 서버가 자동 기록")}
+                </dd>
+              </div>
+            </dl>
+            {!isExternal && (!targetCooperativeName || !fiscalYear) ? (
+              <p className="nh-audit-warning" role="alert">
+                {copy.requestContextMissing ||
+                  "대상 농협 또는 사업연도가 견적요청에 등록되지 않았습니다. 운영자에게 요청정보 보완을 요청해 주세요."}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <dl className="admin-detail-list nh-audit-readonly-info">
+            <div>
+              <dt>{copy.accountingFirmLabel || "회계법인명"}</dt>
+              <dd>{accountingFirmName || "계정정보 확인 필요"}</dd>
+            </div>
+          </dl>
+        )}
 
         <label
           id={`quote-field-engagementPartnerName`}
           className="admin-form__field"
           htmlFor={fieldId("engagementPartnerName")}
         >
-          <span>{copy.engagementPartnerLabel || "담당회계사 이름 *"}</span>
+          <span>
+            {copy.engagementPartnerLabel ||
+              (isExternal ? "담당회계사 이름" : "담당회계사 이름 *")}
+          </span>
           <input
             id={fieldId("engagementPartnerName")}
             className="admin-input"
@@ -142,7 +182,10 @@ export function PartnerNhAuditQuoteForm({
         <ChoiceFieldset
           id={fieldId("proposerType")}
           quoteFieldId="quote-field-proposerType"
-          legend={copy.proposerTypeLabel || "제안 주체 유형 *"}
+          legend={
+            copy.proposerTypeLabel ||
+            (isExternal ? "제안 주체 유형" : "제안 주체 유형 *")
+          }
           value={values.proposerType}
           choices={[
             { value: "ACCOUNTING_FIRM", label: "회계법인" },
@@ -162,6 +205,7 @@ export function PartnerNhAuditQuoteForm({
         ) : null}
       </fieldset>
 
+      {showCostFields ? (
       <fieldset className="admin-form__group">
         <legend>{copy.costLegend || "비용정보"}</legend>
         <label
@@ -169,7 +213,12 @@ export function PartnerNhAuditQuoteForm({
           className="admin-form__field"
           htmlFor={fieldId("auditFeeWon")}
         >
-          <span>{copy.auditFeeLabel || "감사보수(VAT 제외, 원) *"}</span>
+          <span>
+            {copy.auditFeeLabel ||
+              (isExternal
+                ? "감사보수(VAT 제외, 원)"
+                : "감사보수(VAT 제외, 원) *")}
+          </span>
           <input
             id={fieldId("auditFeeWon")}
             className="admin-input"
@@ -283,9 +332,16 @@ export function PartnerNhAuditQuoteForm({
           </small>
         </div>
       </fieldset>
+      ) : null}
 
       <fieldset className="admin-form__group">
         <legend>{copy.evaluationLegend || "평가정보"}</legend>
+        <p className="admin-form__hint">
+          {copy.evaluationDefaultsHelp ||
+            (isExternal
+              ? "알고 있는 항목만 입력하세요. 미입력 항목은 평가 시 0점으로 처리됩니다."
+              : "초안 저장 또는 최종확정 시 담당회계사·평가정보가 제휴사 기본값으로 저장되며, 새 견적 작성 시 자동 입력됩니다. 감사보수·제경비는 견적마다 다시 입력합니다.")}
+        </p>
         <IntegerField
           id={fieldId("localNonghyupAuditCount2025")}
           quoteFieldId="quote-field-localNonghyupAuditCount2025"
@@ -436,33 +492,35 @@ export function PartnerNhAuditQuoteForm({
             update("nonghyupSubsidySettlementPerformed2025", value)}
         />
 
-        <div
-          id="quote-field-factsConfirmed"
-          className="admin-form__field"
-        >
-          <label className="nh-audit-option">
-            <input
-              id={fieldId("factsConfirmed")}
-              type="checkbox"
-              checked={values.factsConfirmed}
-              disabled={disabled}
-              aria-invalid={Boolean(errors.factsConfirmed)}
-              aria-describedby={
-                errors.factsConfirmed ? errorId("factsConfirmed") : undefined
-              }
-              onChange={(event) =>
-                update("factsConfirmed", event.target.checked)}
+        {showFactsConfirmation ? (
+          <div
+            id="quote-field-factsConfirmed"
+            className="admin-form__field"
+          >
+            <label className="nh-audit-option">
+              <input
+                id={fieldId("factsConfirmed")}
+                type="checkbox"
+                checked={values.factsConfirmed}
+                disabled={disabled}
+                aria-invalid={Boolean(errors.factsConfirmed)}
+                aria-describedby={
+                  errors.factsConfirmed ? errorId("factsConfirmed") : undefined
+                }
+                onChange={(event) =>
+                  update("factsConfirmed", event.target.checked)}
+              />
+              <span>
+                {copy.factsConfirmationLabel ||
+                  "입력한 내용이 사실이며 서버 검증 결과가 최종 결과임을 확인합니다. *"}
+              </span>
+            </label>
+            <FieldError
+              id={errorId("factsConfirmed")}
+              message={errors.factsConfirmed}
             />
-            <span>
-              {copy.factsConfirmationLabel ||
-                "입력한 내용이 사실이며 서버 검증 결과가 최종 결과임을 확인합니다. *"}
-            </span>
-          </label>
-          <FieldError
-            id={errorId("factsConfirmed")}
-            message={errors.factsConfirmed}
-          />
-        </div>
+          </div>
+        ) : null}
       </fieldset>
 
       <p className="admin-form__hint">

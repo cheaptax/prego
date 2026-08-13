@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
+import { cmsEditableSectionProps } from "@/lib/cms/editable-section";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 import { getCmsMessage } from "@/lib/cms/runtime";
-import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
 import { normalizeWonAmount } from "@/lib/audit-evaluation/money";
 import type {
   AuditEvaluationReviewWorkspace,
@@ -503,6 +504,13 @@ export function AuditQuoteReviewWorkspace({
           </p>
         ) : null}
       </section>
+      <CmsSupplementalSections
+        pageKey="event.auditQuoteEvaluationReview"
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </div>
   );
 }
@@ -513,18 +521,11 @@ function reviewSectionProps(
   selectedSectionId: string | undefined,
   onSelectSection: ((sectionId: string) => void) | undefined,
 ) {
-  const root = cmsSectionRootProps(section, "audit-review__block");
-  return {
-    ...root,
-    className: [
-      root.className,
-      editing ? "cms-home-edit-section" : "",
-      editing && selectedSectionId === section.id ? "is-selected" : "",
-    ].filter(Boolean).join(" "),
-    tabIndex: editing ? 0 : undefined,
-    onClick: editing ? () => onSelectSection?.(section.id) : undefined,
-    onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
-  };
+  return cmsEditableSectionProps(section, "audit-review__block", {
+    editing,
+    selectedSectionId,
+    onSelectSection,
+  });
 }
 
 function QuoteComparisonTable({

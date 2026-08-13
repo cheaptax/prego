@@ -58,6 +58,10 @@ describe("member screen CMS integration", () => {
       (section) => section.id === "navigation",
     );
     assert.ok(navigation);
+    assert.deepEqual(
+      navigation.items.map((item) => item.id),
+      ["overview", "inquiries", "quotes", "points", "profile", "sitemap"],
+    );
     navigation.items.find((item) => item.id === "points")!.visible = false;
     mypage.messages.loadFailed = "";
 
@@ -73,6 +77,22 @@ describe("member screen CMS integration", () => {
       issues.some((issue) =>
         issue.id.startsWith("member-required-message-loadFailed"),
       ),
+    );
+  });
+
+  it("keeps quote inbox under inquiries in the mypage sidebar", () => {
+    const mypage = source("components/MyPageDashboard.tsx");
+    assert.match(mypage, /quotes:\s*"\/mypage\/quotes"/);
+    assert.ok(mypage.includes('"inquiries"'));
+    assert.ok(mypage.includes('"quotes"'));
+    assert.ok(
+      mypage.indexOf('"inquiries"') < mypage.indexOf('"quotes"'),
+      "quotes nav item must follow inquiries",
+    );
+    assert.equal(
+      mypage.includes('href="/mypage/quotes"\n              견적함'),
+      false,
+      "topbar quote shortcut should be removed",
     );
   });
 
@@ -133,7 +153,7 @@ describe("member screen CMS integration", () => {
     );
     assert.match(
       preview,
-      /<MyPageDashboard content=\{content\} previewMode \/>/,
+      /<MyPageDashboard \{\.\.\.shared\} \/>/,
     );
     assert.match(
       preview,

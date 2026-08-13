@@ -164,7 +164,7 @@ describe("portal route boundary", () => {
 describe("portal API boundary", () => {
   it("requires an admin authorization helper in every admin route", () => {
     const helper =
-      /requirePermission\(|requireActiveAdmin\(|requireAdminCapability\(|getAdminSession\(|requireAuditEvaluationAdmin\(|requireConfigAdmin\(|authorizePurgeAdmin|requireRole\(/;
+      /requirePermission\(|requireAnyPermission\(|requireActiveAdmin\(|requireAdminCapability\(|getAdminSession\(|requireAuditEvaluationAdmin\(|requireConfigAdmin\(|authorizePurgeAdmin|requireRole\(/;
     for (const file of routeFiles("app/api/admin")) {
       assert.match(source(file), helper, `missing admin auth: ${file}`);
     }
@@ -188,15 +188,15 @@ describe("portal API boundary", () => {
     const server = source("lib/firebase/server.ts");
     assert.match(
       server,
-      /!isAdminToken\(decoded\) \|\| decoded\.partner === true/,
+      /!isAdminToken\(decoded\) \|\|\s*\(decoded\.partner === true && !isMultiRoleToken\(decoded\)\)/,
     );
     assert.match(
       server,
-      /decoded\.partner !== true \|\| decoded\.admin === true/,
+      /decoded\.partner !== true \|\|\s*\(decoded\.admin === true && !multiRole\)/,
     );
     assert.match(
       server,
-      /decoded\.admin === true \|\| decoded\.partner === true/,
+      /\(decoded\.admin === true \|\| decoded\.partner === true\) &&\s*!multiRole/,
     );
   });
 

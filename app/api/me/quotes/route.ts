@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { AuditEvaluationCustomerAccessService } from "@/lib/audit-evaluation/customer-access-service";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
@@ -10,6 +11,7 @@ import {
   canCustomerReadQuote,
   canCustomerReadQuoteRequest,
 } from "@/lib/quotes/quote-access";
+import { buildCustomerQuoteComparisonGroups } from "@/lib/quotes/customer-quote-comparison";
 import { resolveNhAuditQuoteCompatibility } from "@/lib/quotes/nh-audit-quote-server";
 
 export const runtime = "nodejs";
@@ -39,7 +41,10 @@ export async function GET(req: Request) {
   ]);
   const quoteRequests = new Map<string, QuoteRequestRecord>();
   for (const doc of [...byUid.docs, ...byEmailDocs]) {
-    const quoteRequest = doc.data() as QuoteRequestRecord;
+    const quoteRequest = {
+      ...(doc.data() as QuoteRequestRecord),
+      id: doc.id,
+    };
     if (canCustomerReadQuoteRequest(decoded, quoteRequest)) {
       quoteRequests.set(doc.id, quoteRequest);
     }
@@ -68,10 +73,41 @@ export async function GET(req: Request) {
       };
     });
 
+  const requestList = Array.from(quoteRequests.values());
+  const accessService = new AuditEvaluationCustomerAccessService();
+  const now = new Date().toISOString();
+  const auditSourceIds = Array.from(
+    new Set(
+      requestList
+        .filter(
+          (request) =>
+            request.sourceType === "audit_quote" && Boolean(request.sourceId),
+        )
+        .map((request) => request.sourceId),
+    ),
+  );
+  const peeks = new Map(
+    await Promise.all(
+      auditSourceIds.map(async (sourceId) => {
+        const peek = await accessService.peekComparisonForAuditQuoteRequest(
+          sourceId,
+          now,
+        );
+        return [sourceId, peek] as const;
+      }),
+    ),
+  );
+  const comparisons = buildCustomerQuoteComparisonGroups({
+    quoteRequests: requestList,
+    quotes,
+    peeks,
+  });
+
   return NextResponse.json({
     ok: true,
     membershipStatus: memberSession.profile.status,
     quotes: quotes.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")),
-    quoteRequests: Array.from(quoteRequests.values()),
+    quoteRequests: requestList,
+    comparisons,
   });
 }

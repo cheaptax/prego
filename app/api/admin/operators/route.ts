@@ -2,6 +2,17 @@ import { NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import {
+  addAdminAuditLog,
+  authErrorCode,
+  authErrorStatus,
+  requirePermission,
+} from "@/lib/firebase/server";
+import {
+  buildMultiRoleOperatorClaims,
+  buildMultiRoleOperatorProfile,
+  canPromoteEmailToMultiRoleOperator,
+} from "@/lib/admin/multi-role-operator";
+import {
   ADMIN_ROLE_RANK,
   ADMIN_ROLE_LABELS,
   getAccountStatus,
@@ -15,12 +26,6 @@ import type {
   AdminStatus,
   UserRecord,
 } from "@/lib/firebase/schema";
-import {
-  addAdminAuditLog,
-  authErrorCode,
-  authErrorStatus,
-  requirePermission,
-} from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
 
@@ -213,6 +218,7 @@ export async function POST(req: Request) {
 
   const now = new Date().toISOString();
   let authUser;
+  let promotedExisting = false;
   try {
     authUser = await adminAuth().createUser({
       email: payload.email,
@@ -226,50 +232,116 @@ export async function POST(req: Request) {
       typeof error === "object" && error && "code" in error
         ? String(error.code)
         : "";
-    if (code === "auth/email-already-exists") {
+    if (
+      code === "auth/email-already-exists" &&
+      canPromoteEmailToMultiRoleOperator(payload.email)
+    ) {
+      try {
+        authUser = await adminAuth().getUserByEmail(payload.email);
+        await adminAuth().updateUser(authUser.uid, {
+          password: payload.password,
+          displayName: payload.name,
+          emailVerified: true,
+          disabled: payload.status !== "active",
+        });
+        promotedExisting = true;
+      } catch {
+        return NextResponse.json(
+          { ok: false, error: "operator_create_failed" },
+          { status: 500 },
+        );
+      }
+    } else if (code === "auth/email-already-exists") {
       return NextResponse.json(
         { ok: false, error: "email_already_exists" },
         { status: 409 },
       );
+    } else {
+      return NextResponse.json(
+        { ok: false, error: "operator_create_failed" },
+        { status: 500 },
+      );
     }
+  }
+
+  const existingProfileSnapshot = promotedExisting
+    ? await adminDb().collection("users").doc(authUser.uid).get()
+    : null;
+  const existingProfile = existingProfileSnapshot?.exists
+    ? (existingProfileSnapshot.data() as UserRecord)
+    : null;
+
+  if (
+    promotedExisting &&
+    existingProfile?.role === "admin" &&
+    !existingProfile.multiRoleTestAccount
+  ) {
     return NextResponse.json(
-      { ok: false, error: "operator_create_failed" },
-      { status: 500 },
+      { ok: false, error: "email_already_exists" },
+      { status: 409 },
     );
   }
-  const operator: UserRecord = withoutUndefined({
-    uid: authUser.uid,
-    name: payload.name,
-    phone: "",
-    email: payload.email,
-    position: payload.position,
-    duty: payload.duty,
-    consents: {
-      terms: false,
-      privacy: false,
-      marketing: false,
-      email: false,
-      sms: false,
-      kakao: false,
-    },
-    role: "admin",
-    adminRole: payload.adminRole,
-    adminCapabilityAllow: payload.adminCapabilityAllow,
-    adminCapabilityDeny: payload.adminCapabilityDeny,
-    accountStatus: payload.status === "active" ? "active" : "disabled",
-    status: payload.status,
-    createdAt: now,
-    updatedAt: now,
-  } satisfies UserRecord);
+
+  const operator: UserRecord = promotedExisting
+    ? buildMultiRoleOperatorProfile({
+        authUser,
+        existingProfile,
+        name: payload.name,
+        email: payload.email,
+        position: payload.position,
+        duty: payload.duty,
+        status: payload.status,
+        adminRole: payload.adminRole,
+        adminCapabilityAllow: payload.adminCapabilityAllow,
+        adminCapabilityDeny: payload.adminCapabilityDeny,
+        now,
+      })
+    : withoutUndefined({
+        uid: authUser.uid,
+        name: payload.name,
+        phone: "",
+        email: payload.email,
+        position: payload.position,
+        duty: payload.duty,
+        consents: {
+          terms: false,
+          privacy: false,
+          marketing: false,
+          email: false,
+          sms: false,
+          kakao: false,
+        },
+        role: "admin",
+        adminRole: payload.adminRole,
+        adminCapabilityAllow: payload.adminCapabilityAllow,
+        adminCapabilityDeny: payload.adminCapabilityDeny,
+        accountStatus: payload.status === "active" ? "active" : "disabled",
+        status: payload.status,
+        createdAt: now,
+        updatedAt: now,
+      } satisfies UserRecord);
 
   const db = adminDb();
   try {
-    await adminAuth().setCustomUserClaims(authUser.uid, {
-      admin: payload.status === "active",
-    });
+    if (promotedExisting) {
+      await adminAuth().setCustomUserClaims(
+        authUser.uid,
+        buildMultiRoleOperatorClaims({
+          authUser,
+          profile: operator,
+          adminEnabled: payload.status === "active",
+        }),
+      );
+    } else {
+      await adminAuth().setCustomUserClaims(authUser.uid, {
+        admin: payload.status === "active",
+      });
+    }
     await db.collection("users").doc(authUser.uid).set(operator);
   } catch {
-    await adminAuth().deleteUser(authUser.uid).catch(() => undefined);
+    if (!promotedExisting) {
+      await adminAuth().deleteUser(authUser.uid).catch(() => undefined);
+    }
     return NextResponse.json(
       { ok: false, error: "operator_create_failed" },
       { status: 500 },
@@ -280,7 +352,9 @@ export async function POST(req: Request) {
     actorEmail: admin.decoded.email,
     actorRole,
     requiredPermission: "operators:create",
-    action: "operator.created",
+    action: promotedExisting
+      ? "operator.multi_role_promoted"
+      : "operator.created",
     targetType: "user",
     targetId: authUser.uid,
     after: {
@@ -292,15 +366,18 @@ export async function POST(req: Request) {
       adminRole: operator.adminRole,
       adminCapabilityAllow: operator.adminCapabilityAllow,
       adminCapabilityDeny: operator.adminCapabilityDeny,
+      multiRoleTestAccount: operator.multiRoleTestAccount ?? false,
+      enabledPortals: operator.enabledPortals ?? [],
     },
     metadata: {
       targetName: operator.name,
       targetEmail: operator.email,
       status: operator.status,
       adminRole: operator.adminRole ?? null,
+      promotedExisting,
     },
     createdAt: now,
   });
 
-  return NextResponse.json({ ok: true, operator });
+  return NextResponse.json({ ok: true, operator, promotedExisting });
 }

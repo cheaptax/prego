@@ -2,6 +2,10 @@
 
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { useEffect, useRef, useState } from "react";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
@@ -116,10 +120,13 @@ function formatSize(
 export function ConsultForm({
   content,
   previewMode = false,
+  editing = false,
+  selectedSectionId,
+  onSelectSection,
 }: {
   content: CmsPageContent;
   previewMode?: boolean;
-}) {
+} & CmsSectionEditingOptions) {
   const categoryCopy = getCmsSection(
     content,
     "public.consult",
@@ -137,6 +144,7 @@ export function ConsultForm({
   );
   const successCopy = getCmsSection(content, "public.consult", "success");
   const messages = content.messages;
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
   const categoryOptions = categoryCopy.items.flatMap((item) => {
     const value = CATEGORY_VALUES[item.id];
     return value && item.visible && !item.deleted
@@ -283,7 +291,15 @@ export function ConsultForm({
 
   if (status === "success") {
     return (
-      <div className="consult-success" role="status" aria-live="polite">
+      <div
+        {...cmsEditableSectionProps(
+          successCopy,
+          "consult-success",
+          editingOptions,
+        )}
+        role="status"
+        aria-live="polite"
+      >
         <span className="consult-success__seal" aria-hidden="true">
           <svg viewBox="0 0 32 32" width="28" height="28">
             <path
@@ -332,7 +348,13 @@ export function ConsultForm({
       )}
 
       <div className="consult-form__choices">
-        <fieldset className="consult-form__field consult-category">
+        <fieldset
+          {...cmsEditableSectionProps(
+            categoryCopy,
+            "consult-form__field consult-category",
+            editingOptions,
+          )}
+        >
           <legend className="consult-form__label">{categoryCopy.title}</legend>
           <p className="consult-form__field-hint">
             {categoryCopy.description}
@@ -363,7 +385,13 @@ export function ConsultForm({
           </div>
         </fieldset>
 
-        <fieldset className="consult-form__field consult-visibility">
+        <fieldset
+          {...cmsEditableSectionProps(
+            visibilityCopy,
+            "consult-form__field consult-visibility",
+            editingOptions,
+          )}
+        >
           <legend className="consult-form__label">{visibilityCopy.title}</legend>
           <div
             className="consult-choice__grid consult-choice__grid--visibility"
@@ -399,6 +427,7 @@ export function ConsultForm({
         </fieldset>
       </div>
 
+      <div {...cmsEditableSectionProps(fieldsCopy, "", editingOptions)}>
       <label className="consult-form__field">
         <span className="consult-form__label">
           {fieldsCopy.text.subjectLabel}
@@ -531,6 +560,7 @@ export function ConsultForm({
             ? fieldsCopy.text.submittingLabel
             : fieldsCopy.text.submitLabel}
         </button>
+      </div>
       </div>
     </form>
   );

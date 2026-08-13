@@ -41,6 +41,16 @@ export function normalizeWonAmount(
   return value;
 }
 
+export const HUNDRED_THOUSAND_WON = 100_000n;
+
+/** Half-up to 100,000원. Zero and negative stay 0. */
+export function roundWonHalfUpToHundredThousand(value: bigint): bigint {
+  if (value <= 0n) return 0n;
+  return (
+    (value + HUNDRED_THOUSAND_WON / 2n) / HUNDRED_THOUSAND_WON
+  ) * HUNDRED_THOUSAND_WON;
+}
+
 export function compareWonAmounts(left: WonAmount, right: WonAmount) {
   const leftValue = BigInt(left);
   const rightValue = BigInt(right);

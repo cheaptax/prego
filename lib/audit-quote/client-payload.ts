@@ -6,6 +6,8 @@ export type AuditQuoteRequestPayload = {
   email: string;
   name: string;
   phone: string;
+  phoneVerificationIdToken: string;
+  targetCooperativeId: string;
   targetCooperativeName: string;
   fiscalYear: number;
   privacyConsent: true;
@@ -27,6 +29,8 @@ export function buildAuditQuoteRequestPayload(
     email: string;
     name: string;
     phone: string;
+    phoneVerificationIdToken: string;
+    targetCooperativeId: string;
     targetCooperativeName: string;
     fiscalYear: number;
     marketingConsent: boolean;
@@ -38,6 +42,8 @@ export function buildAuditQuoteRequestPayload(
     email: input.email,
     name: input.name,
     phone: input.phone,
+    phoneVerificationIdToken: input.phoneVerificationIdToken,
+    targetCooperativeId: input.targetCooperativeId,
     targetCooperativeName: input.targetCooperativeName,
     fiscalYear: input.fiscalYear,
     privacyConsent: true,

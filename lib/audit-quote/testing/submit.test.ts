@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { Firestore } from "firebase-admin/firestore";
+import type { FieldValue, Firestore } from "firebase-admin/firestore";
 import type { AuditQuoteConfig } from "@/lib/audit-quote/config";
 import {
   AUDIT_QUOTE_REQUESTS,
@@ -56,14 +56,42 @@ function baseInput(overrides: Record<string, unknown> = {}) {
     email: "Finance.Team@nonghyup.com",
     contactName: "김농협",
     phone: "010-1234-5678",
+    targetCooperativeId: "demo-prigo-nh",
     targetCooperativeName: "프리고농협",
-    fiscalYear: 2026,
+    fiscalYear: 2027,
     privacyConsent: true,
     privacyPolicyVersion: "2026-07-20",
     campaign: "fy27-audit-quote",
     channel: "event_page",
     pagePath: "/events/audit-quote",
     idempotencyKey: randomUUID(),
+    ...overrides,
+  };
+}
+
+async function resolveTestCooperative(cooperativeId: string) {
+  if (cooperativeId === "demo-jaegyeong-nh") {
+    return {
+      cooperative_id: "demo-jaegyeong-nh",
+      cooperative_name: "재경농협",
+      status: "active" as const,
+    };
+  }
+  if (cooperativeId !== "demo-prigo-nh") return null;
+  return {
+    cooperative_id: "demo-prigo-nh",
+    cooperative_name: "프리고농협",
+    status: "active" as const,
+  };
+}
+
+function submitOpts(overrides: {
+  ipHash?: string;
+  nowMs?: number;
+  serverTimestamp?: FieldValue;
+} = {}) {
+  return {
+    resolveCooperative: resolveTestCooperative,
     ...overrides,
   };
 }
@@ -96,7 +124,11 @@ describe("audit-quote unit", () => {
       false,
     );
     assert.equal(
-      isAllowedAuditQuoteRequesterEmail("prego.ceo+test@gmail.com"),
+      isAllowedAuditQuoteRequesterEmail("prego.ceo+pwtest1@gmail.com"),
+      true,
+    );
+    assert.equal(
+      isAllowedAuditQuoteRequesterEmail("random+test@gmail.com"),
       false,
     );
   });
@@ -173,7 +205,7 @@ describe("audit-quote integration (memory firestore)", () => {
       db as unknown as Firestore,
       testConfig(),
       baseInput(),
-      { ipHash: "ip1", nowMs: Date.UTC(2026, 6, 20), serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", nowMs: Date.UTC(2026, 6, 20), serverTimestamp: "SERVER_TS" as never })
     );
     assert.equal(result.kind, "success");
     if (result.kind === "success") {
@@ -191,7 +223,7 @@ describe("audit-quote integration (memory firestore)", () => {
     assert.equal(stored.contactName, "김농협");
     assert.equal(stored.phone, "010-1234-5678");
     assert.equal(stored.targetCooperativeName, "프리고농협");
-    assert.equal(stored.fiscalYear, 2026);
+    assert.equal(stored.fiscalYear, 2027);
     assert.notEqual(stored.idempotencyKeyHash, baseInput().idempotencyKey);
     if (result.kind === "success") {
       assert.equal(stored.publicReference, result.publicReference);
@@ -211,13 +243,13 @@ describe("audit-quote integration (memory firestore)", () => {
       db as unknown as Firestore,
       testConfig(),
       baseInput({ idempotencyKey: key }),
-      { ipHash: "ip1", nowMs: 1_000, serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", nowMs: 1_000, serverTimestamp: "SERVER_TS" as never })
     );
     const second = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ idempotencyKey: key, email: "other@nonghyup.com" }),
-      { ipHash: "ip1", nowMs: 2_000, serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", nowMs: 2_000, serverTimestamp: "SERVER_TS" as never })
     );
     assert.equal(first.kind, "success");
     assert.equal(second.kind, "success");
@@ -236,7 +268,7 @@ describe("audit-quote integration (memory firestore)", () => {
           db as unknown as Firestore,
           testConfig(),
           baseInput({ idempotencyKey: randomUUID() }),
-          { ipHash: "ip-concurrent", nowMs, serverTimestamp: "SERVER_TS" as never }
+          submitOpts({ ipHash: "ip-concurrent", nowMs, serverTimestamp: "SERVER_TS" as never })
         )
       )
     );
@@ -248,43 +280,153 @@ describe("audit-quote integration (memory firestore)", () => {
     assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 1);
   });
 
+  it("allows the same email to request quotes for a different cooperative", async () => {
+    const db = new MemoryFirestore();
+    const first = await submitAuditQuoteRequest(
+      db as unknown as Firestore,
+      testConfig(),
+      baseInput({ idempotencyKey: randomUUID() }),
+      submitOpts({ ipHash: "ip1", nowMs: 1_000, serverTimestamp: "SERVER_TS" as never })
+    );
+    const second = await submitAuditQuoteRequest(
+      db as unknown as Firestore,
+      testConfig(),
+      baseInput({
+        idempotencyKey: randomUUID(),
+        targetCooperativeId: "demo-jaegyeong-nh",
+        targetCooperativeName: "재경농협",
+      }),
+      submitOpts({ ipHash: "ip1", nowMs: 2_000, serverTimestamp: "SERVER_TS" as never })
+    );
+    assert.equal(first.kind, "success");
+    assert.equal(second.kind, "success");
+    if (first.kind === "success" && second.kind === "success") {
+      assert.equal(first.created, true);
+      assert.equal(second.created, true);
+      assert.notEqual(first.requestId, second.requestId);
+    }
+    assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 2);
+  });
+
+  it("limits non-test phone numbers to five created quote requests", async () => {
+    const db = new MemoryFirestore();
+    const cfg = testConfig({
+      dedupeWindowMs: 0,
+      rateLimit: {
+        ipWindowMs: 60_000,
+        ipMax: 50,
+        emailWindowMs: 60_000,
+        emailMax: 50,
+      },
+    });
+
+    const results = [];
+    for (let index = 0; index < 6; index += 1) {
+      results.push(
+        await submitAuditQuoteRequest(
+          db as unknown as Firestore,
+          cfg,
+          baseInput({
+            email: `phone-limit-${index}@nonghyup.com`,
+            idempotencyKey: randomUUID(),
+          }),
+          submitOpts({
+            ipHash: `ip-${index}`,
+            nowMs: 10_000 + index,
+            serverTimestamp: "SERVER_TS" as never,
+          }),
+        ),
+      );
+    }
+
+    assert.deepEqual(
+      results.map((result) => result.kind),
+      ["success", "success", "success", "success", "success", "rejected"],
+    );
+    const sixth = results[5];
+    assert.equal(sixth.kind, "rejected");
+    if (sixth.kind === "rejected") {
+      assert.equal(sixth.error, "phone_quote_limit_exceeded");
+    }
+    assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 5);
+  });
+
+  it("allows unlimited quote requests for the test phone number", async () => {
+    const db = new MemoryFirestore();
+    const cfg = testConfig({
+      dedupeWindowMs: 0,
+      rateLimit: {
+        ipWindowMs: 60_000,
+        ipMax: 50,
+        emailWindowMs: 60_000,
+        emailMax: 50,
+      },
+    });
+
+    const results = [];
+    for (let index = 0; index < 6; index += 1) {
+      results.push(
+        await submitAuditQuoteRequest(
+          db as unknown as Firestore,
+          cfg,
+          baseInput({
+            email: `test-phone-${index}@nonghyup.com`,
+            phone: "010-6387-7780",
+            idempotencyKey: randomUUID(),
+          }),
+          submitOpts({
+            ipHash: `ip-test-${index}`,
+            nowMs: 20_000 + index,
+            serverTimestamp: "SERVER_TS" as never,
+          }),
+        ),
+      );
+    }
+
+    assert.deepEqual(
+      results.map((result) => result.kind),
+      ["success", "success", "success", "success", "success", "success"],
+    );
+    assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 6);
+  });
+
   it("rejects invalid email, missing consent, and wrong policy version without storage", async () => {
     const db = new MemoryFirestore();
     const invalidEmail = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ email: "bad-email" }),
-      { ipHash: "ip1", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", serverTimestamp: "SERVER_TS" as never })
     );
     const wrongDomain = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ email: "someone@example.com" }),
-      { ipHash: "ip1", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", serverTimestamp: "SERVER_TS" as never })
     );
     const missingName = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ contactName: "" }),
-      { ipHash: "ip1", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", serverTimestamp: "SERVER_TS" as never })
     );
     const badPhone = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ phone: "02-123-4567" }),
-      { ipHash: "ip1", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", serverTimestamp: "SERVER_TS" as never })
     );
     const missingConsent = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ privacyConsent: false }),
-      { ipHash: "ip1", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", serverTimestamp: "SERVER_TS" as never })
     );
     const wrongPolicy = await submitAuditQuoteRequest(
       db as unknown as Firestore,
       testConfig(),
       baseInput({ privacyPolicyVersion: "1999-01-01" }),
-      { ipHash: "ip1", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip1", serverTimestamp: "SERVER_TS" as never })
     );
     assert.equal(invalidEmail.kind, "rejected");
     assert.equal(wrongDomain.kind, "rejected");
@@ -310,7 +452,7 @@ describe("audit-quote integration (memory firestore)", () => {
       db as unknown as Firestore,
       testConfig(),
       baseInput({ companyWebsite: "https://bot.example" }),
-      { ipHash: "ip-bot", serverTimestamp: "SERVER_TS" as never }
+      submitOpts({ ipHash: "ip-bot", serverTimestamp: "SERVER_TS" as never })
     );
     assert.equal(result.kind, "honeypot");
     assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 0);
@@ -333,6 +475,8 @@ describe("audit-quote firestore rules contract", () => {
       "auditQuoteEmailDedup",
       "auditQuoteRateLimits",
       "auditQuoteNotifications",
+      "phoneVerificationChallenges",
+      "phoneVerificationRateLimits",
     ]) {
       assert.match(rules, new RegExp(`match /${collection}/\\{[^}]+\\}`));
       const block = rules.split(`match /${collection}/`)[1] ?? "";

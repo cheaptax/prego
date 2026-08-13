@@ -130,6 +130,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /cooperativeQuotePricePlans/{planId} {
+      allow read, write: if false;
+    }
+
+    match /cooperativeQuotePartnerPrices/{priceId} {
+      allow read, write: if false;
+    }
+
+    match /cooperativeQuotePriceChangeEvents/{eventId} {
+      allow read, write: if false;
+    }
+
     match /testAuthSubjects/{authUid} {
       allow read, write: if false;
     }
@@ -250,6 +262,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /auditQuoteRateLimits/{limitId} {
+      allow read, write: if false;
+    }
+    match /phoneVerificationChallenges/{challengeId} {
+      allow read, write: if false;
+    }
+    match /phoneVerificationRateLimits/{limitId} {
       allow read, write: if false;
     }
     match /auditQuoteNotifications/{requestId} {

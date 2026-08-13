@@ -9,6 +9,8 @@ import {
   normalizeContactName,
   normalizePhoneDigits,
 } from "@/lib/audit-quote/contact-core";
+import { AUDIT_QUOTE_FIXED_FISCAL_YEAR } from "@/lib/audit-quote/fiscal-year";
+import { isValidKrMobilePhone } from "@/lib/phone";
 
 export function validateAuditQuoteEmail(raw: string) {
   const email = normalizeEmail(raw);
@@ -36,7 +38,7 @@ export function validateAuditQuotePhone(raw: string) {
   if (!digits) {
     return { ok: false as const, error: "휴대폰 번호를 입력해 주세요." };
   }
-  if (!isValidKoreanMobile(digits)) {
+  if (!isValidKoreanMobile(digits) || !isValidKrMobilePhone(digits)) {
     return { ok: false as const, error: "올바른 휴대폰 번호를 입력해 주세요." };
   }
   return { ok: true as const, phone: formatKoreanMobile(digits) };
@@ -62,6 +64,21 @@ export function validateAuditQuoteTargetCooperative(raw: string) {
   return { ok: true as const, targetCooperativeName };
 }
 
+export function normalizeCooperativeSearchName(value: string) {
+  return value.normalize("NFKC").replace(/\s+/gu, "").trim();
+}
+
+export function findExactCooperativeMatch<
+  T extends { cooperative_name: string },
+>(query: string, results: readonly T[]): T | null {
+  const needle = normalizeCooperativeSearchName(query);
+  if (!needle) return null;
+  const matches = results.filter(
+    (item) => normalizeCooperativeSearchName(item.cooperative_name) === needle,
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export function validateAuditQuoteFiscalYear(raw: string) {
   if (!/^\d{4}$/u.test(raw.trim())) {
     return { ok: false as const, error: "사업연도 4자리를 입력해 주세요." };
@@ -69,12 +86,11 @@ export function validateAuditQuoteFiscalYear(raw: string) {
   const fiscalYear = Number(raw);
   if (
     !Number.isSafeInteger(fiscalYear) ||
-    fiscalYear < 2_000 ||
-    fiscalYear > 2_100
+    fiscalYear !== AUDIT_QUOTE_FIXED_FISCAL_YEAR
   ) {
     return {
       ok: false as const,
-      error: "사업연도는 2000년부터 2100년 사이로 입력해 주세요.",
+      error: `이번 접수는 ${AUDIT_QUOTE_FIXED_FISCAL_YEAR}년도만 가능합니다.`,
     };
   }
   return { ok: true as const, fiscalYear };
@@ -111,6 +127,17 @@ export function mapAuditQuoteApiError(code: string | undefined) {
       return "현재 접수 기간이 아닙니다.";
     case "rate_limited":
       return "요청이 많아 잠시 후 다시 시도해 주세요.";
+    case "missing_phone_verification":
+      return "휴대폰 문자 인증을 먼저 진행해 주세요.";
+    case "invalid_phone_verification":
+      return "휴대폰 인증 정보가 올바르지 않습니다.";
+    case "phone_verification_expired":
+      return "휴대폰 인증이 만료되었습니다. 인증번호를 다시 받아 주세요.";
+    case "sms_not_configured":
+    case "sms_send_failed":
+      return "휴대폰 문자 인증을 잠시 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+    case "phone_quote_limit_exceeded":
+      return "해당 휴대폰 번호로는 견적요청을 최대 5번까지만 할 수 있습니다.";
     case "origin_not_allowed":
     case "unsupported_media_type":
     case "payload_too_large":

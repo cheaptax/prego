@@ -1,11 +1,16 @@
 import { LoginForm } from "@/components/LoginForm";
+import { HomePromoFloat } from "@/components/HomePromoFloat";
+import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSections";
 import {
   getPortalLoginPageConfig,
   type PortalLoginPageKey,
 } from "@/lib/auth/login-page";
+import {
+  cmsEditableSectionProps,
+  type CmsSectionEditingOptions,
+} from "@/lib/cms/editable-section";
 import { getCmsSection } from "@/lib/cms/runtime";
-import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
-import { cmsSectionRootProps } from "@/lib/cms/style-runtime";
+import type { CmsPageContent } from "@/lib/cms/schemas";
 
 export function LoginPageRenderer({
   content,
@@ -21,35 +26,23 @@ export function LoginPageRenderer({
   mainId?: string | null;
   editing?: boolean;
   previewMode?: boolean;
-  selectedSectionId?: string;
-  onSelectSection?: (sectionId: string) => void;
-}) {
+} & CmsSectionEditingOptions) {
   const config = getPortalLoginPageConfig(pageKey);
   const hero = getCmsSection(content, pageKey, "hero");
   const form = getCmsSection(content, pageKey, "loginForm");
+  const promoFloat = content.sections.find(
+    (section) => section.id === "promoFloat",
+  );
 
-  function sectionProps(section: CmsSection, className: string) {
-    const root = cmsSectionRootProps(section, className);
-    return {
-      ...root,
-      className: [
-        root.className,
-        editing ? "cms-home-edit-section" : "",
-        selectedSectionId === section.id ? "is-selected" : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      tabIndex: editing ? 0 : undefined,
-      onClick: editing ? () => onSelectSection?.(section.id) : undefined,
-      onFocus: editing ? () => onSelectSection?.(section.id) : undefined,
-    };
-  }
+  const editingOptions = { editing, selectedSectionId, onSelectSection };
 
   const highlight = hero.text.highlight;
   return (
     <main id={mainId ?? undefined} className="login-page">
       <section className="login-shell">
-        <header {...sectionProps(hero, "login-head")}>
+        <header
+          {...cmsEditableSectionProps(hero, "login-head", editingOptions)}
+        >
           <span className="login-head__eyebrow">
             <span className="dot" aria-hidden="true" />
             {hero.eyebrow}
@@ -76,7 +69,9 @@ export function LoginPageRenderer({
           <p className="login-head__lede">{hero.description}</p>
         </header>
 
-        <section {...sectionProps(form, "login-card")}>
+        <section
+          {...cmsEditableSectionProps(form, "login-card", editingOptions)}
+        >
           <span className="login-card__tag">{form.eyebrow}</span>
           <h2 className="login-card__title">{form.title}</h2>
           <p className="login-card__lede">{form.description}</p>
@@ -90,6 +85,21 @@ export function LoginPageRenderer({
           />
         </section>
       </section>
+      {promoFloat ? (
+        <HomePromoFloat
+          section={promoFloat}
+          editing={editing}
+          selectedSectionId={selectedSectionId}
+          onSelectSection={onSelectSection}
+        />
+      ) : null}
+      <CmsSupplementalSections
+        pageKey={pageKey}
+        content={content}
+        editing={editing}
+        selectedSectionId={selectedSectionId}
+        onSelectSection={onSelectSection}
+      />
     </main>
   );
 }

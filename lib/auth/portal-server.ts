@@ -20,17 +20,18 @@ export type PortalAccountResolverDependencies = {
 
 async function loadProfiles(uid: string) {
   const users = adminDb().collection("users");
-  const [directSnapshot, matchingSnapshot] = await Promise.all([
-    users.doc(uid).get(),
-    users.where("uid", "==", uid).limit(3).get(),
-  ]);
-  const profiles = new Map<string, UserRecord>();
-
+  const directSnapshot = await users.doc(uid).get();
   if (directSnapshot.exists) {
-    profiles.set(
-      directSnapshot.id,
-      directSnapshot.data() as UserRecord,
-    );
+    const direct = directSnapshot.data() as UserRecord;
+    if (!direct.uid || direct.uid === uid) {
+      return [direct];
+    }
+  }
+
+  const matchingSnapshot = await users.where("uid", "==", uid).limit(3).get();
+  const profiles = new Map<string, UserRecord>();
+  if (directSnapshot.exists) {
+    profiles.set(directSnapshot.id, directSnapshot.data() as UserRecord);
   }
   for (const snapshot of matchingSnapshot.docs) {
     profiles.set(snapshot.id, snapshot.data() as UserRecord);
@@ -66,6 +67,7 @@ function decodedIdentity(
     admin: decoded.admin,
     partner: decoded.partner,
     partnerId: decoded.partnerId,
+    multiRole: (decoded as { multiRole?: unknown }).multiRole,
   };
 }
 
@@ -92,7 +94,11 @@ async function resolveDecodedAccountContext(
 
   const profile = profiles[0];
   const partnerId =
-    profile.role === "partner" ? profile.partnerId?.trim() : "";
+    profile.role === "partner" ||
+    (profile.multiRoleTestAccount &&
+      profile.enabledPortals?.includes("partner"))
+      ? profile.partnerId?.trim()
+      : "";
   const partner = partnerId
     ? await dependencies.loadPartner(partnerId)
     : undefined;
