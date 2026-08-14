@@ -713,7 +713,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         title: "담당자 정보 입력",
         text: {
           positionLabel: "직책",
-          positionPlaceholder: "예: 과장, 팀장",
+          positionPlaceholder: "사원, 대리, 과장, 팀장, 차장 ...",
           dutyLabel: "담당업무",
           dutyPlaceholder: "담당업무 선택",
         },
@@ -799,6 +799,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           temporaryConversionQuotedCooperativeLabel: "견적 요청 농협",
           temporaryConversionQuotedNameLabel: "견적 요청 이름",
           temporaryConversionQuotedPhoneLabel: "견적 요청 전화번호",
+          temporaryConversionQuotedEmailLabel: "견적 요청 이메일",
           temporaryConversionQuotedMissingValue: "미등록",
           temporaryConversionConsentLabel: "정회원 전환에 동의합니다",
           temporaryConversionConsentHelp:
@@ -2232,9 +2233,10 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       countSuffix: "건",
       requestInfoTitle: "견적 신청 정보",
       requestInfoHelp:
-        "견적 신청 때 입력한 이름, 전화번호, 농협명입니다. 전환 전에 한 번 확인해 주세요.",
+        "견적 신청 때 입력한 이름, 전화번호, 이메일, 농협명입니다. 전환 전에 한 번 확인해 주세요.",
       requestNameLabel: "이름",
       requestPhoneLabel: "전화번호",
+      requestEmailLabel: "이메일",
       requestCooperativeLabel: "농협명",
     },
   ),
@@ -2293,9 +2295,10 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       countSuffix: "건",
       requestInfoTitle: "견적 신청 정보",
       requestInfoHelp:
-        "견적 신청 때 입력한 이름, 전화번호, 농협명입니다. 전환 전에 한 번 확인해 주세요.",
+        "견적 신청 때 입력한 이름, 전화번호, 이메일, 농협명입니다. 전환 전에 한 번 확인해 주세요.",
       requestNameLabel: "이름",
       requestPhoneLabel: "전화번호",
+      requestEmailLabel: "이메일",
       requestCooperativeLabel: "농협명",
     },
   ),
@@ -4033,6 +4036,15 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           save: "저장",
           saving: "저장 중...",
           retryNotification: "알림 재시도",
+          retryRequestEmail: "견적 요청 완료 메일 재발송",
+          retryQuoteEmail: "견적서 발송 메일 재발송",
+          emailDeliveryTitle: "고객 메일 발송 현황",
+          emailDeliveryHelp:
+            "발송됨은 메일 서버가 접수한 상태, 수신 확인은 고객 받은편지함 도착입니다. 반송·실패면 주소를 확인한 뒤 해당 메일을 다시 보내 주세요.",
+          emailDeliveryEmpty: "아직 발송 기록이 없습니다.",
+          emailDeliveryAttemptsSuffix: "회 시도",
+          emailDeliveryAccountLabel: "아이디",
+          emailDeliveryRecipientLabel: "실제 수신 주소",
         },
         items: [
           item("status.all", "전체"),
@@ -4870,6 +4882,18 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       auditQuoteSaveFailed: "저장에 실패했습니다.",
       auditQuoteNotifySuccess: "알림 상태: {status} (시도 {attempts})",
       auditQuoteNotifyFailed: "알림 재시도에 실패했습니다.",
+      auditQuoteRequestEmailSuccess:
+        "견적 요청 완료 안내 메일을 다시 보냈습니다.",
+      auditQuoteRequestEmailSuccessWithPassword:
+        "견적 요청 완료 안내 메일(임시 비밀번호 포함)을 다시 보냈습니다.",
+      auditQuoteRequestEmailFailed:
+        "견적 요청 완료 안내 메일을 보내지 못했습니다.",
+      auditQuoteDeliveryEmailSuccess:
+        "견적서 발송 안내 메일 {sent}건을 다시 보냈습니다.",
+      auditQuoteDeliveryEmailNone:
+        "다시 보낼 확정 견적서가 없습니다. 제휴사가 견적을 확정한 뒤 재발송할 수 있습니다.",
+      auditQuoteDeliveryEmailFailed:
+        "견적서 발송 안내 메일을 다시 보내지 못했습니다.",
       auditEvaluationUnauthorized:
         "로그인이 만료되었습니다. 관리자 계정으로 다시 로그인해 주세요.",
       auditEvaluationForbidden: "감사평가 운영 권한이 없습니다.",
@@ -5057,6 +5081,7 @@ export const CMS_GLOBAL_DEFAULTS: Record<CmsGlobalKey, CmsGlobalContent> = {
       about: action("about", "소개", "/#about", "text"),
       signup: action("signup", "회원가입", "/signup", "text"),
       mypage: action("mypage", "마이페이지", "/mypage", "text"),
+      customerLogin: { ...FOOTER_PORTAL_LINK_DEFAULTS.customerLogin },
       partnerLogin: { ...FOOTER_PORTAL_LINK_DEFAULTS.partnerLogin },
       operatorLogin: { ...FOOTER_PORTAL_LINK_DEFAULTS.operatorLogin },
     },

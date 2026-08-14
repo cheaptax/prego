@@ -61,6 +61,7 @@ const PREVIEW_REQUEST = {
   subject: "2027년도 외부회계감사 견적",
   customerName: "김농협",
   customerPhone: "010-1234-5678",
+  customerEmail: "quote@nonghyup.com",
   cooperativeName: "재경농협",
 } as QuoteRequestRecord;
 
@@ -343,6 +344,13 @@ export function CustomerQuotesPage({
                           <dt>{copy("requestPhoneLabel")}</dt>
                           <dd>
                             {displayQuotedPhone(request.customerPhone) ||
+                              copy("missingValue")}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>{copy("requestEmailLabel")}</dt>
+                          <dd>
+                            {request.customerEmail?.trim() ||
                               copy("missingValue")}
                           </dd>
                         </div>

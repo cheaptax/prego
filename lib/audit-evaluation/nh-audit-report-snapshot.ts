@@ -350,7 +350,7 @@ function resultSnapshot(
       : null;
   const auditFeeWon = result.cost?.auditFeeWon ?? null;
   const belowSafePrice =
-    Boolean(safePriceMinWon) &&
+    safePriceMinWon != null &&
     auditFeeWon !== null &&
     BigInt(auditFeeWon) < BigInt(safePriceMinWon);
   return {

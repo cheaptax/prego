@@ -77,7 +77,7 @@ try {
     await page.waitForTimeout(500);
     const firstCoop = page.locator(".signup-coop-results button").first();
     if (await firstCoop.count()) await firstCoop.click();
-    await page.getByPlaceholder("예: 과장, 팀장").fill("과장");
+    await page.getByPlaceholder("사원, 대리, 과장, 팀장, 차장 ...").fill("과장");
     await selectFirstNonEmpty(page.locator("select").nth(2));
     await page.locator(".auth-check--all input").check();
     await page.getByRole("button", { name: "가입 신청 완료" }).click();

@@ -16,6 +16,7 @@ import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getPartnerProfessionLabel } from "@/lib/partner-professions";
 import { MIN_AUDIT_QUOTE_ASSIGNMENTS } from "@/lib/quotes/audit-quote-assignment";
 import type { QuoteAssignmentRecord } from "@/lib/firebase/schema";
+import type { CustomerEmailDeliveryView } from "@/lib/email/delivery-status";
 import { PartnerNhAuditQuoteForm } from "@/components/PartnerNhAuditQuoteForm";
 import {
   EMPTY_NH_AUDIT_PARTNER_FORM,
@@ -174,6 +175,12 @@ export function AdminAuditQuotesPanel({
   >([]);
   const [automationNotes, setAutomationNotes] = useState("");
   const [automationSaving, setAutomationSaving] = useState(false);
+  const [emailDeliveries, setEmailDeliveries] = useState<
+    CustomerEmailDeliveryView[]
+  >([]);
+  const [retryingKind, setRetryingKind] = useState<
+    "request_received" | "quote_delivery" | null
+  >(null);
 
   useEffect(() => {
     if (previewMode) return;
@@ -226,6 +233,7 @@ export function AdminAuditQuotesPanel({
       setSelectedId(requestId);
       setDetail(previewQuote);
       setAssignments([]);
+      setEmailDeliveries([]);
       return;
     }
     setSelectedId(requestId);
@@ -240,6 +248,9 @@ export function AdminAuditQuotesPanel({
       ]);
       const item = data.item as AuditQuoteDetail;
       setDetail(item);
+      setEmailDeliveries(
+        (data.emailDeliveries as CustomerEmailDeliveryView[]) ?? [],
+      );
       setDraftStatus(item.status);
       setDraftAssignee(item.assignedTo ?? "");
       setDraftQuoteCount(String(item.quoteCount));
@@ -455,34 +466,49 @@ export function AdminAuditQuotesPanel({
     }
   }
 
-  async function retryNotify() {
+  async function retryCustomerEmail(kind: "request_received" | "quote_delivery") {
     if (!detail || previewMode) return;
-    setSaving(true);
+    setRetryingKind(kind);
     try {
       const data = await adminFetch(
         `/api/admin/audit-quotes/${detail.requestId}/notify-retry`,
-        { method: "POST" }
+        {
+          method: "POST",
+          body: JSON.stringify({ kind }),
+        },
       );
-      onMessage({
-        tone: "success",
-        text: formatAdminOperationsMessage(
-          copy.message("auditQuoteNotifySuccess"),
-          {
-            status: String(data.notifyStatus),
-            attempts: String(data.attempts),
-          },
-        ),
-      });
+      if (kind === "request_received") {
+        onMessage({
+          tone: "success",
+          text: data.includedPassword
+            ? copy.message("auditQuoteRequestEmailSuccessWithPassword")
+            : copy.message("auditQuoteRequestEmailSuccess"),
+        });
+      } else {
+        onMessage({
+          tone: "success",
+          text: formatAdminOperationsMessage(
+            copy.message("auditQuoteDeliveryEmailSuccess"),
+            { sent: String(data.sent ?? 0) },
+          ),
+        });
+      }
+      await loadDetail(detail.requestId);
     } catch (error) {
+      const code = error instanceof AdminRequestError ? error.code : "";
       onMessage({
         tone: "error",
         text:
-          error instanceof AdminRequestError && error.code === "auth_required"
+          code === "auth_required"
             ? copy.message("authRequired")
-            : copy.message("auditQuoteNotifyFailed"),
+            : code === "no_quotes_to_resend"
+              ? copy.message("auditQuoteDeliveryEmailNone")
+              : kind === "quote_delivery"
+                ? copy.message("auditQuoteDeliveryEmailFailed")
+                : copy.message("auditQuoteRequestEmailFailed"),
       });
     } finally {
-      setSaving(false);
+      setRetryingKind(null);
     }
   }
 
@@ -965,6 +991,55 @@ export function AdminAuditQuotesPanel({
               </div>
             </dl>
 
+            <section className="admin-field" aria-labelledby="customer-email-delivery-title">
+              <h3 id="customer-email-delivery-title">
+                {section.text("emailDeliveryTitle")}
+              </h3>
+              <p className="admin-form__hint">
+                {section.text("emailDeliveryHelp")}
+              </p>
+              {emailDeliveries.length === 0 ? (
+                <p className="admin-form__hint">
+                  {section.text("emailDeliveryEmpty")}
+                </p>
+              ) : (
+                <ul className="admin-feed">
+                  {emailDeliveries.map((delivery) => (
+                    <li key={delivery.id} className="admin-feed__item">
+                      <div>
+                        <strong>{delivery.purposeLabel}</strong>
+                        <span>
+                          {delivery.statusLabel}
+                          {delivery.attemptCount
+                            ? ` · ${delivery.attemptCount}${section.text("emailDeliveryAttemptsSuffix")}`
+                            : ""}
+                          {delivery.sentAt
+                            ? ` · ${new Date(delivery.sentAt).toLocaleString("ko-KR")}`
+                            : ""}
+                        </span>
+                        {delivery.accountEmail ? (
+                          <span>
+                            {section.text("emailDeliveryAccountLabel")}:{" "}
+                            {delivery.accountEmail}
+                          </span>
+                        ) : null}
+                        {delivery.recipientEmail &&
+                        delivery.recipientEmail !== delivery.accountEmail ? (
+                          <span>
+                            {section.text("emailDeliveryRecipientLabel")}:{" "}
+                            {delivery.recipientEmail}
+                          </span>
+                        ) : null}
+                        {delivery.lastError ? (
+                          <span>{delivery.lastError}</span>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
             <label className="admin-field">
               <span>{section.text("status")}</span>
               <select
@@ -1229,10 +1304,22 @@ export function AdminAuditQuotesPanel({
               <button
                 type="button"
                 className="admin-btn"
-                disabled={saving}
-                onClick={() => void retryNotify()}
+                disabled={retryingKind !== null || previewMode}
+                onClick={() => void retryCustomerEmail("request_received")}
               >
-                {section.text("retryNotification")}
+                {retryingKind === "request_received"
+                  ? section.text("saving")
+                  : section.text("retryRequestEmail")}
+              </button>
+              <button
+                type="button"
+                className="admin-btn"
+                disabled={retryingKind !== null || previewMode}
+                onClick={() => void retryCustomerEmail("quote_delivery")}
+              >
+                {retryingKind === "quote_delivery"
+                  ? section.text("saving")
+                  : section.text("retryQuoteEmail")}
               </button>
             </div>
           </div>

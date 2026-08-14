@@ -567,6 +567,9 @@ export type QuoteEmailDeliveryRecord = {
   quoteId: string;
   quoteRequestId: string;
   recipientEmail: string;
+  accountEmail?: string;
+  auditQuoteRequestId?: string;
+  purpose?: "quote" | "audit_quote_request";
   status: "pending" | "sending" | "sent" | "delivered" | "bounced" | "complained" | "failed";
   provider: "resend" | "local";
   providerMessageId?: string | null;

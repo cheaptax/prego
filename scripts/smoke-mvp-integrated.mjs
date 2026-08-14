@@ -53,7 +53,7 @@ async function signup(browser, name, email, coopQuery) {
   await page.getByPlaceholder("예: 상주농협, 서울중앙농협").fill(coopQuery);
   await page.waitForTimeout(500);
   await page.locator(".signup-coop-results button").first().click();
-  await page.getByPlaceholder("예: 과장, 팀장").fill("대리");
+  await page.getByPlaceholder("사원, 대리, 과장, 팀장, 차장 ...").fill("대리");
   await selectFirstNonEmpty(page.locator("select").last());
   await page.locator(".auth-check--all input").check();
   await page.getByRole("button", { name: "가입 신청 완료" }).click();

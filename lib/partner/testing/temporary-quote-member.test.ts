@@ -185,7 +185,7 @@ describe("temporary quote membership", () => {
     );
   });
 
-  it("resets only unactivated temporary members to the deterministic initial password", async () => {
+  it("resets temporary members to the deterministic initial password", async () => {
     const db = new MemoryDb();
     db.values.set("users/temporary-user", temporaryProfile());
     let updatedPassword = "";
@@ -369,8 +369,10 @@ describe("temporary quote membership", () => {
     assert.match(form, /className="login-page"/);
     assert.match(form, /temporaryConversionQuotedNameLabel/);
     assert.match(form, /temporaryConversionQuotedPhoneLabel/);
+    assert.match(form, /temporaryConversionQuotedEmailLabel/);
     assert.match(form, /quotedContact\.customerName/);
     assert.match(form, /quotedContact\.customerPhone/);
+    assert.match(form, /quotedContact\.customerEmail/);
   });
 
   it("reuses the latest quoted cooperative and contact instead of asking again", () => {
@@ -381,6 +383,7 @@ describe("temporary quote membership", () => {
           cooperativeName: "이전농협",
           customerName: "이전 담당자",
           customerPhone: "010-0000-0000",
+          customerEmail: "old@nonghyup.com",
           updatedAt: "2026-08-01T00:00:00.000Z",
         },
         {
@@ -388,6 +391,7 @@ describe("temporary quote membership", () => {
           cooperativeName: "재경농협",
           customerName: "김농협",
           customerPhone: "+821012345678",
+          customerEmail: "quote@nonghyup.com",
           updatedAt: "2026-08-13T00:00:00.000Z",
         },
       ]),
@@ -396,6 +400,7 @@ describe("temporary quote membership", () => {
         cooperativeName: "재경농협",
         customerName: "김농협",
         customerPhone: "+821012345678",
+        customerEmail: "quote@nonghyup.com",
       },
     );
   });
@@ -408,10 +413,15 @@ describe("temporary quote membership", () => {
         {
           customerName: "김농협",
           customerPhone: "010-1234-5678",
+          customerEmail: "quote@nonghyup.com",
           updatedAt: "2026-08-13T00:00:00.000Z",
         },
       ]),
-      { customerName: "김농협", customerPhone: "010-1234-5678" },
+      {
+        customerName: "김농협",
+        customerPhone: "010-1234-5678",
+        customerEmail: "quote@nonghyup.com",
+      },
     );
   });
 
@@ -423,7 +433,9 @@ describe("temporary quote membership", () => {
     assert.match(page, /requestInfoTitle/);
     assert.match(page, /requestNameLabel/);
     assert.match(page, /requestPhoneLabel/);
+    assert.match(page, /requestEmailLabel/);
     assert.match(page, /requestCooperativeLabel/);
     assert.match(page, /displayQuotedPhone/);
+    assert.match(page, /customerEmail/);
   });
 });

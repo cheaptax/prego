@@ -98,7 +98,11 @@ test("production Resend adapter sends the one-time link without logging it", asy
     available: true,
     sender: async (message) => {
       sent.push(message);
-      return { provider: "resend" as const, id: "email-1" };
+      return {
+        provider: "resend" as const,
+        id: "email-1",
+        recipientEmail: message.to,
+      };
     },
   });
   await adapter.sendAccessLink({

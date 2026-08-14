@@ -112,13 +112,15 @@ describe("homepage CMS operating defaults", () => {
     assert.equal(header.links.mypage.href, "/mypage");
     assert.equal(footer.links.consult.href, "/consult");
     assert.equal(footer.links.inquiries.href, "/inquiries");
+    assert.equal(footer.links.customerLogin.label, "고객 로그인");
+    assert.equal(footer.links.customerLogin.href, "/login");
     assert.equal(footer.links.partnerLogin.label, "제휴사 로그인");
     assert.equal(footer.links.partnerLogin.href, "/partner/login");
     assert.equal(footer.links.operatorLogin.label, "운영자 로그인");
     assert.equal(footer.links.operatorLogin.href, "/admin/login");
     assert.equal(
       footer.text.portalLoginNavigationLabel,
-      "제휴사 및 운영자 로그인",
+      "고객 · 제휴사 · 운영자 로그인",
     );
     assert.equal(support.links.support.href, "/support");
   });

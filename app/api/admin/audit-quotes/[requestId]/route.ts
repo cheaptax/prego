@@ -9,14 +9,17 @@ import type {
   AuditQuoteRequestRecord,
   AuditQuoteStatus,
 } from "@/lib/audit-quote/types";
+import { toCustomerEmailDeliveryView } from "@/lib/email/delivery-status";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import { adminDb } from "@/lib/firebase/admin";
+import type { QuoteEmailDeliveryRecord } from "@/lib/firebase/schema";
 import {
   authErrorCode,
   authErrorStatus,
   requireAdminCapability,
   writeAuditLog,
 } from "@/lib/firebase/server";
+import { quoteRequestIdFor } from "@/lib/quotes/quote-requests";
 
 export const runtime = "nodejs";
 
@@ -59,9 +62,45 @@ export async function GET(req: Request, { params }: Params) {
   }
 
   const record = snap.data() as AuditQuoteRequestRecord;
+  const quoteRequestId = quoteRequestIdFor("audit_quote", requestId);
+  const [byAuditId, byQuoteRequestId, requestDeliverySnap] = await Promise.all([
+    adminDb()
+      .collection("quoteEmailDeliveries")
+      .where("auditQuoteRequestId", "==", requestId)
+      .get()
+      .catch(() => null),
+    adminDb()
+      .collection("quoteEmailDeliveries")
+      .where("quoteRequestId", "==", quoteRequestId)
+      .get()
+      .catch(() => null),
+    adminDb()
+      .collection("quoteEmailDeliveries")
+      .doc(`aqreq_${requestId}`)
+      .get()
+      .catch(() => null),
+  ]);
+  const deliveries = new Map<string, QuoteEmailDeliveryRecord>();
+  for (const doc of [
+    ...(byAuditId?.docs ?? []),
+    ...(byQuoteRequestId?.docs ?? []),
+  ]) {
+    deliveries.set(doc.id, doc.data() as QuoteEmailDeliveryRecord);
+  }
+  if (requestDeliverySnap?.exists) {
+    deliveries.set(
+      requestDeliverySnap.id,
+      requestDeliverySnap.data() as QuoteEmailDeliveryRecord,
+    );
+  }
   return NextResponse.json({
     ok: true,
     item: toAuditQuoteDetail(record),
+    emailDeliveries: Array.from(deliveries.values())
+      .map(toCustomerEmailDeliveryView)
+      .sort((left, right) =>
+        (right.updatedAt || "").localeCompare(left.updatedAt || ""),
+      ),
   });
 }
 

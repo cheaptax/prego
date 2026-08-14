@@ -18,12 +18,20 @@ export function Footer({
 } = {}) {
   const globals = useCmsGlobals();
   const footer = content ?? globals.footer;
+  const customerLogin =
+    footer.links.customerLogin ??
+    FOOTER_PORTAL_LINK_DEFAULTS.customerLogin;
   const partnerLogin =
     footer.links.partnerLogin ??
     FOOTER_PORTAL_LINK_DEFAULTS.partnerLogin;
   const operatorLogin =
     footer.links.operatorLogin ??
     FOOTER_PORTAL_LINK_DEFAULTS.operatorLogin;
+  const portalNavigationLabel =
+    !footer.text.portalLoginNavigationLabel ||
+    footer.text.portalLoginNavigationLabel === "제휴사 및 운영자 로그인"
+      ? FOOTER_PORTAL_NAVIGATION_LABEL
+      : footer.text.portalLoginNavigationLabel;
   return (
     <footer className="foot">
       <div className="foot__inner">
@@ -101,14 +109,16 @@ export function Footer({
         {showPortalLinks ? (
           <nav
             className="foot__portal-links"
-            aria-label={
-              footer.text.portalLoginNavigationLabel ||
-              FOOTER_PORTAL_NAVIGATION_LABEL
-            }
+            aria-label={portalNavigationLabel}
           >
-            <Link href={partnerLogin.href}>{partnerLogin.label}</Link>
-            <span aria-hidden="true">|</span>
-            <Link href={operatorLogin.href}>{operatorLogin.label}</Link>
+            <div className="foot__portal-links-row foot__portal-links-row--customer">
+              <Link href={customerLogin.href}>{customerLogin.label}</Link>
+            </div>
+            <div className="foot__portal-links-row">
+              <Link href={partnerLogin.href}>{partnerLogin.label}</Link>
+              <span aria-hidden="true">|</span>
+              <Link href={operatorLogin.href}>{operatorLogin.label}</Link>
+            </div>
           </nav>
         ) : null}
       </div>

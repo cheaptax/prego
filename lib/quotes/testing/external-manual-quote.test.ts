@@ -32,7 +32,7 @@ describe("external manual quotes", () => {
         engagementPartnerName: "김담당",
         localNonghyupAuditCount2025: 12,
         certifiedPublicAccountantCount: 0,
-        accountingFirmRevenueWon: "0",
+        accountingFirmRevenueWon: "0" as never,
         nonghyupTaxAgencyPerformed2025: true,
       }),
     );

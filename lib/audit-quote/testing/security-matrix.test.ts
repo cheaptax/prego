@@ -239,6 +239,18 @@ describe("security matrix — admin & notify", () => {
       assert.match(src, /requireAdmin/);
     }
   });
+
+  it("notify-retry distinguishes request-complete mail from quote delivery mail", () => {
+    const src = readFileSync(
+      path.join(root, "app/api/admin/audit-quotes/[requestId]/notify-retry/route.ts"),
+      "utf8",
+    );
+    assert.match(src, /kind === "quote_delivery"/);
+    assert.match(src, /notifyCustomerAuditQuoteRequestReceived/);
+    assert.match(src, /reissueTemporaryQuoteMemberPassword/);
+    assert.match(src, /deliverExistingQuoteToCustomer/);
+    assert.match(src, /attemptKey: randomUUID\(\)/);
+  });
 });
 
 describe("security matrix — client boundaries", () => {

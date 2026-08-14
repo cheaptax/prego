@@ -109,6 +109,7 @@ export async function GET(request: Request) {
           status: "sent",
           provider: result.provider,
           providerMessageId: result.id,
+          recipientEmail: result.recipientEmail,
           sentAt,
           updatedAt: sentAt,
         } satisfies Partial<QuoteEmailDeliveryRecord>,

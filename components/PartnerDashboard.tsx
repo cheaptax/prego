@@ -926,6 +926,7 @@ export function PartnerDashboard({
         | {
             ok?: boolean;
             error?: string;
+            quote?: { version?: number };
             missingQuoteFields?: string[];
             missingRequiredFields?: string[];
             missingRequiredProposalItemIds?: string[];

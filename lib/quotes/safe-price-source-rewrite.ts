@@ -325,6 +325,7 @@ async function sendRewriteEmail(input: {
           status: "sent",
           provider: sent.provider,
           providerMessageId: sent.id,
+          recipientEmail: sent.recipientEmail,
           attemptCount: 1,
           sentAt: now,
           updatedAt: now,

@@ -5,6 +5,7 @@ import {
   classifyCustomerDataRecord,
   hasUnlimitedTestSignup,
   isAllowedCustomerEmail,
+  resolveTransactionalRecipient,
   TEST_CUSTOMER_EMAILS,
 } from "@/lib/test-data/email-classification";
 
@@ -20,11 +21,48 @@ describe("customer email data classification", () => {
     for (const email of TEST_CUSTOMER_EMAILS) {
       assert.equal(classifyCustomerEmail(email), "TEST");
       assert.equal(isAllowedCustomerEmail(` ${email.toUpperCase()} `), true);
+      const [local, domain] = email.split("@");
+      const alias = `${local}+pwtest1@${domain}`;
+      assert.equal(classifyCustomerEmail(alias), "TEST");
+      assert.equal(isAllowedCustomerEmail(alias), true);
+      assert.equal(
+        hasUnlimitedTestSignup({ email: alias, phone: "01012345678" }),
+        true,
+      );
     }
     assert.equal(isAllowedCustomerEmail("someone@example.com"), false);
     assert.equal(isAllowedCustomerEmail("prego.ceo+pwtest1@gmail.com"), true);
     assert.equal(classifyCustomerEmail("prego.ceo+pwtest1@gmail.com"), "TEST");
+    assert.equal(isAllowedCustomerEmail("cheaptax+signup2@naver.com"), true);
     assert.equal(isAllowedCustomerEmail("random+test@gmail.com"), false);
+    assert.equal(isAllowedCustomerEmail("cheaptax+test@example.com"), false);
+  });
+
+  it("delivers Naver plus-aliases to the base inbox and keeps Gmail plus-aliases", () => {
+    assert.equal(
+      resolveTransactionalRecipient("cheaptax+pwtest1@naver.com"),
+      "cheaptax@naver.com",
+    );
+    assert.equal(
+      resolveTransactionalRecipient("bsmta+signup@naver.com"),
+      "bsmta@naver.com",
+    );
+    assert.equal(
+      resolveTransactionalRecipient("prego.ceo+pwtest1@gmail.com"),
+      "prego.ceo+pwtest1@gmail.com",
+    );
+    assert.equal(
+      resolveTransactionalRecipient("bsmta1277+signup@gmail.com"),
+      "bsmta1277+signup@gmail.com",
+    );
+    assert.equal(
+      resolveTransactionalRecipient("cheaptax@naver.com"),
+      "cheaptax@naver.com",
+    );
+    assert.equal(
+      resolveTransactionalRecipient("user+tag@nonghyup.com"),
+      "user+tag@nonghyup.com",
+    );
   });
 
   it("exempts an approved test email or phone from signup count limits", () => {

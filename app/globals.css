@@ -3376,12 +3376,21 @@ button { font: inherit; cursor: pointer; }
 }
 .foot__portal-links {
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
   color: var(--gray-400);
   font-size: 12.5px;
   font-weight: 500;
+}
+.foot__portal-links-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.foot__portal-links-row--customer a {
+  font-weight: 700;
 }
 .foot__portal-links a {
   display: inline-flex;
@@ -4948,6 +4957,7 @@ select.field__input:focus { background-color: #fff; }
   .foot__bar-copy p { width: 100%; }
   .foot__portal-links {
     width: 100%;
+    align-items: flex-start;
     gap: 2px;
   }
 

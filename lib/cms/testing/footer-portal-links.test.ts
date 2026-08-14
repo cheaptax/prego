@@ -22,12 +22,16 @@ describe("public Footer portal links", () => {
     );
     assert.deepEqual(
       [
+        footer.links.customerLogin.label,
+        footer.links.customerLogin.href,
         footer.links.partnerLogin.label,
         footer.links.partnerLogin.href,
         footer.links.operatorLogin.label,
         footer.links.operatorLogin.href,
       ],
       [
+        "고객 로그인",
+        "/login",
         "제휴사 로그인",
         "/partner/login",
         "운영자 로그인",
@@ -36,7 +40,7 @@ describe("public Footer portal links", () => {
     );
     assert.equal(
       footer.text.portalLoginNavigationLabel,
-      "제휴사 및 운영자 로그인",
+      "고객 · 제휴사 · 운영자 로그인",
     );
   });
 
@@ -44,6 +48,8 @@ describe("public Footer portal links", () => {
     const footer = source("components/Footer.tsx");
     assert.match(footer, /import Link from "next\/link"/);
     assert.match(footer, /className="foot__portal-links"/);
+    assert.match(footer, /foot__portal-links-row/);
+    assert.match(footer, /customerLogin\.href/);
     assert.match(footer, /partnerLogin\.href/);
     assert.match(footer, /operatorLogin\.href/);
     assert.match(footer, /FOOTER_PORTAL_LINK_DEFAULTS/);
@@ -83,6 +89,8 @@ describe("public Footer portal links", () => {
     const end = css.indexOf(".foot__bar small", start);
     assert.ok(start >= 0 && end > start);
     const portalCss = css.slice(start, end);
+    assert.match(portalCss, /flex-direction: column/);
+    assert.match(portalCss, /foot__portal-links-row/);
     assert.match(portalCss, /font-size: 12\.5px/);
     assert.match(portalCss, /color: var\(--gray-400\)/);
     assert.match(portalCss, /min-height: 44px/);
@@ -120,6 +128,7 @@ describe("public Footer portal links", () => {
     const settings = source(
       "components/cms-editor/CmsCommonAreaSettings.tsx",
     );
+    assert.match(settings, /customerLogin: "고객 로그인 링크"/);
     assert.match(settings, /partnerLogin: "제휴사 로그인 링크"/);
     assert.match(settings, /operatorLogin: "운영자 로그인 링크"/);
     assert.match(

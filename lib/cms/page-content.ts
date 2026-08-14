@@ -7,6 +7,38 @@ import {
 import type { CmsPageKey } from "@/lib/cms/constants";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
 
+/** Replace known stale CMS copy so published docs pick up product wording fixes. */
+const STALE_SECTION_TEXT: ReadonlyArray<{
+  from: string;
+  to: string;
+}> = [
+  {
+    from: "예: 과장, 팀장",
+    to: "사원, 대리, 과장, 팀장, 차장 ...",
+  },
+  {
+    from: "제휴사 및 운영자 로그인",
+    to: "고객 · 제휴사 · 운영자 로그인",
+  },
+];
+
+function refreshStaleSectionText(
+  text: CmsSection["text"],
+  fallbackText: CmsSection["text"],
+) {
+  const next = { ...text };
+  for (const [key, value] of Object.entries(next)) {
+    if (typeof value !== "string") continue;
+    const replacement = STALE_SECTION_TEXT.find((entry) => entry.from === value);
+    if (!replacement) continue;
+    next[key] =
+      typeof fallbackText[key] === "string"
+        ? fallbackText[key]
+        : replacement.to;
+  }
+  return next;
+}
+
 export function normalizeCmsPageContent(
   pageKey: CmsPageKey,
   input: CmsPageContent,
@@ -86,7 +118,10 @@ export function normalizeCmsPageContent(
       visible: fallback.locked ? true : current.visible,
       locked: fallback.locked ? true : current.locked,
       deleted: fallback.locked ? false : Boolean(current.deleted),
-      text: { ...fallback.text, ...current.text },
+      text: refreshStaleSectionText(
+        { ...fallback.text, ...current.text },
+        fallback.text,
+      ),
       items,
       actions,
       style: {

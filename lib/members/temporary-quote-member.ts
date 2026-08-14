@@ -200,24 +200,23 @@ export async function provisionTemporaryQuoteMember(input: {
       { customerUid: user.uid, updatedAt: now },
       { merge: true },
     );
-    const shouldResetUnactivatedTemporaryPassword =
+    const shouldResetTemporaryPassword =
       Boolean(initialPassword) &&
       !created &&
-      isTemporaryQuoteMember(existing) &&
-      !existing.temporaryMember?.activatedAt;
+      isTemporaryQuoteMember(existing);
 
     return {
       uid: user.uid,
       profileStatus: existing?.status ?? TEMPORARY_QUOTE_MEMBER_STATUS,
       initialPasswordIssued:
         Boolean(initialPassword) &&
-        (created || shouldResetUnactivatedTemporaryPassword),
-      shouldResetUnactivatedTemporaryPassword,
+        (created || !existing || isTemporaryQuoteMember(existing)),
+      shouldResetTemporaryPassword,
     };
   });
 
   let initialPasswordIssued = result.initialPasswordIssued;
-  if (initialPassword && result.shouldResetUnactivatedTemporaryPassword) {
+  if (initialPassword && result.shouldResetTemporaryPassword) {
     try {
       await input.auth.updateUser(user.uid, { password: initialPassword });
     } catch (error) {
@@ -236,6 +235,36 @@ export async function provisionTemporaryQuoteMember(input: {
     initialPasswordIssued,
     initialPassword: initialPasswordIssued ? initialPassword : null,
   };
+}
+
+/** Re-apply the deterministic initial password so operators can resend login mail. */
+export async function reissueTemporaryQuoteMemberPassword(input: {
+  auth: Auth;
+  db: Firestore;
+  email: string;
+  phone: string;
+}) {
+  const email = normalizedEmail(input.email);
+  const password = buildTemporaryQuoteMemberInitialPassword(input.phone);
+  if (!password) return null;
+  let user: FirebaseAuthUser;
+  try {
+    user = await input.auth.getUserByEmail(email);
+  } catch (error) {
+    if ((error as { code?: string }).code !== "auth/user-not-found") {
+      throw error;
+    }
+    return password;
+  }
+  const profileSnapshot = await input.db.collection("users").doc(user.uid).get();
+  const profile = profileSnapshot.exists
+    ? (profileSnapshot.data() as UserRecord)
+    : null;
+  if (profile && !isTemporaryQuoteMember(profile)) {
+    return null;
+  }
+  await input.auth.updateUser(user.uid, { password });
+  return password;
 }
 
 export async function createTemporaryMemberActivationLink(input: {

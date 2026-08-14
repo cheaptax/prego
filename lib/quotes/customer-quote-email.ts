@@ -1,10 +1,15 @@
 import type { Firestore } from "firebase-admin/firestore";
-import type { QuoteRecord, QuoteRequestRecord } from "@/lib/firebase/schema";
+import { AUDIT_QUOTE_REQUESTS } from "@/lib/audit-quote/collections";
+import type { AuditQuoteRequestRecord } from "@/lib/audit-quote/types";
 import {
   escapeEmailHtml,
-  getAppBaseUrl,
+  getCustomerFacingAppBaseUrl,
 } from "@/lib/email/resend";
-import { createTemporaryMemberActivationLink } from "@/lib/members/temporary-quote-member";
+import {
+  buildTemporaryMemberAccountNotice,
+  resolveTemporaryAccountPassword,
+} from "@/lib/email/temporary-account-notice";
+import type { QuoteRecord, QuoteRequestRecord, UserRecord } from "@/lib/firebase/schema";
 import {
   applyQuoteTemplate,
   type QuoteDocumentCopy,
@@ -93,13 +98,73 @@ export function resolveCustomerQuoteEmailTemplates(input: {
   };
 }
 
+async function resolveQuoteCustomerPhone(input: {
+  db: Firestore;
+  quoteRequest: QuoteRequestRecord | null;
+}) {
+  if (input.quoteRequest?.customerPhone?.trim()) {
+    return input.quoteRequest.customerPhone;
+  }
+  if (
+    input.quoteRequest?.sourceType === "audit_quote" &&
+    input.quoteRequest.sourceId
+  ) {
+    const source = await input.db
+      .collection(AUDIT_QUOTE_REQUESTS)
+      .doc(input.quoteRequest.sourceId)
+      .get();
+    const phone = (source.data() as AuditQuoteRequestRecord | undefined)?.phone;
+    if (phone?.trim()) return phone;
+  }
+  if (input.quoteRequest?.customerUid) {
+    const profile = await input.db
+      .collection("users")
+      .doc(input.quoteRequest.customerUid)
+      .get();
+    const phone = (profile.data() as UserRecord | undefined)?.phone;
+    if (phone?.trim()) return phone;
+  }
+  return "";
+}
+
+export function composeCustomerQuoteEmailBodies(input: {
+  arrivalText: string;
+  quoteUrl: string;
+  loginUrl: string;
+  accountEmail: string;
+  initialPassword?: string | null;
+  downloadLinkLabel: string;
+  downloadTextLabel: string;
+}) {
+  const arrivalHtml = escapeEmailHtml(input.arrivalText);
+  const notice = buildTemporaryMemberAccountNotice({
+    loginUrl: input.loginUrl,
+    accountEmail: input.accountEmail,
+    initialPassword: input.initialPassword,
+  });
+  return {
+    html: [
+      `<p>${arrivalHtml}</p>`,
+      `<p><a href="${escapeEmailHtml(input.quoteUrl)}">${escapeEmailHtml(input.downloadLinkLabel)}</a></p>`,
+      notice.html,
+    ]
+      .filter(Boolean)
+      .join(""),
+    text: [
+      input.arrivalText,
+      `${input.downloadTextLabel}: ${input.quoteUrl}`,
+      ...(notice.textLines.length > 0 ? ["", ...notice.textLines] : []),
+    ].join("\n"),
+  };
+}
+
 export async function buildCustomerQuoteEmail(input: {
   db: Firestore;
   quote: QuoteRecord;
   copy?: CustomerQuoteEmailCopy;
 }) {
   const copy = input.copy ?? DEFAULT_COPY;
-  const baseUrl = getAppBaseUrl();
+  const baseUrl = getCustomerFacingAppBaseUrl();
   const quoteUrl = `${baseUrl}/mypage/quotes/${encodeURIComponent(input.quote.id)}`;
   const quoteRequestSnapshot = await input.db
     .collection("quoteRequests")
@@ -108,15 +173,10 @@ export async function buildCustomerQuoteEmail(input: {
   const quoteRequest = quoteRequestSnapshot.exists
     ? (quoteRequestSnapshot.data() as QuoteRequestRecord)
     : null;
-  const activationUrl = quoteRequest?.customerUid
-    ? await createTemporaryMemberActivationLink({
-        db: input.db,
-        uid: quoteRequest.customerUid,
-        email: input.quote.customerEmail,
-        quoteId: input.quote.id,
-        baseUrl,
-      })
-    : null;
+  const phone = await resolveQuoteCustomerPhone({
+    db: input.db,
+    quoteRequest,
+  });
   const { subject, arrivalText } = resolveCustomerQuoteEmailTemplates({
     version: input.quote.version,
     partnerName: input.quote.partnerName,
@@ -127,33 +187,18 @@ export async function buildCustomerQuoteEmail(input: {
     sourceType: quoteRequest?.sourceType,
     copy,
   });
-  const arrivalHtml = escapeEmailHtml(arrivalText);
-
-  if (activationUrl) {
-    return {
-      subject,
-      html: [
-        `<p>${arrivalHtml}</p>`,
-        `<p>${escapeEmailHtml(copy.emailTemporaryAccountNotice)}</p>`,
-        `<p>${escapeEmailHtml(copy.emailAccountIdLabel)}: <strong>${escapeEmailHtml(input.quote.customerEmail)}</strong></p>`,
-        `<p><a href="${escapeEmailHtml(activationUrl)}">${escapeEmailHtml(copy.emailActivationLinkLabel)}</a></p>`,
-        `<p>${escapeEmailHtml(copy.emailSecurityNotice)}</p>`,
-        `<p>${escapeEmailHtml(copy.emailExistingAccountPrefix)} <a href="${escapeEmailHtml(quoteUrl)}">${escapeEmailHtml(copy.emailDownloadLinkLabel)}</a></p>`,
-      ].join(""),
-      text: [
-        arrivalText,
-        copy.emailTemporaryAccountNotice,
-        `${copy.emailAccountIdLabel}: ${input.quote.customerEmail}`,
-        `${copy.emailActivationLinkLabel}: ${activationUrl}`,
-        copy.emailSecurityNotice,
-        `${copy.emailExistingAccountPrefix} ${copy.emailDownloadLinkLabel}: ${quoteUrl}`,
-      ].join("\n"),
-    };
-  }
-
+  const bodies = composeCustomerQuoteEmailBodies({
+    arrivalText,
+    quoteUrl,
+    loginUrl: `${baseUrl}/login`,
+    accountEmail: input.quote.customerEmail,
+    initialPassword: resolveTemporaryAccountPassword(phone),
+    downloadLinkLabel: copy.emailDownloadLinkLabel,
+    downloadTextLabel: copy.emailDownloadTextLabel,
+  });
   return {
     subject,
-    html: `<p>${arrivalHtml}</p><p><a href="${escapeEmailHtml(quoteUrl)}">${escapeEmailHtml(copy.emailDownloadLinkLabel)}</a></p>`,
-    text: `${arrivalText}\n${copy.emailDownloadTextLabel}: ${quoteUrl}`,
+    html: bodies.html,
+    text: bodies.text,
   };
 }

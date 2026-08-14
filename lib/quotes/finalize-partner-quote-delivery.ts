@@ -177,6 +177,12 @@ export async function finalizePartnerQuoteDelivery(input: {
     id: deliveryId,
     quoteId: finalizedQuote.id,
     quoteRequestId: finalizedQuote.quoteRequestId,
+    auditQuoteRequestId:
+      built.quoteRequest.sourceType === "audit_quote"
+        ? built.quoteRequest.sourceId
+        : undefined,
+    purpose: "quote",
+    accountEmail: finalizedQuote.customerEmail,
     recipientEmail: finalizedQuote.customerEmail,
     status: "pending",
     provider: "local",
@@ -324,6 +330,7 @@ export async function finalizePartnerQuoteDelivery(input: {
       status: "sent",
       provider: sent.provider,
       providerMessageId: sent.id,
+      recipientEmail: sent.recipientEmail,
       attemptCount: 1,
       sentAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -431,7 +438,7 @@ export async function deliverExistingQuoteToCustomer(input: {
       to: input.quote.customerEmail,
       ...emailContent,
       attachments: [{ filename: pdfFileName, content: pdfBuffer }],
-      idempotencyKey: `quote/${input.quote.id}/customer/${attemptCount}`,
+      idempotencyKey: `quote/${input.quote.id}/customer/retry/${randomUUID()}`,
     });
     if (sent.provider === "local") {
       throw new Error("resend_not_configured");
@@ -442,7 +449,13 @@ export async function deliverExistingQuoteToCustomer(input: {
         id: deliveryId,
         quoteId: input.quote.id,
         quoteRequestId: input.quote.quoteRequestId,
-        recipientEmail: input.quote.customerEmail,
+        auditQuoteRequestId:
+          input.quoteRequest.sourceType === "audit_quote"
+            ? input.quoteRequest.sourceId
+            : undefined,
+        purpose: "quote",
+        accountEmail: input.quote.customerEmail,
+        recipientEmail: sent.recipientEmail,
         status: "sent",
         provider: sent.provider,
         providerMessageId: sent.id,
@@ -450,6 +463,7 @@ export async function deliverExistingQuoteToCustomer(input: {
         sentAt: now,
         createdAt: previous?.createdAt ?? now,
         updatedAt: now,
+        lastError: "",
       } satisfies QuoteEmailDeliveryRecord,
       { merge: true },
     );

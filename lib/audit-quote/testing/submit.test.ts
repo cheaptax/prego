@@ -128,6 +128,14 @@ describe("audit-quote unit", () => {
       true,
     );
     assert.equal(
+      isAllowedAuditQuoteRequesterEmail("cheaptax+pwtest1@naver.com"),
+      true,
+    );
+    assert.equal(
+      isAllowedAuditQuoteRequesterEmail("bsmta1277+signup@gmail.com"),
+      true,
+    );
+    assert.equal(
       isAllowedAuditQuoteRequesterEmail("random+test@gmail.com"),
       false,
     );

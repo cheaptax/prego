@@ -3,6 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import {
   formatEmailFromHeader,
   getCustomerFacingAppBaseUrl,
+  isTransientEmailSendError,
   sanitizeResendDisplayName,
 } from "@/lib/email/resend";
 
@@ -90,6 +91,22 @@ describe("customer-facing app base URL", () => {
         NODE_ENV: "development",
       }),
       "http://localhost:3000",
+    );
+  });
+});
+
+describe("transient Resend send errors", () => {
+  it("retries DNS/fetch failures like the production outage", () => {
+    assert.equal(
+      isTransientEmailSendError(
+        new Error("Unable to fetch data. The request could not be resolved."),
+      ),
+      true,
+    );
+    assert.equal(isTransientEmailSendError(new Error("fetch failed")), true);
+    assert.equal(
+      isTransientEmailSendError(new Error("invalid_email_payload")),
+      false,
     );
   });
 });

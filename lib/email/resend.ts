@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { resolveTransactionalRecipient } from "@/lib/test-data/email-classification";
 
 type SendEmailInput = {
   to: string;
@@ -13,12 +14,29 @@ type SendEmailInput = {
 };
 
 let resendClient: Resend | null = null;
+const EMAIL_SEND_ATTEMPTS = 3;
+const EMAIL_SEND_RETRY_DELAYS_MS = [300, 800];
 
 function getResendClient() {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) return null;
   resendClient ??= new Resend(apiKey);
   return resendClient;
+}
+
+function resetResendClient() {
+  resendClient = null;
+}
+
+export function isTransientEmailSendError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unable to fetch data|could not be resolved|fetch failed|econnreset|etimedout|enotfound|eai_again|network|socket|aborted|undici/i.test(
+    message,
+  );
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function getEmailFromAddress() {
@@ -178,24 +196,52 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
       subject: input.subject,
       idempotencyKey: input.idempotencyKey,
     });
-    return { provider: "local" as const, id: null };
+    return {
+      provider: "local" as const,
+      id: null,
+      recipientEmail: resolveTransactionalRecipient(input.to),
+    };
   }
 
-  const result = await client.emails.send(
-    {
-      from: formatEmailFromHeader(getEmailFromAddress()),
-      to: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-      attachments: input.attachments,
-    },
-    { idempotencyKey: input.idempotencyKey.slice(0, 256) },
-  );
-  if (result.error) {
-    throw new Error(result.error.message || "resend_send_failed");
+  const recipientEmail = resolveTransactionalRecipient(input.to);
+  const payload = {
+    from: formatEmailFromHeader(getEmailFromAddress()),
+    to: recipientEmail,
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    attachments: input.attachments,
+  };
+  const idempotencyKey = input.idempotencyKey.slice(0, 256);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= EMAIL_SEND_ATTEMPTS; attempt += 1) {
+    try {
+      const activeClient = attempt === 1 ? client : getResendClient();
+      if (!activeClient) throw new Error("resend_not_configured");
+      const result = await activeClient.emails.send(payload, { idempotencyKey });
+      if (result.error) {
+        throw new Error(result.error.message || "resend_send_failed");
+      }
+      return {
+        provider: "resend" as const,
+        id: result.data?.id ?? null,
+        recipientEmail,
+      };
+    } catch (error) {
+      lastError = error;
+      if (
+        attempt === EMAIL_SEND_ATTEMPTS ||
+        !isTransientEmailSendError(error)
+      ) {
+        break;
+      }
+      resetResendClient();
+      await wait(EMAIL_SEND_RETRY_DELAYS_MS[attempt - 1] ?? 800);
+    }
   }
-  return { provider: "resend" as const, id: result.data?.id ?? null };
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("resend_send_failed");
 }
 
 export function verifyResendWebhook(

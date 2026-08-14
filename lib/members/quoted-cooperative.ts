@@ -5,6 +5,7 @@ type QuotedRequestLike = {
   cooperativeName?: string;
   customerName?: string;
   customerPhone?: string;
+  customerEmail?: string;
   updatedAt?: string;
   createdAt?: string;
 };
@@ -25,6 +26,7 @@ export type QuotedRequestProfile = {
   cooperativeName: string;
   customerName: string;
   customerPhone: string;
+  customerEmail: string;
 };
 
 export function pickQuotedContact(
@@ -34,6 +36,7 @@ export function pickQuotedContact(
   return {
     customerName: latest?.customerName?.trim() ?? "",
     customerPhone: latest?.customerPhone?.trim() ?? "",
+    customerEmail: latest?.customerEmail?.trim() ?? "",
   };
 }
 
@@ -53,6 +56,7 @@ export function pickQuotedCooperative(
     cooperativeName: latest.cooperativeName!.trim(),
     customerName: latest.customerName?.trim() || contact.customerName,
     customerPhone: latest.customerPhone?.trim() || contact.customerPhone,
+    customerEmail: latest.customerEmail?.trim() || contact.customerEmail,
   };
 }
 

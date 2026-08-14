@@ -19,6 +19,7 @@ import {
   rebuildNhAuditReportViewModel,
   safeReportDownloadFilename,
 } from "@/lib/audit-evaluation/report-view-model";
+import type { AuditEvaluationActor } from "@/lib/audit-evaluation/types";
 
 export class ReportServiceError extends Error {
   readonly code: string;

@@ -24,14 +24,36 @@ export type CustomerDataClassification =
   | "TEST"
   | "UNSUPPORTED";
 
-function gmailAllowlistBase(email: string) {
+/**
+ * Map `local+tag@domain` aliases back to the allowlisted base address so
+ * approved test customers can run fresh signup / quote flows without
+ * colliding with an already-provisioned account. Gmail's googlemail.com
+ * synonym is normalized to gmail.com for the same reason.
+ */
+export function testCustomerAllowlistBase(email: string) {
   const [local, domain] = email.split("@");
-  if (!local || (domain !== "gmail.com" && domain !== "googlemail.com")) {
-    return email;
-  }
+  if (!local || !domain) return email;
   const baseLocal = local.split("+")[0] ?? local;
   if (!baseLocal) return email;
-  return `${baseLocal}@gmail.com`;
+  const normalizedDomain =
+    domain === "googlemail.com" ? "gmail.com" : domain;
+  return `${baseLocal}@${normalizedDomain}`;
+}
+
+/**
+ * Gmail delivers `local+tag@gmail.com` to the base inbox. Naver and most
+ * other hosts do not, so plus-alias test mail would never arrive. Keep the
+ * account/login identity as the alias, but envelope-deliver to the base
+ * address for non-Gmail test aliases.
+ */
+export function resolveTransactionalRecipient(accountEmail: string) {
+  const email = normalizeEmail(accountEmail);
+  const base = testCustomerAllowlistBase(email);
+  if (base === email) return email;
+  const domain = email.split("@")[1] ?? "";
+  if (domain === "gmail.com" || domain === "googlemail.com") return email;
+  if (TEST_CUSTOMER_EMAIL_SET.has(base)) return base;
+  return email;
 }
 
 export function classifyCustomerEmail(
@@ -40,7 +62,9 @@ export function classifyCustomerEmail(
   const email = normalizeEmail(raw);
   if (!isValidBusinessEmail(email)) return "UNSUPPORTED";
   if (TEST_CUSTOMER_EMAIL_SET.has(email)) return "TEST";
-  if (TEST_CUSTOMER_EMAIL_SET.has(gmailAllowlistBase(email))) return "TEST";
+  if (TEST_CUSTOMER_EMAIL_SET.has(testCustomerAllowlistBase(email))) {
+    return "TEST";
+  }
   return isNonghyupEmail(email) ? "PRODUCTION" : "UNSUPPORTED";
 }
 

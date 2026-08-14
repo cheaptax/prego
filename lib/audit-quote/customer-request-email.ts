@@ -4,6 +4,13 @@ import {
   getTransactionalEmailConfigurationError,
   sendTransactionalEmail,
 } from "@/lib/email/resend";
+import {
+  buildTemporaryMemberAccountNotice,
+  resolveTemporaryAccountPassword,
+} from "@/lib/email/temporary-account-notice";
+import { adminDb } from "@/lib/firebase/admin";
+import type { QuoteEmailDeliveryRecord } from "@/lib/firebase/schema";
+import { quoteRequestIdFor } from "@/lib/quotes/quote-requests";
 
 export type CustomerRequestEmailInput = {
   email: string;
@@ -12,8 +19,23 @@ export type CustomerRequestEmailInput = {
   targetCooperativeName?: string;
   fiscalYear?: number;
   requestId: string;
+  phone?: string | null;
   initialPassword?: string | null;
+  attemptKey?: string;
 };
+
+function requestEmailDeliveryId(requestId: string) {
+  return `aqreq_${requestId}`;
+}
+
+async function persistRequestEmailDelivery(
+  record: QuoteEmailDeliveryRecord,
+) {
+  await adminDb()
+    .collection("quoteEmailDeliveries")
+    .doc(record.id)
+    .set(record, { merge: true });
+}
 
 export function buildCustomerAuditQuoteRequestEmail(input: {
   publicReference: string;
@@ -40,19 +62,18 @@ export function buildCustomerAuditQuoteRequestEmail(input: {
   if (input.fiscalYear) {
     lines.push(`사업연도: ${input.fiscalYear}`);
   }
-  if (input.initialPassword) {
-    lines.push(
-      "",
-      "농협지원센터 임시회원 계정이 준비되었습니다.",
-      `로그인 주소: ${input.loginUrl}`,
-      `아이디: ${input.accountEmail}`,
-      `초기 비밀번호: ${input.initialPassword}`,
-      "초기 비밀번호는 nh + 담당자 휴대폰 번호 뒷자리 4자리 두 번 반복입니다.",
-      "로그인 후 견적함에서 가격비교 등 기능을 바로 사용할 수 있으며, 보안을 위해 로그인 후 비밀번호를 변경해 주세요.",
-    );
-  }
   lines.push(
     "담당자가 제휴사 배정과 견적 취합을 진행합니다. 견적이 도착하면 이메일로 안내드리며, 마이페이지에서도 확인할 수 있습니다.",
+  );
+  const accountNotice = buildTemporaryMemberAccountNotice({
+    loginUrl: input.loginUrl,
+    accountEmail: input.accountEmail,
+    initialPassword: input.initialPassword,
+  });
+  if (accountNotice.textLines.length > 0) {
+    lines.push("", ...accountNotice.textLines);
+  }
+  lines.push(
     `마이페이지: ${input.mypageUrl}`,
     `견적 신청 안내: ${input.eventUrl}`,
   );
@@ -64,18 +85,8 @@ export function buildCustomerAuditQuoteRequestEmail(input: {
       ? `<p>대상 농협: ${escapeEmailHtml(input.targetCooperativeName)}</p>`
       : "",
     input.fiscalYear ? `<p>사업연도: ${input.fiscalYear}</p>` : "",
-    input.initialPassword
-      ? [
-          "<hr>",
-          "<p><strong>농협지원센터 임시회원 계정이 준비되었습니다.</strong></p>",
-          `<p>로그인 주소: <a href="${escapeEmailHtml(input.loginUrl)}">${escapeEmailHtml(input.loginUrl)}</a></p>`,
-          `<p>아이디: <strong>${escapeEmailHtml(input.accountEmail)}</strong></p>`,
-          `<p>초기 비밀번호: <strong>${escapeEmailHtml(input.initialPassword)}</strong></p>`,
-          "<p>초기 비밀번호는 nh + 담당자 휴대폰 번호 뒷자리 4자리 두 번 반복입니다.</p>",
-          "<p>로그인 후 견적함에서 가격비교 등 기능을 바로 사용할 수 있으며, 보안을 위해 로그인 후 비밀번호를 변경해 주세요.</p>",
-        ].join("")
-      : "",
     "<p>담당자가 제휴사 배정과 견적 취합을 진행합니다. 견적이 도착하면 이메일로 안내드리며, 마이페이지에서도 확인할 수 있습니다.</p>",
+    accountNotice.html,
     `<p><a href="${escapeEmailHtml(input.mypageUrl)}">마이페이지에서 확인하기</a></p>`,
   ]
     .filter(Boolean)
@@ -85,22 +96,56 @@ export function buildCustomerAuditQuoteRequestEmail(input: {
 }
 
 /**
- * Fire-and-forget safe confirmation mail for the requester.
+ * Confirmation mail for the requester. Failures are recorded and never thrown.
  */
 export async function notifyCustomerAuditQuoteRequestReceived(
   input: CustomerRequestEmailInput,
 ): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  const accountEmail = input.email.trim().toLowerCase();
+  const now = new Date().toISOString();
+  const deliveryId = requestEmailDeliveryId(input.requestId);
+  const existing = await adminDb()
+    .collection("quoteEmailDeliveries")
+    .doc(deliveryId)
+    .get();
+  const previous = existing.exists
+    ? (existing.data() as QuoteEmailDeliveryRecord)
+    : null;
+  const attemptCount = Number(previous?.attemptCount ?? 0) + 1;
+  const baseDelivery = {
+    id: deliveryId,
+    quoteId: deliveryId,
+    quoteRequestId: quoteRequestIdFor("audit_quote", input.requestId),
+    auditQuoteRequestId: input.requestId,
+    purpose: "audit_quote_request" as const,
+    accountEmail,
+    recipientEmail: accountEmail,
+    provider: "resend" as const,
+    attemptCount,
+    createdAt: previous?.createdAt ?? now,
+    updatedAt: now,
+  };
+
   const configError = getTransactionalEmailConfigurationError();
   if (configError) {
     console.info("[audit-quote] customer_request_email_skipped", {
       requestId: input.requestId,
       error: configError,
     });
+    await persistRequestEmailDelivery({
+      ...baseDelivery,
+      status: "failed",
+      lastError: configError,
+    });
     return { ok: false, skipped: true, error: configError };
   }
 
-  const to = input.email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountEmail)) {
+    await persistRequestEmailDelivery({
+      ...baseDelivery,
+      status: "failed",
+      lastError: "invalid_email",
+    });
     return { ok: false, skipped: true, error: "invalid_email" };
   }
 
@@ -113,17 +158,30 @@ export async function notifyCustomerAuditQuoteRequestReceived(
     mypageUrl: `${baseUrl}/mypage`,
     loginUrl: `${baseUrl}/login`,
     eventUrl: `${baseUrl}/events/audit-quote`,
-    accountEmail: to,
-    initialPassword: input.initialPassword,
+    accountEmail,
+    initialPassword: resolveTemporaryAccountPassword(
+      input.phone,
+      input.initialPassword,
+    ),
   });
+  const attemptKey = input.attemptKey?.trim() || `attempt-${attemptCount}`;
 
   try {
-    await sendTransactionalEmail({
-      to,
+    const sent = await sendTransactionalEmail({
+      to: accountEmail,
       subject: email.subject,
       html: email.html,
       text: email.text,
-      idempotencyKey: `audit-quote-request/${input.requestId}/${to}`,
+      idempotencyKey: `audit-quote-request/${input.requestId}/${accountEmail}/${attemptKey}`,
+    });
+    await persistRequestEmailDelivery({
+      ...baseDelivery,
+      recipientEmail: sent.recipientEmail,
+      status: "sent",
+      provider: sent.provider,
+      providerMessageId: sent.id,
+      sentAt: now,
+      lastError: "",
     });
     return { ok: true };
   } catch (error) {
@@ -131,6 +189,11 @@ export async function notifyCustomerAuditQuoteRequestReceived(
     console.error("[audit-quote] customer_request_email_failed", {
       requestId: input.requestId,
       error: message,
+    });
+    await persistRequestEmailDelivery({
+      ...baseDelivery,
+      status: "failed",
+      lastError: message,
     });
     return { ok: false, error: message };
   }

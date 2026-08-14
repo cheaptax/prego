@@ -184,9 +184,11 @@ export async function convertTemporaryMember(input: {
         ...testMetadata,
         status: "active",
         temporaryMember: {
-          ...user.temporaryMember,
+          source:
+            user.temporaryMember?.source ?? "audit_quote_request",
+          sourceRequestIds: user.temporaryMember?.sourceRequestIds ?? [],
           ...(user.temporaryMember?.activatedAt
-            ? {}
+            ? { activatedAt: user.temporaryMember.activatedAt }
             : { activatedAt: now }),
           convertedAt: now,
         },

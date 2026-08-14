@@ -61,7 +61,8 @@ export function TemporaryMemberConversionForm({
   const [quotedContact, setQuotedContact] = useState<{
     customerName: string;
     customerPhone: string;
-  }>({ customerName: "", customerPhone: "" });
+    customerEmail: string;
+  }>({ customerName: "", customerPhone: "", customerEmail: "" });
   const [position, setPosition] = useState("");
   const [duty, setDuty] = useState("");
   const [conversionConsent, setConversionConsent] = useState(false);
@@ -89,6 +90,7 @@ export function TemporaryMemberConversionForm({
             cooperativeName?: string;
             customerName?: string;
             customerPhone?: string;
+            customerEmail?: string;
             updatedAt?: string;
             createdAt?: string;
           }>;
@@ -100,6 +102,7 @@ export function TemporaryMemberConversionForm({
         setQuotedContact({
           customerName: quoted?.customerName || contact.customerName,
           customerPhone: quoted?.customerPhone || contact.customerPhone,
+          customerEmail: quoted?.customerEmail || contact.customerEmail,
         });
         if (quoted) {
           setQuotedCooperative({
@@ -114,7 +117,11 @@ export function TemporaryMemberConversionForm({
       } catch {
         if (!cancelled) {
           setQuotedCooperative(null);
-          setQuotedContact({ customerName: "", customerPhone: "" });
+          setQuotedContact({
+            customerName: "",
+            customerPhone: "",
+            customerEmail: "",
+          });
         }
       } finally {
         if (!cancelled) setLoadingQuote(false);
@@ -348,6 +355,21 @@ export function TemporaryMemberConversionForm({
                     {loadingQuote
                       ? "불러오는 중..."
                       : displayQuotedPhone(quotedContact.customerPhone) ||
+                        submitCopy.text.temporaryConversionQuotedMissingValue ||
+                        "미등록"}
+                  </strong>
+                </span>
+              </div>
+              <div className="login-quoted">
+                <span className="login-form__field">
+                  <span>
+                    {submitCopy.text.temporaryConversionQuotedEmailLabel ||
+                      "견적 요청 이메일"}
+                  </span>
+                  <strong>
+                    {loadingQuote
+                      ? "불러오는 중..."
+                      : quotedContact.customerEmail ||
                         submitCopy.text.temporaryConversionQuotedMissingValue ||
                         "미등록"}
                   </strong>

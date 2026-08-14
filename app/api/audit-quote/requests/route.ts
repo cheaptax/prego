@@ -26,6 +26,7 @@ import {
 import { provisionTemporaryQuoteMember } from "@/lib/members/temporary-quote-member";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 type Payload = {
   email?: string;
@@ -168,41 +169,33 @@ export async function POST(req: Request) {
       }
     }
     if (result.kind === "success" && result.created) {
-      // Fire-and-forget: notification failure must not fail customer intake.
-      void notifyAuditQuoteReceived(adminDb(), {
-        requestId: result.requestId,
-        publicReference: result.publicReference,
-        email: result.email,
-        campaign: body.source?.campaign?.trim() || config.allowedCampaigns[0] || "fy27-audit-quote",
-      }).catch((error: unknown) => {
-        console.error("[audit-quote] notify_unhandled", {
+      // Await delivery so Vercel does not freeze the isolate before Resend
+      // completes. Failures are logged and never fail customer intake.
+      await Promise.allSettled([
+        notifyAuditQuoteReceived(adminDb(), {
           requestId: result.requestId,
-          error: error instanceof Error ? error.message : "notify_failed",
-        });
-      });
-      void notifyCustomerAuditQuoteRequestReceived({
-        requestId: result.requestId,
-        publicReference: result.publicReference,
-        email: result.email,
-        contactName: body.name,
-        targetCooperativeName: body.targetCooperativeName,
-        fiscalYear: body.fiscalYear,
-        initialPassword: temporaryMemberInitialPassword,
-      }).catch((error: unknown) => {
-        console.error("[audit-quote] customer_request_email_unhandled", {
+          publicReference: result.publicReference,
+          email: result.email,
+          campaign:
+            body.source?.campaign?.trim() ||
+            config.allowedCampaigns[0] ||
+            "fy27-audit-quote",
+        }),
+        notifyCustomerAuditQuoteRequestReceived({
           requestId: result.requestId,
-          error: error instanceof Error ? error.message : "notify_failed",
-        });
-      });
-      void notifyOpsAuditQuoteRequestReceived({
-        requestId: result.requestId,
-        publicReference: result.publicReference,
-      }).catch((error: unknown) => {
-        console.error("[audit-quote] ops_alert_unhandled", {
+          publicReference: result.publicReference,
+          email: result.email,
+          contactName: body.name,
+          targetCooperativeName: body.targetCooperativeName,
+          fiscalYear: body.fiscalYear,
+          phone: body.phone,
+          initialPassword: temporaryMemberInitialPassword,
+        }),
+        notifyOpsAuditQuoteRequestReceived({
           requestId: result.requestId,
-          error: error instanceof Error ? error.message : "notify_failed",
-        });
-      });
+          publicReference: result.publicReference,
+        }),
+      ]);
     }
 
     return jsonSuccess(result.publicReference);

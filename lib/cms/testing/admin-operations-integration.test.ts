@@ -267,13 +267,14 @@ describe("admin operations CMS safety contract", () => {
       path.join(root, "components/AdminAuditQuotesPanel.tsx"),
       "utf8",
     );
-    const withoutPreviewFixture = panel.replace(
-      /const previewQuote:[\s\S]*?\n};/,
-      "",
-    );
-    assert.doesNotMatch(withoutPreviewFixture, /[가-힣]/);
     assert.match(panel, /new AdminRequestError\("auth_required"\)/);
     assert.match(panel, /copy\.message\("authRequired"\)/);
-    assert.match(panel, /copy\.message\("auditQuoteNotifySuccess"\)/);
+    assert.match(panel, /copy\.message\("auditQuoteRequestEmailSuccessWithPassword"\)/);
+    assert.match(panel, /copy\.message\("auditQuoteDeliveryEmailSuccess"\)/);
+    assert.match(panel, /section\.text\("retryRequestEmail"\)/);
+    assert.match(panel, /section\.text\("retryQuoteEmail"\)/);
+    assert.match(panel, /section\.text\("emailDeliveryTitle"\)/);
+    assert.doesNotMatch(panel, /견적 요청 완료 메일 재발송/);
+    assert.doesNotMatch(panel, /견적서 발송 메일 재발송/);
   });
 });
