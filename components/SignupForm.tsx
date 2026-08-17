@@ -16,6 +16,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
+  formatCooperativeRegion,
+  formatCooperativeSearchSubtitle,
   type CooperativeSearchItem,
 } from "@/lib/cooperatives/demo-cooperative";
 import {
@@ -116,7 +118,9 @@ const ALLOWED_BUSINESS_CARD_TYPES = new Set([
 ]);
 
 function cooperativeDisplay(item: Cooperative) {
-  return item.cooperative_name;
+  if (item.isDemoInstitution) return item.cooperative_name;
+  const region = formatCooperativeRegion(item);
+  return region ? `${item.cooperative_name} (${region})` : item.cooperative_name;
 }
 
 function safeFileName(name: string) {
@@ -1286,10 +1290,12 @@ export function SignupForm({
                   >
                     <strong>{item.cooperative_name}</strong>
                     <span>
-                      {item.cooperative_type}
-                      {item.isDemoInstitution
-                        ? ` · ${organizationCopy.text.demoBadge}`
-                        : ""}
+                      {formatCooperativeSearchSubtitle(
+                        item,
+                        item.isDemoInstitution
+                          ? organizationCopy.text.demoBadge
+                          : undefined,
+                      )}
                     </span>
                   </button>
                 ))}

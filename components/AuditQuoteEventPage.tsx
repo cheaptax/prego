@@ -31,7 +31,11 @@ import {
   validateAuditQuoteTargetCooperative,
 } from "@/lib/audit-quote/client-form";
 import type { PublicAuditQuoteConfig } from "@/lib/audit-quote/public-types";
-import type { CooperativeSearchItem } from "@/lib/cooperatives/demo-cooperative";
+import {
+  formatCooperativeRegion,
+  formatCooperativeSearchSubtitle,
+  type CooperativeSearchItem,
+} from "@/lib/cooperatives/demo-cooperative";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
   formatKrMobilePhoneInput,
@@ -1112,8 +1116,10 @@ export function AuditQuoteEventPage({
                         >
                           <strong>{item.cooperative_name}</strong>
                           <span>
-                            {item.cooperative_type}
-                            {item.isDemoInstitution ? " · 테스트" : ""}
+                            {formatCooperativeSearchSubtitle(
+                              item,
+                              item.isDemoInstitution ? "테스트" : undefined,
+                            )}
                           </span>
                         </button>
                       ))}
@@ -1127,7 +1133,17 @@ export function AuditQuoteEventPage({
                 ) : null}
                 {selectedCooperative ? (
                   <p className="aq-field__help">
-                    선택됨: <strong>{selectedCooperative.cooperative_name}</strong>
+                    선택됨:{" "}
+                    <strong>
+                      {selectedCooperative.isDemoInstitution
+                        ? selectedCooperative.cooperative_name
+                        : [
+                            selectedCooperative.cooperative_name,
+                            formatCooperativeRegion(selectedCooperative),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                    </strong>
                   </p>
                 ) : section.text.targetCooperativeHelp ? (
                   <p

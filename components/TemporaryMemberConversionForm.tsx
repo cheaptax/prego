@@ -6,7 +6,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { findExactCooperativeMatch } from "@/lib/audit-quote/client-form";
 import type { CmsPageContent } from "@/lib/cms/schemas";
 import { getCmsSection } from "@/lib/cms/runtime";
-import type { CooperativeSearchItem } from "@/lib/cooperatives/demo-cooperative";
+import {
+  formatCooperativeSearchSubtitle,
+  type CooperativeSearchItem,
+} from "@/lib/cooperatives/demo-cooperative";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
   displayQuotedPhone,
@@ -399,7 +402,10 @@ export function TemporaryMemberConversionForm({
                   >
                     <strong>{cooperative.cooperative_name}</strong>
                     <span>
-                      {cooperative.sido} {cooperative.sigungu}
+                      {formatCooperativeSearchSubtitle(
+                        cooperative,
+                        cooperative.isDemoInstitution ? "테스트" : undefined,
+                      )}
                     </span>
                   </button>
                 ))}

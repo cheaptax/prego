@@ -9,6 +9,8 @@ import {
   buildDunggiSeedPlan,
   createDunggiCooperativeMaster,
   createTestCooperativeMaster,
+  formatCooperativeRegion,
+  formatCooperativeSearchSubtitle,
   isCooperativeSelectableForSignup,
   isExistingSignupForCooperative,
   nextDemoSignupStatus,
@@ -49,6 +51,64 @@ describe("둥기농협 master identity", () => {
         Object.hasOwn(cooperative, "isDemoInstitution"),
       ),
       false,
+    );
+    assert.equal(
+      nonghyupMaster.some(
+        (cooperative) => !cooperative.sido || cooperative.sido === "전국",
+      ),
+      false,
+    );
+    assert.deepEqual(
+      nonghyupMaster
+        .filter((cooperative) => cooperative.cooperative_name === "대산농협")
+        .map((cooperative) => formatCooperativeRegion(cooperative))
+        .sort(),
+      [
+        "경상남도 창원시",
+        "경상남도 함안군",
+        "경상북도 김천시",
+        "충청남도 서산시",
+      ],
+    );
+    assert.equal(
+      formatCooperativeRegion(
+        nonghyupMaster.find(
+          (cooperative) => cooperative.cooperative_name === "화촌농협",
+        ) ?? { sido: "", sigungu: "" },
+      ),
+      "강원특별자치도 홍천군",
+    );
+  });
+});
+
+describe("cooperative search region display", () => {
+  it("shows the region for production cooperatives and keeps test labels", () => {
+    const daesan = toRealCooperativeSearchItem(
+      nonghyupMaster.find(
+        (cooperative) =>
+          cooperative.cooperative_name === "대산농협" &&
+          cooperative.sigungu === "서산시",
+      ) ?? nonghyupMaster[0],
+    );
+    const demo = toDemoCooperativeSearchItem(
+      createDunggiCooperativeMaster(NOW),
+    );
+    assert.equal(formatCooperativeSearchSubtitle(daesan), "충청남도 서산시");
+    assert.equal(
+      formatCooperativeSearchSubtitle(demo, "테스트"),
+      "지역농협 · 테스트",
+    );
+    assert.deepEqual(
+      searchCooperativeCatalog(
+        nonghyupMaster.map(toRealCooperativeSearchItem),
+        "대산",
+      ).map((item) => formatCooperativeRegion(item)),
+      [
+        "경상남도 창원시",
+        "경상남도 함안군",
+        "경상북도 김천시",
+        "충청남도 서산시",
+      ],
     );
   });
 });

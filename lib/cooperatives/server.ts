@@ -1,24 +1,28 @@
 import {
+  applyCanonicalSearchItem,
+  mergeProductionSearchItems,
+  staticProductionSearchItems,
+} from "@/lib/cooperatives/catalog";
+import { readProductionMastersForQuery } from "@/lib/cooperatives/catalog-query";
+import {
   DEMO_COOPERATIVE_COLLECTION,
   TEST_COOPERATIVE_DEFINITIONS,
   createTestCooperativeMaster,
   parseTestCooperativeMaster,
   searchCooperativeCatalog,
   toDemoCooperativeSearchItem,
-  toRealCooperativeSearchItem,
   type CooperativeSearchItem,
   type DemoCooperativeMasterRecord,
 } from "@/lib/cooperatives/demo-cooperative";
 import { adminDb } from "@/lib/firebase/admin";
-import { nonghyupMaster } from "@/lib/platform";
 import {
   COOPERATIVE_MASTER_COLLECTION,
   COOPERATIVE_MASTER_CONFIG_COLLECTION,
   COOPERATIVE_MASTER_CONFIG_ID,
-  normalizeCooperativeSearchText,
   parseProductionCooperativeMaster,
   toProductionCooperativeSearchItem,
 } from "@/lib/cooperatives/master";
+import { ensureStaticCooperativeMasterSynced } from "@/lib/cooperatives/sync-static-master";
 
 export type ResolvedSignupCooperative = CooperativeSearchItem & {
   masterSource:
@@ -27,7 +31,7 @@ export type ResolvedSignupCooperative = CooperativeSearchItem & {
     | "DEMO_FIRESTORE";
 };
 
-const realCooperatives = nonghyupMaster.map(toRealCooperativeSearchItem);
+const realCooperatives = staticProductionSearchItems;
 
 export function isDemoCooperativeSignupEnabled() {
   const configured = process.env.DEMO_COOPERATIVE_SIGNUP_ENABLED?.trim();
@@ -85,7 +89,7 @@ export async function resolveSignupCooperative(
       : null;
     if (record?.status === "active") {
       return {
-        ...toProductionCooperativeSearchItem(record),
+        ...applyCanonicalSearchItem(toProductionCooperativeSearchItem(record)),
         masterSource: "REAL_FIRESTORE_MASTER",
       };
     }
@@ -93,7 +97,12 @@ export async function resolveSignupCooperative(
     const real = realCooperatives.find(
       (item) => item.cooperative_id === cooperativeId,
     );
-    if (real) return { ...real, masterSource: "REAL_STATIC_MASTER" };
+    if (real) {
+      return {
+        ...applyCanonicalSearchItem(real),
+        masterSource: "REAL_STATIC_MASTER",
+      };
+    }
   }
   if (
     !TEST_COOPERATIVE_DEFINITIONS.some(
@@ -133,23 +142,27 @@ export async function searchSignupCooperatives(
   } catch (error) {
     console.error("Demo cooperative lookup failed.", error);
   }
-  let production = realCooperatives;
+  let production = searchCooperativeCatalog(
+    staticProductionSearchItems,
+    query,
+    Math.min(limit * 4, 40),
+  );
   if (await usesFirestoreProductionMaster()) {
-    const normalized = normalizeCooperativeSearchText(query);
-    production = normalized
-      ? (
-          await adminDb()
-            .collection(COOPERATIVE_MASTER_COLLECTION)
-            .where("searchTokens", "array-contains", normalized)
-            .limit(Math.min(Math.max(limit * 4, 20), 100))
-            .get()
-        ).docs.flatMap((document) => {
-          const record = parseProductionCooperativeMaster(document.data());
-          return record?.status === "active"
-            ? [toProductionCooperativeSearchItem(record)]
-            : [];
-        })
-      : [];
+    void ensureStaticCooperativeMasterSynced(adminDb()).catch((error) => {
+      console.error("Cooperative master region sync failed.", error);
+    });
+    const { staticHits, firestoreRecords } =
+      await readProductionMastersForQuery(
+        adminDb(),
+        query,
+        Math.min(Math.max(limit * 4, 20), 80),
+      );
+    production = mergeProductionSearchItems({
+      query,
+      limit: Math.min(limit * 4, 40),
+      staticHits,
+      firestoreRecords,
+    });
   }
   return searchCooperativeCatalog(
     [...production, ...demo.map(toDemoCooperativeSearchItem)],

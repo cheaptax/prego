@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { FieldPath } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import {
+  applyCanonicalMasterRecord,
+  mergeAdminMasterSearchRecords,
+} from "@/lib/cooperatives/catalog";
+import { readProductionMastersForQuery } from "@/lib/cooperatives/catalog-query";
+import {
   COOPERATIVE_MASTER_COLLECTION,
   COOPERATIVE_MASTER_CONFIG_COLLECTION,
   COOPERATIVE_MASTER_CONFIG_ID,
@@ -10,6 +15,7 @@ import {
   normalizeCooperativeSearchText,
   parseProductionCooperativeMaster,
 } from "@/lib/cooperatives/master";
+import { ensureStaticCooperativeMasterSynced } from "@/lib/cooperatives/sync-static-master";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   authErrorCode,
@@ -54,6 +60,11 @@ export async function GET(request: Request) {
     );
     const cursor = decodeCursor(url.searchParams.get("cursor") ?? "");
     const db = adminDb();
+    try {
+      await ensureStaticCooperativeMasterSynced(db);
+    } catch (error) {
+      console.error("Cooperative master region sync failed.", error);
+    }
     const configSnapshot = await db
       .collection(COOPERATIVE_MASTER_CONFIG_COLLECTION)
       .doc(COOPERATIVE_MASTER_CONFIG_ID)
@@ -67,29 +78,41 @@ export async function GET(request: Request) {
         { status: 409 },
       );
     }
-    let query = search
-      ? db
-          .collection(COOPERATIVE_MASTER_COLLECTION)
-          .where("searchTokens", "array-contains", search)
-          .limit(pageSize + 1)
-      : db
-          .collection(COOPERATIVE_MASTER_COLLECTION)
-          .orderBy("cooperativeName")
-          .orderBy(FieldPath.documentId())
-          .limit(pageSize + 1);
-    if (!search && cursor) {
+    const rawQuery = url.searchParams.get("q")?.trim() ?? "";
+    if (search) {
+      const { firestoreRecords } = await readProductionMastersForQuery(
+        db,
+        rawQuery || search,
+        Math.min(Math.max(pageSize * 4, 40), 120),
+      );
+      const matched = mergeAdminMasterSearchRecords({
+        query: rawQuery || search,
+        firestoreRecords,
+      });
+      const items = matched.slice(0, pageSize).map(applyCanonicalMasterRecord);
+      return NextResponse.json(
+        {
+          ok: true,
+          items,
+          total: Number(configSnapshot.data()?.sourceRecordCount ?? 0),
+          nextCursor: null,
+        },
+        { headers: { "cache-control": "private, no-store" } },
+      );
+    }
+    let query = db
+      .collection(COOPERATIVE_MASTER_COLLECTION)
+      .orderBy("cooperativeName")
+      .orderBy(FieldPath.documentId())
+      .limit(pageSize + 1);
+    if (cursor) {
       query = query.startAfter(cursor.name, cursor.id);
     }
     const snapshot = await query.get();
     const records = snapshot.docs.flatMap((document) => {
       const record = parseProductionCooperativeMaster(document.data());
-      return record ? [record] : [];
+      return record ? [applyCanonicalMasterRecord(record)] : [];
     });
-    if (search) {
-      records.sort((left, right) =>
-        left.cooperativeName.localeCompare(right.cooperativeName, "ko"),
-      );
-    }
     const hasMore = records.length > pageSize;
     const items = records.slice(0, pageSize);
     const last = items.at(-1);

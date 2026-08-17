@@ -251,6 +251,30 @@ export function toRealCooperativeSearchItem(record: {
   };
 }
 
+export function formatCooperativeRegion(
+  item: Pick<CooperativeSearchItem, "sido" | "sigungu">,
+) {
+  return [item.sido, item.sigungu]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function formatCooperativeSearchSubtitle(
+  item: Pick<
+    CooperativeSearchItem,
+    "sido" | "sigungu" | "cooperative_type" | "isDemoInstitution"
+  >,
+  demoBadge?: string,
+) {
+  if (item.isDemoInstitution) {
+    return demoBadge
+      ? `${item.cooperative_type} · ${demoBadge}`
+      : item.cooperative_type;
+  }
+  return formatCooperativeRegion(item);
+}
+
 export function searchCooperativeCatalog(
   cooperatives: readonly CooperativeSearchItem[],
   rawQuery: string,

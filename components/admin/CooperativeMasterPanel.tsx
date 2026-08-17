@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { formatCooperativeRegion } from "@/lib/cooperatives/demo-cooperative";
 import type {
   CooperativeMasterInput,
   ProductionCooperativeMasterRecord,
@@ -247,7 +248,7 @@ export function CooperativeMasterPanel({
                     <span className="admin-cell-sub">{item.cooperativeId}</span>
                   </td>
                   <td>{item.cooperativeType}</td>
-                  <td>{[item.sido, item.sigungu].filter(Boolean).join(" ") || "-"}</td>
+                  <td>{formatCooperativeRegion(item) || "-"}</td>
                   <td>
                     <span className="admin-pill">
                       {text.text(`cooperativeMasterStatus.${item.status}`)}
@@ -469,7 +470,9 @@ export function CooperativeMasterPanel({
                         >
                           {item.cooperativeName}
                         </button>
-                        <span>{item.cooperativeId}</span>
+                        <span>
+                          {formatCooperativeRegion(item) || item.cooperativeId}
+                        </span>
                       </li>
                     ))}
                   </ul>

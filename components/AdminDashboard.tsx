@@ -111,7 +111,10 @@ import {
 } from "@/lib/cms/editable-section";
 import { getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPageContent } from "@/lib/cms/schemas";
-import type { CooperativeSearchItem } from "@/lib/cooperatives/demo-cooperative";
+import {
+  formatCooperativeSearchSubtitle,
+  type CooperativeSearchItem,
+} from "@/lib/cooperatives/demo-cooperative";
 import { partitionAdminDashboardData } from "@/lib/admin/dashboard-classification";
 import { CooperativeMasterPanel } from "@/components/admin/CooperativeMasterPanel";
 import { CooperativeQuotePriceMasterPanel } from "@/components/admin/CooperativeQuotePriceMasterPanel";
@@ -4640,7 +4643,12 @@ function MemberCooperativeEditorModal({
                   >
                     {cooperative.cooperative_name}
                   </button>
-                  <span>{cooperative.cooperative_id}</span>
+                  <span>
+                    {formatCooperativeSearchSubtitle(
+                      cooperative,
+                      cooperative.isDemoInstitution ? "테스트" : undefined,
+                    ) || cooperative.cooperative_id}
+                  </span>
                 </li>
               ))}
             </ul>

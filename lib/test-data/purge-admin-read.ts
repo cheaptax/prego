@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import {
+  applyCanonicalMasterRecord,
+  mergeAdminMasterSearchRecords,
+} from "@/lib/cooperatives/catalog";
+import { readProductionMastersForQuery } from "@/lib/cooperatives/catalog-query";
+import {
   DEMO_COOPERATIVE_COLLECTION,
   TEST_COOPERATIVE_DEFINITIONS,
   parseTestCooperativeMaster,
@@ -107,34 +112,36 @@ export class PurgeAdminReadService {
       configSnapshot.data()?.status === "ACTIVE";
     let realItems: PurgeInstitutionListItem[];
     if (usesFirestoreMaster) {
-      const snapshot = await (normalized
-        ? this.db
-            .collection(COOPERATIVE_MASTER_COLLECTION)
-            .where("searchTokens", "array-contains", normalized)
-            .limit(limit)
-        : this.db
-            .collection(COOPERATIVE_MASTER_COLLECTION)
-            .orderBy("cooperativeName")
-            .limit(limit)
-      ).get();
-      realItems = snapshot.docs.flatMap((document) => {
-        const item = parseProductionCooperativeMaster(document.data());
-        return item
-          ? [
-              {
-                institutionId: item.cooperativeId,
-                institutionName: item.cooperativeName,
-                institutionCode: item.cooperativeId,
-                institutionType: item.cooperativeType,
-                isDemoInstitution: false,
-                signupStatus:
-                  item.status === "active" ? "AVAILABLE" : "PENDING",
-                dataClassification: "PRODUCTION" as const,
-                resettable: false,
-              },
-            ]
-          : [];
-      });
+      const { firestoreRecords } = normalized
+        ? await readProductionMastersForQuery(this.db, query, limit)
+        : {
+            firestoreRecords: (
+              await this.db
+                .collection(COOPERATIVE_MASTER_COLLECTION)
+                .orderBy("cooperativeName")
+                .limit(limit)
+                .get()
+            ).docs.flatMap((document) => {
+              const item = parseProductionCooperativeMaster(document.data());
+              return item ? [item] : [];
+            }),
+          };
+      const records = normalized
+        ? mergeAdminMasterSearchRecords({
+            query,
+            firestoreRecords,
+          }).slice(0, limit)
+        : firestoreRecords.map(applyCanonicalMasterRecord);
+      realItems = records.map((item) => ({
+        institutionId: item.cooperativeId,
+        institutionName: item.cooperativeName,
+        institutionCode: item.cooperativeId,
+        institutionType: item.cooperativeType,
+        isDemoInstitution: false,
+        signupStatus: item.status === "active" ? "AVAILABLE" : "PENDING",
+        dataClassification: "PRODUCTION" as const,
+        resettable: false,
+      }));
     } else {
       realItems = nonghyupMaster
         .filter((item) => {
