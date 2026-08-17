@@ -210,9 +210,10 @@ describe("dynamic production cooperative master", () => {
       actorId: "admin-1",
       now: "2026-08-01T00:00:00.000Z",
     });
-    const existingById = new Map(
-      nonghyupMaster.map((item) => [item.cooperative_id, null]),
-    );
+    const existingById = new Map<
+      string,
+      ReturnType<typeof createProductionCooperativeMaster> | null
+    >(nonghyupMaster.map((item) => [item.cooperative_id, null]));
     existingById.set(first.cooperative_id, stale);
     existingById.set(adminRow.cooperativeId, adminRow);
     const plans = planStaticCooperativeMasterSync({

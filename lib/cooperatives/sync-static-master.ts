@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Firestore } from "firebase-admin/firestore";
 import {
   COOPERATIVE_MASTER_COLLECTION,
   COOPERATIVE_MASTER_CONFIG_COLLECTION,
@@ -19,25 +20,6 @@ export type StaticMasterSyncPlan = {
   action: StaticMasterSyncAction;
   cooperativeId: string;
   record: ProductionCooperativeMasterRecord;
-};
-
-type FirestoreLike = {
-  collection: (name: string) => {
-    doc: (id: string) => unknown;
-    count?: () => { get: () => Promise<{ data: () => { count: number } }> };
-  };
-  getAll: (...refs: unknown[]) => Promise<
-    Array<{
-      id: string;
-      exists: boolean;
-      data: () => unknown;
-      ref: unknown;
-    }>
-  >;
-  batch: () => {
-    set: (ref: unknown, data: unknown) => void;
-    commit: () => Promise<unknown>;
-  };
 };
 
 export function staticCooperativeMasterChecksum(
@@ -133,7 +115,7 @@ export function countStaticMasterSyncPlans(
 }
 
 export async function loadExistingStaticMasterRecords(
-  db: FirestoreLike,
+  db: Firestore,
 ): Promise<Map<string, ProductionCooperativeMasterRecord | null>> {
   const collection = db.collection(COOPERATIVE_MASTER_COLLECTION);
   const refs = nonghyupMaster.map((record) =>
@@ -163,7 +145,7 @@ export async function loadExistingStaticMasterRecords(
 }
 
 export async function writeStaticCooperativeMasterPlans(
-  db: FirestoreLike,
+  db: Firestore,
   plans: readonly StaticMasterSyncPlan[],
   input: {
     now: string;
@@ -179,11 +161,7 @@ export async function writeStaticCooperativeMasterPlans(
   const writable = plans.filter((plan) =>
     ["create", "update"].includes(plan.action),
   );
-  await (
-    configRef as {
-      set: (data: unknown, options?: { merge?: boolean }) => Promise<unknown>;
-    }
-  ).set(
+  await configRef.set(
     {
       schemaVersion: 1,
       mode: "FIRESTORE",
@@ -206,11 +184,7 @@ export async function writeStaticCooperativeMasterPlans(
   const counted = collection.count
     ? (await collection.count().get()).data().count
     : nonghyupMaster.length;
-  await (
-    configRef as {
-      set: (data: unknown, options?: { merge?: boolean }) => Promise<unknown>;
-    }
-  ).set(
+  await configRef.set(
     {
       schemaVersion: 1,
       mode: "FIRESTORE",
@@ -231,7 +205,7 @@ let syncInFlight: Promise<{
   counts: ReturnType<typeof countStaticMasterSyncPlans>;
 }> | null = null;
 
-export async function ensureStaticCooperativeMasterSynced(db: FirestoreLike) {
+export async function ensureStaticCooperativeMasterSynced(db: Firestore) {
   if (syncInFlight) return syncInFlight;
   syncInFlight = runStaticCooperativeMasterSync(db).finally(() => {
     syncInFlight = null;
@@ -239,14 +213,11 @@ export async function ensureStaticCooperativeMasterSynced(db: FirestoreLike) {
   return syncInFlight;
 }
 
-async function runStaticCooperativeMasterSync(db: FirestoreLike) {
+async function runStaticCooperativeMasterSync(db: Firestore) {
   const emptyCounts = { create: 0, update: 0, noop: 0, preserve: 0 };
   const configRef = db
     .collection(COOPERATIVE_MASTER_CONFIG_COLLECTION)
-    .doc(COOPERATIVE_MASTER_CONFIG_ID) as {
-    get: () => Promise<{ exists: boolean; data: () => Record<string, unknown> | undefined }>;
-    set: (data: unknown, options?: { merge?: boolean }) => Promise<unknown>;
-  };
+    .doc(COOPERATIVE_MASTER_CONFIG_ID);
   const configSnapshot = await configRef.get();
   const config = configSnapshot.data();
   if (
