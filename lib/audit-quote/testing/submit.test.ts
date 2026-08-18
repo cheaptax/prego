@@ -359,6 +359,44 @@ describe("audit-quote integration (memory firestore)", () => {
     assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 5);
   });
 
+  it("allows approved test emails to create duplicate quote requests", async () => {
+    const db = new MemoryFirestore();
+    const first = await submitAuditQuoteRequest(
+      db as unknown as Firestore,
+      testConfig(),
+      baseInput({
+        email: "prego.ceo@gmail.com",
+        idempotencyKey: randomUUID(),
+      }),
+      submitOpts({
+        ipHash: "ip-test-email",
+        nowMs: 30_000,
+        serverTimestamp: "SERVER_TS" as never,
+      }),
+    );
+    const second = await submitAuditQuoteRequest(
+      db as unknown as Firestore,
+      testConfig(),
+      baseInput({
+        email: "prego.ceo@gmail.com",
+        idempotencyKey: randomUUID(),
+      }),
+      submitOpts({
+        ipHash: "ip-test-email",
+        nowMs: 30_001,
+        serverTimestamp: "SERVER_TS" as never,
+      }),
+    );
+    assert.equal(first.kind, "success");
+    assert.equal(second.kind, "success");
+    if (first.kind === "success" && second.kind === "success") {
+      assert.equal(first.created, true);
+      assert.equal(second.created, true);
+      assert.notEqual(first.requestId, second.requestId);
+    }
+    assert.equal(db.count(AUDIT_QUOTE_REQUESTS), 2);
+  });
+
   it("allows unlimited quote requests for the test phone number", async () => {
     const db = new MemoryFirestore();
     const cfg = testConfig({

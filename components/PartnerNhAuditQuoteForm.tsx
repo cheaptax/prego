@@ -360,7 +360,7 @@ export function PartnerNhAuditQuoteForm({
         <IntegerField
           id={fieldId("certifiedPublicAccountantCount")}
           quoteFieldId="quote-field-certifiedPublicAccountantCount"
-          label={copy.cpaCountLabel || "소속 공인회계사 수 *"}
+          label={copy.cpaCountLabel || "공인회계사 인원 수 *"}
           unit="명"
           value={values.certifiedPublicAccountantCount}
           disabled={disabled}

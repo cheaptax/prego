@@ -14829,6 +14829,120 @@ input.admin-input[type="number"] {
   cursor: not-allowed;
 }
 
+.quote-screen-template {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(420px, 1fr) minmax(320px, 420px);
+  gap: 18px;
+  align-items: start;
+  padding: 24px;
+}
+
+.quote-screen-template .admin-list {
+  display: grid;
+  gap: 8px;
+}
+
+.quote-screen-template .admin-list__item {
+  appearance: none;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quote-screen-template .admin-list__item span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.quote-screen-template .admin-list__item.is-active {
+  border-color: #1d4ed8;
+  box-shadow: 0 10px 24px -18px rgba(29, 78, 216, 0.8);
+}
+
+.quote-screen-template .admin-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.quote-screen-template .admin-stack h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.quote-screen-template .admin-fieldset {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+}
+
+.quote-screen-template .admin-fieldset legend {
+  padding: 0 4px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.quote-screen-template .quote-screen-preview-frame {
+  position: relative;
+  min-height: 760px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #eef2f6;
+}
+
+.quote-screen-template .partner-quote-preview {
+  display: block;
+  width: 100%;
+  min-height: 760px;
+  border: 0;
+  background: #eef2f6;
+}
+
+.quote-screen-preview-status {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  min-height: 760px;
+  padding: 32px;
+  text-align: center;
+  color: #334155;
+}
+
+.quote-screen-preview-status p {
+  margin: 0;
+  max-width: 28rem;
+  line-height: 1.5;
+}
+
+.quote-screen-preview-status.is-overlay {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.quote-screen-preview-status--error {
+  color: #991b1b;
+}
+
+@media (max-width: 1180px) {
+  .quote-screen-template {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 문의 목록 — 답변 액션 버튼 (작성 / 수정 / 완료) */
 .admin-table__actions .admin-btn--sm {
   min-width: 92px;

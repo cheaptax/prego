@@ -171,6 +171,64 @@ describe("safe price adjustment", () => {
     );
   });
 
+  it("spreads a third non-winner 300,000원 above the selected partner", () => {
+    const winner = partnerQuoteFixture("12000000", { quality: "high" });
+    const second = partnerQuoteFixture("11000000", {
+      partnerId: "partner-2",
+      partnerName: "제휴사2",
+      quality: "medium",
+    });
+    const third = partnerQuoteFixture("11500000", {
+      partnerId: "partner-3",
+      partnerName: "제휴사3",
+      quality: "medium",
+    });
+    const fourth = partnerQuoteFixture("11600000", {
+      partnerId: "partner-4",
+      partnerName: "제휴사4",
+      quality: "low",
+    });
+    const result = applySafePriceAdjustments({
+      caseId: "case-1",
+      quoteRequestId: "req-1",
+      reportId: "report-1",
+      partnerQuotes: [winner, second, third, fourth],
+      externalQuotes: [externalRecord("10000000")],
+      presets: [
+        presetFor(winner, {
+          planned: "12000000",
+          min: "8000000",
+          max: "13000000",
+          winner: true,
+        }),
+        presetFor(second, {
+          planned: "11000000",
+          min: "8000000",
+          max: "13000000",
+          winner: false,
+        }),
+        presetFor(third, {
+          planned: "11500000",
+          min: "8000000",
+          max: "13000000",
+          winner: false,
+        }),
+        presetFor(fourth, {
+          planned: "11600000",
+          min: "8000000",
+          max: "13000000",
+          winner: false,
+        }),
+      ],
+      now: NOW,
+    });
+    assert.equal(
+      result.quotes.find((quote) => quote.id === fourth.id)?.nhAuditV2
+        ?.submission.auditFeeWon,
+      "10000000",
+    );
+  });
+
   it("reselects the highest-quality partner after ranking, even if the planned winner differs", () => {
     const planned = partnerQuoteFixture("11000000", {
       quality: "low",

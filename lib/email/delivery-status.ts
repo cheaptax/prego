@@ -29,6 +29,7 @@ export type CustomerEmailDeliveryView = {
   statusLabel: string;
   accountEmail?: string;
   recipientEmail: string;
+  ccEmails: string[];
   attemptCount: number;
   lastError?: string;
   sentAt?: string;
@@ -50,6 +51,9 @@ export function toCustomerEmailDeliveryView(
     statusLabel: customerEmailStatusLabel(record.status),
     accountEmail: record.accountEmail,
     recipientEmail: record.recipientEmail,
+    ccEmails: Array.isArray(record.ccEmails)
+      ? record.ccEmails.filter(Boolean)
+      : [],
     attemptCount: record.attemptCount,
     lastError: record.lastError,
     sentAt: record.sentAt,

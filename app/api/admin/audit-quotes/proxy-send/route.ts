@@ -26,10 +26,6 @@ import {
   getCooperativeQuotePriceMaster,
   seedQuoteAutomationFromMaster,
 } from "@/lib/quotes/cooperative-quote-price-master-repository";
-import type {
-  CooperativeQuotePartnerPrice,
-  CooperativeQuotePriceMasterRow,
-} from "@/lib/quotes/cooperative-quote-price-master-types";
 import {
   adminProxyMissingFixHint,
   adminProxyMissingLabel,
@@ -37,6 +33,10 @@ import {
   checkAdminProxyQuoteReadiness,
   resolveAdminProxySendPlan,
 } from "@/lib/quotes/admin-proxy-quote-readiness";
+import {
+  isActiveAuditPartner,
+  resolveAdminProxySendTargets,
+} from "@/lib/quotes/admin-proxy-send-targets";
 import {
   deliverExistingQuoteToCustomer,
   finalizePartnerQuoteDelivery,
@@ -87,18 +87,17 @@ async function resolveCooperativeId(audit: AuditQuoteRequestRecord) {
   return hit?.cooperative_id ?? null;
 }
 
-function masterSendPrices(master: CooperativeQuotePriceMasterRow) {
-  const winner =
-    master.prices.find((price) => price.isPlannedWinner) ??
-    master.prices.find(
-      (price) => price.partnerId === master.plan.plannedWinnerPartnerId,
+async function loadActiveAuditPartners(db: Firestore) {
+  const snapshot = await db.collection("partners").limit(500).get();
+  return snapshot.docs
+    .map((doc) => ({ ...(doc.data() as PartnerRecord), id: doc.id }))
+    .filter(isActiveAuditPartner)
+    .sort((left, right) =>
+      (left.displayName || left.name).localeCompare(
+        right.displayName || right.name,
+        "ko",
+      ),
     );
-  const others = master.prices
-    .filter((price) => price.partnerId !== winner?.partnerId)
-    .slice(0, 2);
-  return [winner, ...others].filter(
-    (price): price is CooperativeQuotePartnerPrice => Boolean(price),
-  );
 }
 
 async function ensureAssignment(input: {
@@ -223,8 +222,12 @@ async function processRequest(input: {
   if (!master) {
     return { requestId: input.requestId, error: "master_not_found" };
   }
-  const prices = masterSendPrices(master);
-  if (prices.length === 0) {
+  const activePartners = await loadActiveAuditPartners(db);
+  const targets = resolveAdminProxySendTargets({
+    master,
+    activePartners,
+  });
+  if (targets.length === 0) {
     return {
       requestId: input.requestId,
       error: "master_prices_empty",
@@ -235,14 +238,6 @@ async function processRequest(input: {
       masterPartnerCount: 0,
     };
   }
-  const partners = await Promise.all(
-    prices.map(async (price) => {
-      const snapshot = await db.collection("partners").doc(price.partnerId).get();
-      return snapshot.exists
-        ? ({ ...(snapshot.data() as PartnerRecord), id: snapshot.id } as PartnerRecord)
-        : null;
-    }),
-  );
   const quoteRequest = await ensureQuoteRequest(db, {
     sourceType: "audit_quote",
     source: audit,
@@ -266,18 +261,8 @@ async function processRequest(input: {
     errorLabel: string;
   }> = [];
 
-  for (let index = 0; index < prices.length; index += 1) {
-    const price = prices[index];
-    const partner = partners[index];
-    if (!partner) {
-      errors.push({
-        partnerId: price.partnerId,
-        partnerName: price.partnerName,
-        error: "partner_not_found",
-        errorLabel: adminProxySendErrorLabel("partner_not_found"),
-      });
-      continue;
-    }
+  for (const target of targets) {
+    const { price, partner } = target;
     try {
       const readiness = checkAdminProxyQuoteReadiness({ partner, price });
       if (!readiness.ready) {
@@ -422,7 +407,7 @@ async function processRequest(input: {
     sentVersions,
     skipped,
     errors,
-    masterPartnerCount: prices.length,
+    masterPartnerCount: targets.length,
   };
 }
 

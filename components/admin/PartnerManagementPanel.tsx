@@ -923,6 +923,12 @@ export function PartnerManagementPanel({
               <h2>견적 운영 현황</h2>
               <p>일반 상담·감사견적에서 생성된 공통 견적요청입니다.</p>
             </div>
+            <a
+              className="admin-btn"
+              href="/admin/operations/quote-screens"
+            >
+              법인별 견적서 템플릿
+            </a>
           </header>
           <div className="admin-table-wrap">
             <table className="admin-table">

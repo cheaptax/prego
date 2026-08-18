@@ -9,10 +9,7 @@ import {
   getQuoteDocumentSigningSecret,
   serializeEmbeddedQuoteDocumentIdentity,
 } from "@/lib/audit-evaluation/standard-quote-identity";
-import {
-  getTransactionalEmailConfigurationError,
-  sendTransactionalEmail,
-} from "@/lib/email/resend";
+import { getTransactionalEmailConfigurationError } from "@/lib/email/resend";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import type {
   PartnerRecord,
@@ -28,7 +25,8 @@ import { valuesFromNhAuditSubmission } from "@/lib/quotes/nh-audit-quote-form";
 import { canPartnerFinalizeQuoteAssignment } from "@/lib/quotes/nh-audit-quote-server";
 import { embedAuditQuoteIdentityMarker } from "@/lib/quotes/audit-quote-document";
 import { buildCustomerQuoteEmail } from "@/lib/quotes/customer-quote-email";
-import { quoteDocumentContentFromCms } from "@/lib/quotes/quote-document-content";
+import { sendCustomerQuoteTransactionalEmail } from "@/lib/quotes/partner-quote-cc";
+import { getPublishedQuoteDocumentContentForPartner } from "@/lib/quotes/quote-screen-profile";
 import { quotePdfFileNameFromRecords } from "@/lib/quotes/quote-pdf-filename";
 import { quoteDocumentForPersistence } from "@/lib/quotes/quote-persistence";
 import { renderQuotePdf } from "@/lib/quotes/quote-pdf";
@@ -62,8 +60,13 @@ export async function finalizePartnerQuoteDelivery(input: {
   const { db, assignmentId, built, actor } = input;
   const logoDataUri = await readStorageFileAsDataUri(built.partner.logoPath);
   const sealDataUri = await readStorageFileAsDataUri(built.partner.sealPath);
-  const quoteDocumentContent = quoteDocumentContentFromCms(
-    (await loadPublishedCmsPage("partner.portal")).content,
+  const quoteDocumentContent = await getPublishedQuoteDocumentContentForPartner(
+    {
+      db,
+      partnerId: built.partner.id,
+      cmsContent: (await loadPublishedCmsPage("partner.portal")).content,
+      partner: built.partner,
+    },
   );
   let pdfBuffer = await renderQuotePdf({
     quote: built.quote,
@@ -316,8 +319,9 @@ export async function finalizePartnerQuoteDelivery(input: {
       quote: finalizedQuote,
       copy: quoteDocumentContent.copy,
     });
-    const sent = await sendTransactionalEmail({
-      to: finalizedQuote.customerEmail,
+    const sent = await sendCustomerQuoteTransactionalEmail({
+      db,
+      quote: finalizedQuote,
       ...emailContent,
       attachments: [{ filename: pdfFileName, content: pdfBuffer }],
       idempotencyKey: `quote/${finalizedQuote.id}/customer`,
@@ -331,6 +335,7 @@ export async function finalizePartnerQuoteDelivery(input: {
       provider: sent.provider,
       providerMessageId: sent.id,
       recipientEmail: sent.recipientEmail,
+      ccEmails: sent.ccEmails,
       attemptCount: 1,
       sentAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -413,8 +418,12 @@ export async function deliverExistingQuoteToCustomer(input: {
       error: "quote_pdf_missing",
     };
   }
-  const quoteDocumentContent = quoteDocumentContentFromCms(
-    (await loadPublishedCmsPage("partner.portal")).content,
+  const quoteDocumentContent = await getPublishedQuoteDocumentContentForPartner(
+    {
+      db: input.db,
+      partnerId: input.quote.partnerId,
+      cmsContent: (await loadPublishedCmsPage("partner.portal")).content,
+    },
   );
   const pdfFileName =
     input.quote.pdfFileName ||
@@ -434,8 +443,9 @@ export async function deliverExistingQuoteToCustomer(input: {
       quote: input.quote,
       copy: quoteDocumentContent.copy,
     });
-    const sent = await sendTransactionalEmail({
-      to: input.quote.customerEmail,
+    const sent = await sendCustomerQuoteTransactionalEmail({
+      db: input.db,
+      quote: input.quote,
       ...emailContent,
       attachments: [{ filename: pdfFileName, content: pdfBuffer }],
       idempotencyKey: `quote/${input.quote.id}/customer/retry/${randomUUID()}`,
@@ -456,6 +466,7 @@ export async function deliverExistingQuoteToCustomer(input: {
         purpose: "quote",
         accountEmail: input.quote.customerEmail,
         recipientEmail: sent.recipientEmail,
+        ccEmails: sent.ccEmails,
         status: "sent",
         provider: sent.provider,
         providerMessageId: sent.id,

@@ -142,6 +142,13 @@ export function mapAuditQuoteApiError(code: string | undefined) {
     case "unsupported_media_type":
     case "payload_too_large":
       return "요청을 처리할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.";
+    case "missing_idempotency_key":
+    case "invalid_source":
+    case "invalid_json":
+      return "요청을 처리할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.";
+    case "server_misconfigured":
+    case "submit_failed":
+      return "전송 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
     default:
       return "전송 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
   }
@@ -150,12 +157,21 @@ export function mapAuditQuoteApiError(code: string | undefined) {
 /** Session idempotency helper: reuse until success, then rotate. */
 export class IdempotencyKeySession {
   private key: string | null = null;
+  private fingerprint: string | null = null;
 
   peek() {
     return this.key;
   }
 
-  getForAttempt() {
+  getForAttempt(fingerprint?: string) {
+    if (
+      fingerprint &&
+      this.fingerprint &&
+      fingerprint !== this.fingerprint
+    ) {
+      this.key = null;
+    }
+    if (fingerprint) this.fingerprint = fingerprint;
     if (!this.key) {
       this.key =
         typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -167,5 +183,6 @@ export class IdempotencyKeySession {
 
   clearAfterSuccess() {
     this.key = null;
+    this.fingerprint = null;
   }
 }

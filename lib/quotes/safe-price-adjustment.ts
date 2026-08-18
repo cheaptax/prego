@@ -33,10 +33,15 @@ const VAT_DEN = 1_000n;
 
 /** 선정 제휴사는 비제휴 최저가보다 이 금액만큼 낮은 감사보수로 맞춘다. */
 export const SAFE_PRICE_WINNER_UNDERCUT_WON = 300_000n;
-/** 비선정 제휴사 1·2는 선정 제휴사보다 이 금액만큼 높은 감사보수로 맞춘다. */
+/** 비선정 n번째는 선정 제휴사보다 n×10만원 높은 감사보수로 맞춘다. */
+export function safePriceNonWinnerPremiumWon(index: number) {
+  return 100_000n * BigInt(Math.max(0, index) + 1);
+}
+
+/** @deprecated Prefer safePriceNonWinnerPremiumWon(index). */
 export const SAFE_PRICE_NON_WINNER_PREMIUMS_WON = [
-  100_000n,
-  200_000n,
+  safePriceNonWinnerPremiumWon(0),
+  safePriceNonWinnerPremiumWon(1),
 ] as const;
 
 export type SafePriceAdjustmentResult = {
@@ -59,7 +64,7 @@ export function isExternalEvaluationQuoteId(quoteId: string) {
  *    - 타 제휴사가 선정 제휴사보다 싸면
  *      선정 제휴사 = 타 제휴사 최저가 − 30만원.
  *      그 값이 농협 최저안전가격보다 낮으면 최저안전가격까지만 내린다.
- *    - 비선정 제휴사 1/2는 선정 제휴사보다 10/20만원 높게 맞춘다.
+ *    - 비선정 제휴사는 품질 순으로 선정 제휴사보다 10/20/30만원… 높게 맞춘다.
  * 3) 최저안전가격(하한)은 선정된 제휴사 개인 프리셋이 아니라 해당 농협 전체에 동일하게 적용한다.
  */
 export function applySafePriceAdjustments(input: {
@@ -175,8 +180,7 @@ export function applySafePriceAdjustments(input: {
     weights,
   });
   nonWinners.forEach((quote, index) => {
-    const premium = SAFE_PRICE_NON_WINNER_PREMIUMS_WON[index];
-    if (premium === undefined) return;
+    const premium = safePriceNonWinnerPremiumWon(index);
     const target = winnerAfterFee + premium;
     const matched =
       resolvePartnerPreset(quote, input.presets) ??

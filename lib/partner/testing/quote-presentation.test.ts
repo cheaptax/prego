@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  QUOTE_SCREEN_PREVIEW_NOTES,
+  STANDARD_QUOTE_SERVICE_PERIOD,
+  STANDARD_QUOTE_TERMS,
+  STANDARD_QUOTE_VALID_UNTIL,
   quoteConditionRows,
   quoteDisplayNumber,
   quoteDocumentTitle,
+  quoteEvaluationFactsFootnote,
+  quoteEvaluationFactsHelp,
   quoteIssueDate,
   quotePartnerCredentialRows,
   quotePartnerEvaluationFactRows,
@@ -70,7 +76,7 @@ describe("quote document presentation", () => {
     );
   });
 
-  it("omits the entire condition section when no condition was entered", () => {
+  it("fills the shared template conditions when partner fields are empty", () => {
     assert.deepEqual(
       quoteConditionRows({
         servicePeriod: "",
@@ -78,7 +84,11 @@ describe("quote document presentation", () => {
         terms: undefined,
         notes: undefined,
       }),
-      [],
+      [
+        ["수행기간", STANDARD_QUOTE_SERVICE_PERIOD],
+        ["유효기간", STANDARD_QUOTE_VALID_UNTIL],
+        ["조건", STANDARD_QUOTE_TERMS],
+      ],
     );
     assert.deepEqual(
       quoteConditionRows({
@@ -89,6 +99,7 @@ describe("quote document presentation", () => {
       }),
       [
         ["수행기간", "2027.01 ~ 2027.03"],
+        ["유효기간", STANDARD_QUOTE_VALID_UNTIL],
         ["조건", "계약 체결 후 착수"],
       ],
     );
@@ -223,7 +234,8 @@ describe("customer-visible partner facts", () => {
     assert.equal(rows["사업자등록번호"], "123-45-67890");
     assert.equal(rows["담당회계사"], "홍길동");
     assert.equal(rows["제안 주체"], "회계법인");
-    assert.equal(rows["소속 공인회계사"], "12명");
+    assert.equal(rows["공인회계사 인원 수"], undefined);
+    assert.equal(rows["소속 공인회계사"], undefined);
     assert.equal(rows["전화"], "02-1234-5678");
     assert.equal(rows["이메일"], "quote@example.com");
   });
@@ -231,10 +243,54 @@ describe("customer-visible partner facts", () => {
   it("exposes evaluation facts the customer needs to compare firms", () => {
     const rows = Object.fromEntries(quotePartnerEvaluationFactRows(quote));
     assert.equal(rows["회계법인 매출액"], "1,000,000,000원");
-    assert.equal(rows["2025년 지역농협 감사건수"], "8건");
+    assert.equal(rows["2025년 지역농협 감사실적"], "8건");
+    assert.equal(rows["2025년 지역농협 감사건수 (*)"], undefined);
+    assert.equal(rows["공인회계사 인원 수"], "12명");
+    assert.equal(rows["소속 공인회계사"], undefined);
     assert.equal(rows["감사 수행 농협 유형"], "지역농협");
     assert.equal(rows["농협 세무대리 경험"], "있음");
     assert.equal(rows["농협 보조금 정산 경험"], "없음");
+  });
+
+  it("attaches the footnote marker to the evaluation help, not the audit-count row", () => {
+    assert.equal(
+      quoteEvaluationFactsHelp(),
+      "농협 외부회계 감사 선정시 고려할만한 평가지표 및 실적 정보입니다. (*)",
+    );
+    assert.equal(
+      quoteEvaluationFactsHelp({
+        evaluationFactsHelp:
+          "농협 외부회계감사 선정 시 참고할 제휴사 실적·역량 정보입니다.",
+      }),
+      "농협 외부회계 감사 선정시 고려할만한 평가지표 및 실적 정보입니다. (*)",
+    );
+    assert.equal(
+      quoteEvaluationFactsFootnote(),
+      "(*) 소속 농협감사 협회사의 상호 공유된 제휴실적을 80%인정한 수치입니다.",
+    );
+  });
+
+  it("modernizes the standard service window and keeps preview notes out of real quotes", () => {
+    assert.deepEqual(
+      quoteConditionRows({
+        servicePeriod: "2026.09 ~ 2027.02",
+        validUntil: "발행일로부터 30일",
+        notes: "",
+      }),
+      [
+        ["수행기간", STANDARD_QUOTE_SERVICE_PERIOD],
+        ["유효기간", STANDARD_QUOTE_VALID_UNTIL],
+        ["조건", STANDARD_QUOTE_TERMS],
+      ],
+    );
+    assert.equal(
+      quoteConditionRows({
+        servicePeriod: STANDARD_QUOTE_SERVICE_PERIOD,
+        validUntil: STANDARD_QUOTE_VALID_UNTIL,
+        notes: QUOTE_SCREEN_PREVIEW_NOTES,
+      }).some(([, value]) => value === QUOTE_SCREEN_PREVIEW_NOTES),
+      false,
+    );
   });
 
   it("omits evaluation facts when the partner has not submitted them", () => {

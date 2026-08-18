@@ -39,7 +39,7 @@ import {
 } from "@/lib/audit-quote/types";
 import { resolveSignupCooperative } from "@/lib/cooperatives/server";
 import { withoutUndefined } from "@/lib/firebase/clean";
-import { UNLIMITED_TEST_PHONE } from "@/lib/test-data/email-classification";
+import { hasUnlimitedTestSignup } from "@/lib/test-data/email-classification";
 
 const MAX_QUOTE_REQUESTS_PER_PHONE = 5;
 
@@ -236,6 +236,10 @@ export async function submitAuditQuoteRequest(
 
   const nowMs = options?.nowMs ?? Date.now();
   const serverTimestamp = options?.serverTimestamp ?? FieldValue.serverTimestamp();
+  const unlimitedTestIntake = hasUnlimitedTestSignup({
+    email,
+    phone: phoneDigits,
+  });
   const emailHash = isValidBusinessEmail(email)
     ? hmacEmailHash(email, config.hashPepper)
     : "";
@@ -243,17 +247,18 @@ export async function submitAuditQuoteRequest(
     input.idempotencyKey,
     config.hashPepper
   );
-  const dedupId = emailHash
-    ? emailDedupDocId({
-        campaign,
-        emailHash,
-        targetCooperativeId,
-        fiscalYear,
-      })
-    : "";
-  const ipHash = options?.ipHash;
+  const dedupId =
+    emailHash && !unlimitedTestIntake
+      ? emailDedupDocId({
+          campaign,
+          emailHash,
+          targetCooperativeId,
+          fiscalYear,
+        })
+      : "";
+  const ipHash = unlimitedTestIntake ? undefined : options?.ipHash;
   const phoneLimitHash =
-    !honeypot && phoneDigits !== UNLIMITED_TEST_PHONE
+    !honeypot && !unlimitedTestIntake
       ? hashRateLimitKey("audit_quote_phone", phoneDigits, config.hashPepper)
       : "";
 
@@ -272,15 +277,17 @@ export async function submitAuditQuoteRequest(
       const idempotencyRef = db
         .collection(AUDIT_QUOTE_IDEMPOTENCY)
         .doc(idempotencyKeyHash);
-      const dedupRef = emailHash
-        ? db.collection(AUDIT_QUOTE_EMAIL_DEDUP).doc(dedupId)
-        : null;
+      const dedupRef =
+        emailHash && dedupId
+          ? db.collection(AUDIT_QUOTE_EMAIL_DEDUP).doc(dedupId)
+          : null;
       const ipRateRef = ipHash
         ? db.collection(AUDIT_QUOTE_RATE_LIMITS).doc(`ip_${ipHash}`)
         : null;
-      const emailRateRef = emailHash
-        ? db.collection(AUDIT_QUOTE_RATE_LIMITS).doc(`email_${emailHash}`)
-        : null;
+      const emailRateRef =
+        emailHash && !unlimitedTestIntake
+          ? db.collection(AUDIT_QUOTE_RATE_LIMITS).doc(`email_${emailHash}`)
+          : null;
       const phoneLimitRef = phoneLimitHash
         ? db
             .collection(AUDIT_QUOTE_RATE_LIMITS)

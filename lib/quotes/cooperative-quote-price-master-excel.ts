@@ -13,10 +13,9 @@ import { isPartnerActive } from "@/lib/partners";
 import { nonghyupMaster } from "@/lib/platform";
 import { isPartnerEligibleForAuditQuote } from "@/lib/quotes/audit-quote-assignment";
 import {
-  NON_SELECTED_FEE_BPS,
-  nonSelectedFeeFromPlanned,
+  nonSelectedMasterPriceFields,
   normalizePartnerMatchKey,
-  pickRandomPartners,
+  orderNonSelectedPartners,
   safeMinFromPlanned,
 } from "@/lib/quotes/cooperative-quote-price-master-pricing";
 import type {
@@ -141,14 +140,12 @@ export async function buildPayloadsFromWideExcelRows(input: {
       );
     const uniqueNamed = [
       ...new Map(namedNonSelected.map((item) => [item.id, item])).values(),
-    ].slice(0, 2);
-    const remaining = partners.filter(
-      (partner) =>
-        partner.id !== selected.id &&
-        !uniqueNamed.some((item) => item.id === partner.id),
+    ];
+    const remaining = partners.filter((partner) => partner.id !== selected.id);
+    const nonSelected = orderNonSelectedPartners(
+      remaining,
+      uniqueNamed.map((item) => item.id),
     );
-    const randomFill = pickRandomPartners(remaining, 2 - uniqueNamed.length);
-    const nonSelected = [...uniqueNamed, ...randomFill].slice(0, 2);
 
     payloads.push({
       fiscalYear: input.fiscalYear,
@@ -172,25 +169,16 @@ export async function buildPayloadsFromWideExcelRows(input: {
           isPlannedWinner: true,
           locked: false,
         },
-        ...nonSelected.map((partner, index) => {
-          const fee = nonSelectedFeeFromPlanned(
-            planned,
-            NON_SELECTED_FEE_BPS[index] ?? 11_000n,
-          );
-          return {
-            cooperativeId: cooperative.cooperativeId,
-            cooperativeName: cooperative.cooperativeName,
-            partnerId: partner.id,
-            partnerName: partner.name,
-            plannedAuditFeeWon: fee,
-            expenseBillingMode: "INCLUDED_IN_AUDIT_FEE" as const,
-            expectedExpenseWon: "0" as WonAmount,
-            safePriceMinWon: safeMinFromPlanned(fee),
-            safePriceMaxWon: fee,
-            isPlannedWinner: false,
-            locked: false,
-          };
-        }),
+        ...nonSelected.map((partner, index) => ({
+          cooperativeId: cooperative.cooperativeId,
+          cooperativeName: cooperative.cooperativeName,
+          partnerId: partner.id,
+          partnerName: partner.name,
+          ...nonSelectedMasterPriceFields({
+            plannedWinnerFeeWon: planned,
+            index,
+          }),
+        })),
       ],
     });
   }

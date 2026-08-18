@@ -1,6 +1,11 @@
 import { CMS_PAGE_DEFAULTS } from "@/lib/cms/defaults";
 import { getCmsSection } from "@/lib/cms/runtime";
 import type { CmsPageContent, CmsSection } from "@/lib/cms/schemas";
+import type {
+  QuoteScreenLayoutFamily,
+  QuoteScreenSectionConfig,
+  QuoteScreenTheme,
+} from "@/lib/quotes/quote-screen-profile";
 
 export type QuoteDocumentCopy = {
   auditTitleTemplate: string;
@@ -61,6 +66,8 @@ export type QuoteDocumentCopy = {
   credentialsHelp: string;
   evaluationFactsTitle: string;
   evaluationFactsHelp: string;
+  evaluationFactsFootnoteAssociation: string;
+  evaluationFactsFootnoteAssociationDef: string;
   engagementPartnerLabel: string;
   proposerTypeLabel: string;
   proposerAccountingFirmLabel: string;
@@ -97,9 +104,12 @@ export type QuoteDocumentCopy = {
 export type QuoteDocumentContent = {
   copy: QuoteDocumentCopy;
   style: CmsSection["style"];
+  layoutFamily?: QuoteScreenLayoutFamily;
+  sections?: QuoteScreenSectionConfig[];
+  theme?: QuoteScreenTheme;
 };
 
-const COPY_KEYS = [
+export const QUOTE_DOCUMENT_COPY_KEYS = [
   "auditTitleTemplate",
   "generalTitleTemplate",
   "recipientTemplate",
@@ -158,6 +168,8 @@ const COPY_KEYS = [
   "credentialsHelp",
   "evaluationFactsTitle",
   "evaluationFactsHelp",
+  "evaluationFactsFootnoteAssociation",
+  "evaluationFactsFootnoteAssociationDef",
   "engagementPartnerLabel",
   "proposerTypeLabel",
   "proposerAccountingFirmLabel",
@@ -205,7 +217,7 @@ export function quoteDocumentContentFromCms(
     "quoteDocument",
   );
   const copy = Object.fromEntries(
-    COPY_KEYS.map((key) => {
+    QUOTE_DOCUMENT_COPY_KEYS.map((key) => {
       const value =
         section.text[key]?.trim() ||
         fallback.text[key]?.trim() ||

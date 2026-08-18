@@ -22,6 +22,11 @@ import { CmsSupplementalSections } from "@/components/cms/CmsSupplementalSection
 import { PartnerNhAuditQuoteForm } from "@/components/PartnerNhAuditQuoteForm";
 import { validatePartnerQuoteInput } from "@/lib/quotes/partner-quote-validation";
 import {
+  STANDARD_QUOTE_SERVICE_PERIOD,
+  STANDARD_QUOTE_TERMS,
+  STANDARD_QUOTE_VALID_UNTIL,
+} from "@/lib/quotes/quote-presentation";
+import {
   extractNhAuditEvaluationDefaults,
   resolveInitialNhAuditPartnerForm,
 } from "@/lib/quotes/nh-audit-evaluation-defaults";
@@ -95,7 +100,7 @@ export function PartnerDashboard({
   const [quoteVatIncluded, setQuoteVatIncluded] = useState(true);
   const [quoteServicePeriod, setQuoteServicePeriod] = useState("");
   const [quoteValidUntil, setQuoteValidUntil] = useState("");
-  const [quoteTerms, setQuoteTerms] = useState("");
+  const [quoteTerms, setQuoteTerms] = useState(STANDARD_QUOTE_TERMS);
   const [quoteNotes, setQuoteNotes] = useState("");
   const [quoteSupplierProfile, setQuoteSupplierProfile] =
     useState<QuoteSupplierProfile>(EMPTY_SUPPLIER_PROFILE);
@@ -191,9 +196,9 @@ export function PartnerDashboard({
         formatCurrencyInput(source?.lineItems[0]?.unitPrice ?? ""),
       );
       setQuoteVatIncluded(source?.vatIncluded ?? true);
-      setQuoteServicePeriod(source?.servicePeriod ?? "");
-      setQuoteValidUntil(source?.validUntil ?? "");
-      setQuoteTerms(source?.terms ?? "");
+      setQuoteServicePeriod(source?.servicePeriod || STANDARD_QUOTE_SERVICE_PERIOD);
+      setQuoteValidUntil(source?.validUntil || STANDARD_QUOTE_VALID_UNTIL);
+      setQuoteTerms(source?.terms || STANDARD_QUOTE_TERMS);
       setQuoteNotes(source?.notes ?? "");
       const supplierPartner = partnerOverride;
       if (supplierPartner) {
@@ -484,9 +489,9 @@ export function PartnerDashboard({
         formatCurrencyInput(source?.lineItems[0]?.unitPrice ?? ""),
       );
       setQuoteVatIncluded(source?.vatIncluded ?? true);
-      setQuoteServicePeriod(source?.servicePeriod ?? "");
-      setQuoteValidUntil(source?.validUntil ?? "");
-      setQuoteTerms(source?.terms ?? "");
+      setQuoteServicePeriod(source?.servicePeriod || STANDARD_QUOTE_SERVICE_PERIOD);
+      setQuoteValidUntil(source?.validUntil || STANDARD_QUOTE_VALID_UNTIL);
+      setQuoteTerms(source?.terms || STANDARD_QUOTE_TERMS);
       setQuoteNotes(source?.notes ?? "");
       if (partner) {
         setQuoteSupplierProfile(quoteSupplierProfileFrom(partner, source));

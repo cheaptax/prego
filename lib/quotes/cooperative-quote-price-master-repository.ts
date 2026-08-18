@@ -17,6 +17,7 @@ import {
 import {
   cooperativeQuotePricePlanInputSchema,
 } from "@/lib/quotes/cooperative-quote-price-master-schemas";
+import { nonSelectedMasterPriceFields } from "@/lib/quotes/cooperative-quote-price-master-pricing";
 import {
   COOPERATIVE_QUOTE_PRICE_MASTER_COLLECTIONS,
   type CooperativeQuotePartnerPrice,
@@ -494,21 +495,30 @@ export async function seedQuoteAutomationFromMaster(input: {
   const activeAssignments = input.assignments.filter(
     (assignment) => assignment.status !== "revoked",
   );
-  const assignmentByPartner = new Map(
-    activeAssignments.map((assignment) => [assignment.partnerId, assignment]),
-  );
   const existingByPartner = new Map(
     existing.presets.map((preset) => [preset.partnerId, preset]),
   );
-  const partnerPresets = master.prices
-    .filter((price) => assignmentByPartner.has(price.partnerId))
-    .map((price) => {
-      const existingPreset = existingByPartner.get(price.partnerId);
-      if (existingPreset?.locked) {
-        return existingPreset;
-      }
+  const winnerPrice =
+    master.prices.find((price) => price.isPlannedWinner) ??
+    master.prices.find(
+      (price) => price.partnerId === master.plan.plannedWinnerPartnerId,
+    ) ??
+    null;
+  const priceByPartner = new Map(
+    master.prices.map((price) => [price.partnerId, price]),
+  );
+  let nextSyntheticIndex = master.prices.filter(
+    (price) => !price.isPlannedWinner,
+  ).length;
+  const partnerPresets = activeAssignments.map((assignment) => {
+    const existingPreset = existingByPartner.get(assignment.partnerId);
+    if (existingPreset?.locked) {
+      return existingPreset;
+    }
+    const price = priceByPartner.get(assignment.partnerId);
+    if (price) {
       return {
-        assignmentId: assignmentByPartner.get(price.partnerId)!.id,
+        assignmentId: assignment.id,
         partnerId: price.partnerId,
         partnerName: price.partnerName,
         plannedAuditFeeWon: price.plannedAuditFeeWon,
@@ -519,7 +529,19 @@ export async function seedQuoteAutomationFromMaster(input: {
         isPlannedWinner: price.isPlannedWinner,
         locked: price.locked,
       };
+    }
+    const fields = nonSelectedMasterPriceFields({
+      plannedWinnerFeeWon: winnerPrice?.plannedAuditFeeWon ?? "1",
+      index: nextSyntheticIndex,
     });
+    nextSyntheticIndex += 1;
+    return {
+      assignmentId: assignment.id,
+      partnerId: assignment.partnerId,
+      partnerName: assignment.partnerName,
+      ...fields,
+    };
+  });
   if (partnerPresets.length === 0) {
     return { ok: true as const, seeded: false, reason: "no_assigned_partner_price" };
   }

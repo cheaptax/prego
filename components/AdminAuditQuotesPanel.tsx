@@ -56,6 +56,7 @@ type ProxySendResult = {
   sent?: string[];
   sentVersions?: number[];
   skipped?: ProxySendSkipped[];
+  masterPartnerCount?: number;
   errors?: Array<{
     partnerId: string;
     partnerName?: string;
@@ -540,14 +541,18 @@ export function AdminAuditQuotesPanel({
         (sum, item) => sum + (item.errors?.length ?? 0) + (item.error ? 1 : 0),
         0,
       );
+      const targetCount = results.reduce(
+        (sum, item) => sum + (item.masterPartnerCount ?? 0),
+        0,
+      );
       onMessage({
         tone:
           errorCount > 0 || (!dryRun && sentCount === 0)
             ? "error"
             : "success",
         text: dryRun
-          ? `대행 발송 사전검사 완료: 발송 가능 ${sentCount}건 · 보완필요 ${skippedCount}건 · 오류 ${errorCount}건`
-          : `대행 발송 완료: 메일 발송 ${sentCount}건 · 보완필요 ${skippedCount}건 · 오류 ${errorCount}건`,
+          ? `대행 발송 사전검사 완료: 활성 제휴사 ${targetCount}곳 · 발송 가능 ${sentCount}건 · 보완필요 ${skippedCount}건 · 오류 ${errorCount}건`
+          : `대행 발송 완료: 활성 제휴사 ${targetCount}곳 · 메일 발송 ${sentCount}건 · 보완필요 ${skippedCount}건 · 오류 ${errorCount}건`,
       });
       if (!dryRun) {
         setListVersion((value) => value + 1);
@@ -637,6 +642,12 @@ export function AdminAuditQuotesPanel({
             </p>
           </div>
           <div className="admin-topbar__actions">
+            <a
+              className="admin-btn"
+              href="/admin/operations/quote-screens"
+            >
+              법인별 견적서 템플릿
+            </a>
             <label className="admin-field">
               <span>{section.text("statusFilter")}</span>
               <select
@@ -1028,6 +1039,12 @@ export function AdminAuditQuotesPanel({
                           <span>
                             {section.text("emailDeliveryRecipientLabel")}:{" "}
                             {delivery.recipientEmail}
+                          </span>
+                        ) : null}
+                        {delivery.ccEmails?.length ? (
+                          <span>
+                            {section.text("emailDeliveryCcLabel")}:{" "}
+                            {delivery.ccEmails.join(", ")}
                           </span>
                         ) : null}
                         {delivery.lastError ? (

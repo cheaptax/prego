@@ -46,6 +46,12 @@ export const GENERATED_APP_PAGES = [
     "sourcePath": "app/admin/operations/page.tsx"
   },
   {
+    "route": "/admin/operations/quote-screens",
+    "audience": "admin",
+    "dynamic": false,
+    "sourcePath": "app/admin/operations/quote-screens/page.tsx"
+  },
+  {
     "route": "/admin/pages/[pageKey]",
     "audience": "admin",
     "dynamic": true,

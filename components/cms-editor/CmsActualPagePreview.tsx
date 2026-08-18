@@ -255,7 +255,7 @@ function PartnerQuoteDocumentPreview({
               </div>
               <div>
                 <dt>{text.validUntilLabel}</dt>
-                <dd>발행일로부터 30일</dd>
+                <dd>발행일로부터 감사계약 체결시까지</dd>
               </div>
             </dl>
           </div>
@@ -278,9 +278,6 @@ function PartnerQuoteDocumentPreview({
             <p>{text.supplierContactLabel}: 김담당</p>
             <p>{text.contactLabel}: 02-1234-5678 / quote@example.com</p>
             <p>{text.engagementPartnerLabel}: 홍길동</p>
-            <p>
-              {text.cpaCountLabel}: 12{text.peopleSuffix}
-            </p>
           </section>
           <p>{text.quoteIntro}</p>
           <p>
@@ -298,12 +295,18 @@ function PartnerQuoteDocumentPreview({
           </section>
           <section>
             <h2>{text.evaluationFactsTitle}</h2>
-            <p>{text.evaluationFactsHelp}</p>
+            <p>
+              {text.evaluationFactsHelp}
+              {/\(\*\)/u.test(text.evaluationFactsHelp) ? "" : " (*)"}
+            </p>
             <p>
               {text.revenueLabel}: 1,000,000,000{text.currencySuffix}
             </p>
             <p>
               {text.localAuditCountLabel}: 8{text.countSuffix}
+            </p>
+            <p>
+              {text.cpaCountLabel}: 12{text.peopleSuffix}
             </p>
             <p>
               {text.auditedTypesLabel}: {text.cooperativeTypeLocalAgri}
@@ -314,6 +317,9 @@ function PartnerQuoteDocumentPreview({
             <p>
               {text.subsidyExperienceLabel}: {text.noLabel}
             </p>
+            <small>{text.evaluationFactsFootnoteAssociation}</small>
+            <br />
+            <small>{text.evaluationFactsFootnoteAssociationDef}</small>
           </section>
           <footer>
             {text.footerStatement}

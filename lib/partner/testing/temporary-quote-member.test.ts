@@ -217,6 +217,61 @@ describe("temporary quote membership", () => {
     assert.equal(updatedPassword, "nh56785678");
   });
 
+  it("links quote requests to existing admin test accounts without changing the profile", async () => {
+    const db = new MemoryDb();
+    db.values.set("users/admin-user", {
+      ...temporaryProfile("admin-user"),
+      email: "prego.ceo@gmail.com",
+      role: "admin",
+      status: "active",
+      adminRole: "super_admin",
+      multiRoleTestAccount: true,
+      enabledPortals: ["admin", "customer"],
+      temporaryMember: undefined,
+    } satisfies UserRecord);
+    const auth = {
+      async getUserByEmail() {
+        return { uid: "admin-user" };
+      },
+      async updateUser() {
+        throw new Error("must_not_reset_password");
+      },
+    } as unknown as Auth;
+
+    const result = await provisionTemporaryQuoteMember({
+      db: db as unknown as Firestore,
+      auth,
+      requestId: "request-admin",
+      quoteRequestId: "audit_quote_request-admin",
+      email: "prego.ceo@gmail.com",
+      contactName: "운영 테스트",
+      phone: "010-6387-7780",
+      marketingConsent: false,
+      now: "2026-08-19T00:00:00.000Z",
+    });
+
+    assert.equal(result.uid, "admin-user");
+    assert.equal(result.initialPasswordIssued, false);
+    assert.equal(result.initialPassword, null);
+    assert.equal((db.values.get("users/admin-user") as UserRecord).role, "admin");
+    assert.equal(
+      (
+        db.values.get("auditQuoteRequests/request-admin") as {
+          customerUid: string;
+        }
+      ).customerUid,
+      "admin-user",
+    );
+    assert.equal(
+      (
+        db.values.get("quoteRequests/audit_quote_request-admin") as {
+          customerUid: string;
+        }
+      ).customerUid,
+      "admin-user",
+    );
+  });
+
   it("does not reset passwords for full members", async () => {
     const db = new MemoryDb();
     db.values.set("users/full-user", {

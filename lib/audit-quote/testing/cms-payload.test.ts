@@ -132,6 +132,8 @@ describe("audit-quote CMS payload boundary", () => {
     assert.match(pageSource, /targetCooperativeId/);
     assert.match(pageSource, /company-website/);
     assert.match(pageSource, /buildAuditQuoteRequestPayload/);
+    assert.match(pageSource, /getForAttempt\(/);
+    assert.match(pageSource, /emailResult\.email/);
     assert.match(routeSource, /contactName:\s*body\.name/);
     assert.match(routeSource, /targetCooperativeId:\s*body\.targetCooperativeId/);
     assert.match(routeSource, /companyWebsite:\s*body\.companyWebsite/);

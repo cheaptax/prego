@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { calculateNhAuditExpectedCostV2 } from "@/lib/audit-evaluation/nh-audit-v2-engine";
 import { loadPublishedCmsPage } from "@/lib/cms/public-content";
-import { getTransactionalEmailConfigurationError, sendTransactionalEmail } from "@/lib/email/resend";
+import { getTransactionalEmailConfigurationError } from "@/lib/email/resend";
 import { withoutUndefined } from "@/lib/firebase/clean";
 import { adminDb } from "@/lib/firebase/admin";
 import type {
@@ -13,8 +13,10 @@ import type {
   QuoteRequestRecord,
 } from "@/lib/firebase/schema";
 import { buildCustomerQuoteEmail } from "@/lib/quotes/customer-quote-email";
+import { withStandardQuoteConditions } from "@/lib/quotes/quote-presentation";
+import { sendCustomerQuoteTransactionalEmail } from "@/lib/quotes/partner-quote-cc";
 import { createNhAuditEvaluationSnapshotV2 } from "@/lib/quotes/nh-audit-quote-server";
-import { quoteDocumentContentFromCms } from "@/lib/quotes/quote-document-content";
+import { getPublishedQuoteDocumentContentForPartner } from "@/lib/quotes/quote-screen-profile";
 import { quotePdfFileNameFromRecords } from "@/lib/quotes/quote-pdf-filename";
 import { renderQuotePdf } from "@/lib/quotes/quote-pdf";
 import {
@@ -155,7 +157,10 @@ async function rewriteOneQuote(input: {
     quoteRequest,
   );
   const rewritten: QuoteRecord = withoutUndefined({
-    ...input.adjusted,
+    ...withStandardQuoteConditions({
+      ...input.adjusted,
+      notes: appendSafePriceRewriteNote(input.adjusted.notes),
+    }),
     id: quoteId,
     quoteRequestId: quoteRequest.id || input.adjusted.quoteRequestId,
     version: nextVersion,
@@ -166,15 +171,19 @@ async function rewriteOneQuote(input: {
     taxAmount: Number(cost.vatWon),
     totalAmount: Number(cost.expectedTotalBurdenWon),
     nhAuditV2: snapshot,
-    notes: appendSafePriceRewriteNote(input.adjusted.notes),
     supersedesQuoteId: input.adjusted.id,
     deliveredAt: undefined,
     finalizedAt: input.now,
     createdAt: input.now,
     updatedAt: input.now,
   } satisfies QuoteRecord);
-  const quoteDocumentContent = quoteDocumentContentFromCms(
-    (await loadPublishedCmsPage("partner.portal")).content,
+  const quoteDocumentContent = await getPublishedQuoteDocumentContentForPartner(
+    {
+      db,
+      partnerId: partner.id || input.adjusted.partnerId,
+      cmsContent: (await loadPublishedCmsPage("partner.portal")).content,
+      partner,
+    },
   );
   const [logoDataUri, sealDataUri] = await Promise.all([
     readStorageFileAsDataUri(partner.logoPath),
@@ -308,7 +317,9 @@ async function sendRewriteEmail(input: {
       quote: input.quote,
       copy: input.copy,
     });
-    const sent = await sendTransactionalEmail({
+    const sent = await sendCustomerQuoteTransactionalEmail({
+      db: input.db,
+      quote: input.quote,
       to: input.recipientEmail,
       ...emailContent,
       attachments: [{ filename: input.pdfFileName, content: input.pdfBuffer }],
@@ -326,6 +337,7 @@ async function sendRewriteEmail(input: {
           provider: sent.provider,
           providerMessageId: sent.id,
           recipientEmail: sent.recipientEmail,
+          ccEmails: sent.ccEmails,
           attemptCount: 1,
           sentAt: now,
           updatedAt: now,

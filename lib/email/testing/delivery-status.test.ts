@@ -34,6 +34,7 @@ describe("customer email delivery status", () => {
     assert.equal(requestView.statusLabel, "수신 확인");
     assert.equal(requestView.accountEmail, "cheaptax+pwtest1@naver.com");
     assert.equal(requestView.recipientEmail, "cheaptax@naver.com");
+    assert.deepEqual(requestView.ccEmails, []);
 
     const quoteView = toCustomerEmailDeliveryView({
       id: "q1_customer",
@@ -41,6 +42,7 @@ describe("customer email delivery status", () => {
       quoteRequestId: "audit_quote_r1",
       purpose: "quote",
       recipientEmail: "prego.ceo+pwtest1@gmail.com",
+      ccEmails: ["partner@example.com"],
       status: "sent",
       provider: "resend",
       attemptCount: 1,
@@ -49,5 +51,6 @@ describe("customer email delivery status", () => {
     } satisfies QuoteEmailDeliveryRecord);
     assert.equal(quoteView.purposeLabel, "견적서 발송 안내");
     assert.equal(quoteView.statusLabel, "발송됨");
+    assert.deepEqual(quoteView.ccEmails, ["partner@example.com"]);
   });
 });

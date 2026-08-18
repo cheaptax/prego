@@ -24,8 +24,16 @@ export type CustomerRequestEmailInput = {
   attemptKey?: string;
 };
 
-function requestEmailDeliveryId(requestId: string) {
+export function requestEmailDeliveryId(requestId: string) {
   return `aqreq_${requestId}`;
+}
+
+export async function hasSuccessfulCustomerRequestEmail(requestId: string) {
+  const snapshot = await adminDb()
+    .collection("quoteEmailDeliveries")
+    .doc(requestEmailDeliveryId(requestId))
+    .get();
+  return snapshot.exists && snapshot.data()?.status === "sent";
 }
 
 async function persistRequestEmailDelivery(

@@ -21,6 +21,13 @@
       "reason": "최고관리자 전용 시스템 작업 화면이며 admin.operations 게시 콘텐츠의 잠긴 테스트 데이터 관리 영역을 재사용하므로 별도 공개 화면으로 중복 등록하지 않습니다.",
       "owner": "시스템 운영",
       "reviewBy": "2027-01-31"
+    },
+    {
+      "route": "/admin/operations/quote-screens",
+      "kind": "framework",
+      "reason": "운영자 전용 견적서 템플릿 관리 도구 route이며 고객 공개 콘텐츠 화면이 아니므로 CMS 사용자 화면으로 중복 등록하지 않습니다.",
+      "owner": "견적 운영",
+      "reviewBy": "2027-01-31"
     }
   ]
 }

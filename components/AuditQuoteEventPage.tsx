@@ -716,7 +716,9 @@ export function AuditQuoteEventPage({
       return;
     }
 
-    const key = idempotency.current.getForAttempt();
+    const key = idempotency.current.getForAttempt(
+      `${emailResult.email}|${resolvedCooperative.cooperative_id}|${fiscalYearResult.fiscalYear}`,
+    );
     setStatus("submitting");
     trackAuditQuoteEvent("audit_quote_submit_attempt", {
       campaign: config.campaign,

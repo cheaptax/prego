@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { QuoteRecord } from "@/lib/firebase/schema";
 import { quoteDocumentForPersistence } from "@/lib/quotes/quote-persistence";
+import {
+  STANDARD_QUOTE_SERVICE_PERIOD,
+  STANDARD_QUOTE_TERMS,
+  STANDARD_QUOTE_VALID_UNTIL,
+} from "@/lib/quotes/quote-presentation";
 
 function quote(overrides: Partial<QuoteRecord> = {}): QuoteRecord {
   const now = "2026-08-13T00:00:00.000Z";
@@ -56,6 +61,9 @@ test("first quote persist payload omits undefined supersedesQuoteId", () => {
   assert.equal("supersedesQuoteId" in persisted, false);
   assert.equal("logoPath" in persisted, false);
   assert.equal(persisted.pdfPath, "quotes/assignment-1_v1/v1/quote.pdf");
+  assert.equal(persisted.servicePeriod, STANDARD_QUOTE_SERVICE_PERIOD);
+  assert.equal(persisted.validUntil, STANDARD_QUOTE_VALID_UNTIL);
+  assert.equal(persisted.terms, STANDARD_QUOTE_TERMS);
   assert.equal(hasUndefined(persisted), false);
 });
 

@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { getAuditQuoteConfig } from "@/lib/audit-quote/config";
 import { guardAuditQuoteRequest } from "@/lib/audit-quote/http";
 import { notifyAuditQuoteReceived } from "@/lib/audit-quote/notify";
-import { notifyCustomerAuditQuoteRequestReceived } from "@/lib/audit-quote/customer-request-email";
+import {
+  hasSuccessfulCustomerRequestEmail,
+  notifyCustomerAuditQuoteRequestReceived,
+} from "@/lib/audit-quote/customer-request-email";
 import { notifyOpsAuditQuoteRequestReceived } from "@/lib/audit-quote/ops-alert";
 import { submitAuditQuoteRequest } from "@/lib/audit-quote/submit";
 import {
@@ -141,61 +144,74 @@ export async function POST(req: Request) {
     }
 
     if (result.kind === "success") {
-      const db = adminDb();
-      const quoteSourceSnapshot = await db
-        .collection("auditQuoteRequests")
-        .doc(result.requestId)
-        .get();
-      if (quoteSourceSnapshot.exists) {
-        const source =
-          quoteSourceSnapshot.data() as AuditQuoteRequestRecord;
-        const quoteRequest = await ensureQuoteRequest(db, {
-          sourceType: "audit_quote",
-          source,
-        });
-        const temporaryMember = await provisionTemporaryQuoteMember({
-          db,
-          auth: adminAuth(),
+      try {
+        const db = adminDb();
+        const quoteSourceSnapshot = await db
+          .collection("auditQuoteRequests")
+          .doc(result.requestId)
+          .get();
+        if (quoteSourceSnapshot.exists) {
+          const source =
+            quoteSourceSnapshot.data() as AuditQuoteRequestRecord;
+          const quoteRequest = await ensureQuoteRequest(db, {
+            sourceType: "audit_quote",
+            source,
+          });
+          const temporaryMember = await provisionTemporaryQuoteMember({
+            db,
+            auth: adminAuth(),
+            requestId: result.requestId,
+            quoteRequestId:
+              quoteRequest.id ||
+              quoteRequestIdFor("audit_quote", result.requestId),
+            email: source.email,
+            contactName: source.contactName ?? "",
+            phone: source.phone ?? "",
+            marketingConsent: source.marketingConsent === true,
+          });
+          temporaryMemberInitialPassword = temporaryMember.initialPassword;
+        }
+      } catch (error) {
+        console.error("[audit-quote] followup_failed", {
           requestId: result.requestId,
-          quoteRequestId:
-            quoteRequest.id ||
-            quoteRequestIdFor("audit_quote", result.requestId),
-          email: source.email,
-          contactName: source.contactName ?? "",
-          phone: source.phone ?? "",
-          marketingConsent: source.marketingConsent === true,
+          error: error instanceof Error ? error.message : "followup_failed",
         });
-        temporaryMemberInitialPassword = temporaryMember.initialPassword;
       }
-    }
-    if (result.kind === "success" && result.created) {
-      // Await delivery so Vercel does not freeze the isolate before Resend
-      // completes. Failures are logged and never fail customer intake.
-      await Promise.allSettled([
-        notifyAuditQuoteReceived(adminDb(), {
-          requestId: result.requestId,
-          publicReference: result.publicReference,
-          email: result.email,
-          campaign:
-            body.source?.campaign?.trim() ||
-            config.allowedCampaigns[0] ||
-            "fy27-audit-quote",
-        }),
-        notifyCustomerAuditQuoteRequestReceived({
-          requestId: result.requestId,
-          publicReference: result.publicReference,
-          email: result.email,
-          contactName: body.name,
-          targetCooperativeName: body.targetCooperativeName,
-          fiscalYear: body.fiscalYear,
-          phone: body.phone,
-          initialPassword: temporaryMemberInitialPassword,
-        }),
-        notifyOpsAuditQuoteRequestReceived({
-          requestId: result.requestId,
-          publicReference: result.publicReference,
-        }),
-      ]);
+
+      const shouldNotify =
+        result.created ||
+        !(await hasSuccessfulCustomerRequestEmail(result.requestId).catch(
+          () => false,
+        ));
+      if (shouldNotify) {
+        // Await delivery so Vercel does not freeze the isolate before Resend
+        // completes. Failures are logged and never fail customer intake.
+        await Promise.allSettled([
+          notifyAuditQuoteReceived(adminDb(), {
+            requestId: result.requestId,
+            publicReference: result.publicReference,
+            email: result.email,
+            campaign:
+              body.source?.campaign?.trim() ||
+              config.allowedCampaigns[0] ||
+              "fy27-audit-quote",
+          }),
+          notifyCustomerAuditQuoteRequestReceived({
+            requestId: result.requestId,
+            publicReference: result.publicReference,
+            email: result.email,
+            contactName: body.name,
+            targetCooperativeName: body.targetCooperativeName,
+            fiscalYear: body.fiscalYear,
+            phone: body.phone,
+            initialPassword: temporaryMemberInitialPassword,
+          }),
+          notifyOpsAuditQuoteRequestReceived({
+            requestId: result.requestId,
+            publicReference: result.publicReference,
+          }),
+        ]);
+      }
     }
 
     return jsonSuccess(result.publicReference);

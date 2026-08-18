@@ -174,9 +174,7 @@ export function CooperativeQuotePriceMasterPanel({
 
   const nonSelectedPrices = useMemo(() => {
     if (!currentRow) return [];
-    return currentRow.prices
-      .filter((price) => !price.isPlannedWinner)
-      .slice(0, 2);
+    return currentRow.prices.filter((price) => !price.isPlannedWinner);
   }, [currentRow]);
 
   const save = async () => {
@@ -202,7 +200,7 @@ export function CooperativeQuotePriceMasterPanel({
         tone: "success",
         text: keepExistingNonSelected
           ? "견적 마스터를 저장했습니다. (기존 비선정 유지)"
-          : "견적 마스터를 저장했습니다. (비선정 제휴사 랜덤 배정)",
+          : "견적 마스터를 저장했습니다. (활성 제휴사 전원 가격 재계산)",
       });
       await load();
     } catch {
@@ -293,8 +291,8 @@ export function CooperativeQuotePriceMasterPanel({
             <h2>농협 견적 마스터</h2>
             <p>
               엑셀 기본 형식은 농협정보_마스터(시트9)와 같습니다. 운영자는{" "}
-              <strong>제휴사_선정</strong>만 지정하고, 비선정 제휴사는 나머지에서
-              자동 랜덤 배정됩니다.
+              <strong>제휴사_선정</strong>만 지정하면, 나머지 활성 제휴사 전부가
+              비선정으로 저장됩니다 (110%, 115%, 120%…).
             </p>
           </div>
           <button type="button" className="admin-btn" onClick={downloadExcel}>
@@ -353,7 +351,6 @@ export function CooperativeQuotePriceMasterPanel({
                   row.prices.find((price) => price.isPlannedWinner) ?? null;
                 const nonSelected = row.prices
                   .filter((price) => !price.isPlannedWinner)
-                  .slice(0, 2)
                   .map((price) => price.partnerName)
                   .join(", ");
                 return (
@@ -398,8 +395,8 @@ export function CooperativeQuotePriceMasterPanel({
           <div>
             <h3>{selectedCooperative?.cooperativeName ?? "농협 선택 필요"}</h3>
             <p>
-              예정견적·최저안전견적·선정 제휴사만 입력합니다. 비선정은 저장 시
-              자동 배정됩니다.
+              예정견적·최저안전견적·선정 제휴사만 입력합니다. 비선정은 현재 활성
+              제휴사 전부에 자동 배정됩니다.
             </p>
           </div>
         </header>
@@ -463,14 +460,14 @@ export function CooperativeQuotePriceMasterPanel({
               }
               disabled={!canWrite}
             />{" "}
-            기존 비선정 제휴사 유지 (해제 시 저장할 때 다시 랜덤 배정)
+            기존 비선정 가격 유지 (해제 시 활성 제휴사 전원 가격을 다시 계산)
           </span>
         </label>
         <div className="admin-note">
           <p>
-            제휴사_비선정1/2 (자동, 읽기 전용)
+            비선정 제휴사 (자동, 현재 활성 제휴사 전부)
             {nonSelectedPrices.length === 0
-              ? " — 저장 시 나머지 제휴사 중 2곳이 랜덤 배정됩니다."
+              ? " — 저장 시 선정 제휴사를 제외한 활성 제휴사 전원이 배정됩니다."
               : null}
           </p>
           {nonSelectedPrices.length > 0 ? (
@@ -507,7 +504,7 @@ export function CooperativeQuotePriceMasterPanel({
             <p>
               다운로드 파일의 <strong>시트9</strong>에서{" "}
               <strong>제휴사_선정</strong>만 드롭다운으로 고르세요. 금액이 아니라
-              제휴사명입니다. 비선정 칸은 비워 두면 반영 시 자동 배정됩니다.
+              제휴사명입니다. 비선정 칸은 비워 두어도 활성 제휴사 전원이 반영됩니다.
             </p>
           </div>
         </header>

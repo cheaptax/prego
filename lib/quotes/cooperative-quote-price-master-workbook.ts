@@ -92,7 +92,7 @@ export async function buildQuotePriceMasterWorkbook(input: {
     "1) 시트9에서 예정견적·최저안전견적을 확인하고, 제휴사_선정만 제휴사목록에서 고르세요.",
   ]);
   guide.addRow([
-    "2) 제휴사_비선정1·2는 비워 두면 업로드 반영 시 나머지 제휴사 중 자동 랜덤 배정됩니다.",
+    "2) 제휴사_비선정1·2는 선택입니다. 비워 두면 업로드 반영 시 현재 활성 제휴사 전부에 110%/115%/120%… 가격이 자동 배정됩니다.",
   ]);
   guide.addRow([
     "3) 제휴사_* 칸에는 금액이 아니라 제휴사 이름을 넣어야 합니다.",
@@ -203,9 +203,9 @@ export async function buildQuotePriceMasterWorkbook(input: {
   sheet.getCell("F1").note =
     "제휴사목록 시트 이름을 입력하거나 아래 드롭다운에서 선택하세요. 금액 금지.";
   sheet.getCell("G1").note =
-    "비워 두면 업로드 반영 시 자동 랜덤 배정됩니다.";
+    "선택. 비워 두면 업로드 시 현재 활성 제휴사 전부에 자동 배정됩니다.";
   sheet.getCell("H1").note =
-    "비워 두면 업로드 반영 시 자동 랜덤 배정됩니다.";
+    "선택. 비워 두면 업로드 시 현재 활성 제휴사 전부에 자동 배정됩니다.";
 
   if (partners.length > 0 && cooperatives.length > 0) {
     const lastDataRow = cooperatives.length + 1;

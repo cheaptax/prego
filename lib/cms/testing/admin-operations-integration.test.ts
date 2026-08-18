@@ -105,6 +105,37 @@ describe("admin operations CMS safety contract", () => {
     );
   });
 
+  it("links audit quote operations to partner-specific quote templates", () => {
+    const auditQuotes = readFileSync(
+      path.join(root, "components/AdminAuditQuotesPanel.tsx"),
+      "utf8",
+    );
+    const partnerManagement = readFileSync(
+      path.join(root, "components/admin/PartnerManagementPanel.tsx"),
+      "utf8",
+    );
+    assert.match(auditQuotes, /\/admin\/operations\/quote-screens/u);
+    assert.match(partnerManagement, /\/admin\/operations\/quote-screens/u);
+  });
+
+  it("waits for admin auth before loading quote screen templates", () => {
+    const workspace = readFileSync(
+      path.join(root, "components/admin/QuoteScreenTemplateWorkspace.tsx"),
+      "utf8",
+    );
+    assert.match(workspace, /onAuthStateChanged/);
+    assert.match(workspace, /copy\.message\("authRequired"\)/);
+    assert.match(workspace, /copy\.message\("denied"\)/);
+    assert.match(workspace, /admin-state__card/);
+    assert.doesNotMatch(
+      workspace,
+      /setMessage\(error instanceof Error \? error\.message/,
+    );
+    assert.match(workspace, /quote-screens\/\$\{selectedPartnerId\}\/preview/);
+    assert.match(workspace, /templateReady/);
+    assert.match(workspace, /샘플 견적서 PDF를 만들고 있습니다/);
+  });
+
   it("rejects publishing when a protected admin option is hidden", () => {
     const content = structuredClone(CMS_PAGE_DEFAULTS["admin.operations"]);
     const inquiries = content.sections.find(

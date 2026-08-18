@@ -45,6 +45,10 @@ const ROUTE_PRESENTATION: Record<
     title: "테스트 데이터 관리",
     description: "테스트 고객·문의 지표와 안전한 데이터 초기화를 관리합니다.",
   },
+  "/admin/operations/quote-screens": {
+    title: "법인별 견적서 템플릿",
+    description: "회계법인별 고객 발송 견적서 양식과 미리보기를 관리합니다.",
+  },
 };
 
 const registryByRoute = new Map(

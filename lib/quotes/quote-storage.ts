@@ -1,4 +1,5 @@
 import { adminStorage } from "@/lib/firebase/admin";
+import { sniffRasterImageMime } from "@/lib/quotes/quote-pdf-assets";
 import { buildAttachmentContentDisposition } from "@/lib/quotes/quote-pdf-filename";
 
 export async function saveQuotePdf(input: {
@@ -45,12 +46,23 @@ export async function readStorageFileAsDataUri(
 ) {
   if (!storagePath) return undefined;
   const file = adminStorage().bucket().file(storagePath);
-  const [exists] = await file.exists();
-  if (!exists) return undefined;
-  const [metadata] = await file.getMetadata();
-  const [buffer] = await file.download();
-  const contentType = metadata.contentType || "image/png";
-  return `data:${contentType};base64,${buffer.toString("base64")}`;
+  try {
+    const [metadataResult, downloadResult] = await Promise.allSettled([
+      file.getMetadata(),
+      file.download(),
+    ]);
+    if (downloadResult.status !== "fulfilled") return undefined;
+    const [buffer] = downloadResult.value;
+    const sniffed = sniffRasterImageMime(buffer);
+    const declared =
+      metadataResult.status === "fulfilled"
+        ? metadataResult.value[0].contentType
+        : undefined;
+    const contentType = sniffed || declared || "image/png";
+    return `data:${contentType};base64,${buffer.toString("base64")}`;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function createQuoteDownloadUrl(input: {

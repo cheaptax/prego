@@ -89,6 +89,17 @@ describe("audit-quote client form helpers", () => {
     assert.notEqual(first, third);
   });
 
+  it("rotates the idempotency key when the request fingerprint changes", () => {
+    const session = new IdempotencyKeySession();
+    const first = session.getForAttempt("prego.ceo@gmail.com|demo-prigo-nh|2027");
+    const same = session.getForAttempt("prego.ceo@gmail.com|demo-prigo-nh|2027");
+    const changedEmail = session.getForAttempt(
+      "cheaptax+pwtest1@naver.com|demo-prigo-nh|2027",
+    );
+    assert.equal(first, same);
+    assert.notEqual(first, changedEmail);
+  });
+
   it("hides points benefit unless label and flag are both set", () => {
     const hidden = getPublicAuditQuoteConfig({
       AUDIT_QUOTE_SHOW_POINTS_BENEFIT: "true",

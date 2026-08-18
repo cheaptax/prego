@@ -10,9 +10,8 @@ import { isPartnerActive } from "@/lib/partners";
 import { isPartnerEligibleForAuditQuote } from "@/lib/quotes/audit-quote-assignment";
 import type { WonAmount } from "@/lib/audit-evaluation/types";
 import {
-  NON_SELECTED_FEE_BPS,
-  nonSelectedFeeFromPlanned,
-  pickRandomPartners,
+  nonSelectedMasterPriceFields,
+  orderNonSelectedPartners,
   safeMinFromPlanned,
 } from "@/lib/quotes/cooperative-quote-price-master-pricing";
 import {
@@ -150,25 +149,18 @@ export async function PUT(request: Request) {
         )
       : [];
 
-  const remaining = partners.filter(
-    (partner) =>
-      partner.id !== selected.id &&
-      !existingNonSelected.some((price) => price.partnerId === partner.id),
-  );
-  const randomFill = pickRandomPartners(
-    remaining,
-    Math.max(0, 2 - existingNonSelected.length),
-  );
-  const nonSelected = [
-    ...existingNonSelected.map((price) => ({
-      id: price.partnerId,
-      name: price.partnerName,
-    })),
-    ...randomFill.map((partner) => ({
+  const remaining = partners
+    .filter((partner) => partner.id !== selected.id)
+    .map((partner) => ({
       id: partner.id,
       name: partner.displayName || partner.name,
-    })),
-  ].slice(0, 2);
+    }));
+  const nonSelected = orderNonSelectedPartners(
+    remaining,
+    body?.keepExistingNonSelected === true
+      ? existingNonSelected.map((price) => price.partnerId)
+      : [],
+  );
 
   const plannedWon = planned as WonAmount;
   const safeMin = (String(body?.safePriceMinWon ?? "").replace(/\D/gu, "") ||
@@ -198,22 +190,29 @@ export async function PUT(request: Request) {
           locked: false,
         },
         ...nonSelected.map((partner, index) => {
-          const fee = nonSelectedFeeFromPlanned(
-            plannedWon,
-            NON_SELECTED_FEE_BPS[index] ?? 11_000n,
-          );
+          const kept =
+            body?.keepExistingNonSelected === true
+              ? existingNonSelected.find((price) => price.partnerId === partner.id)
+              : null;
           return {
             cooperativeId,
             cooperativeName,
             partnerId: partner.id,
             partnerName: partner.name,
-            plannedAuditFeeWon: fee,
-            expenseBillingMode: "INCLUDED_IN_AUDIT_FEE",
-            expectedExpenseWon: "0",
-            safePriceMinWon: safeMinFromPlanned(fee),
-            safePriceMaxWon: fee,
-            isPlannedWinner: false,
-            locked: false,
+            ...(kept
+              ? {
+                  plannedAuditFeeWon: kept.plannedAuditFeeWon,
+                  expenseBillingMode: kept.expenseBillingMode,
+                  expectedExpenseWon: kept.expectedExpenseWon,
+                  safePriceMinWon: kept.safePriceMinWon,
+                  safePriceMaxWon: kept.safePriceMaxWon,
+                  isPlannedWinner: false,
+                  locked: kept.locked,
+                }
+              : nonSelectedMasterPriceFields({
+                  plannedWinnerFeeWon: plannedWon,
+                  index,
+                })),
           };
         }),
       ],

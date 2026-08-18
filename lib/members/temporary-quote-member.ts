@@ -131,13 +131,13 @@ export async function provisionTemporaryQuoteMember(input: {
 
     if (
       existing &&
-      (existing.uid !== user.uid ||
-        normalizedEmail(existing.email) !== email ||
-        existing.role !== "member")
+      (existing.uid !== user.uid || normalizedEmail(existing.email) !== email)
     ) {
       throw new Error("temporary_member_account_conflict");
     }
 
+    // Existing admin/partner/full-member profiles stay untouched. Multi-role
+    // test accounts (role=admin) still get the quote request linked.
     if (!existing) {
       transaction.set(userRef, {
         uid: user.uid,

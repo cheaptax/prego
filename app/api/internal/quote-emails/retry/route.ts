@@ -4,11 +4,9 @@ import type {
   QuoteEmailDeliveryRecord,
   QuoteRecord,
 } from "@/lib/firebase/schema";
-import {
-  getTransactionalEmailConfigurationError,
-  sendTransactionalEmail,
-} from "@/lib/email/resend";
+import { getTransactionalEmailConfigurationError } from "@/lib/email/resend";
 import { buildCustomerQuoteEmail } from "@/lib/quotes/customer-quote-email";
+import { sendCustomerQuoteTransactionalEmail } from "@/lib/quotes/partner-quote-cc";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -92,7 +90,9 @@ export async function GET(request: Request) {
     try {
       const [pdfBuffer] = await adminStorage().bucket().file(quote.pdfPath).download();
       const emailContent = await buildCustomerQuoteEmail({ db, quote });
-      const result = await sendTransactionalEmail({
+      const result = await sendCustomerQuoteTransactionalEmail({
+        db,
+        quote,
         to: delivery.recipientEmail,
         ...emailContent,
         attachments: [
@@ -110,6 +110,7 @@ export async function GET(request: Request) {
           provider: result.provider,
           providerMessageId: result.id,
           recipientEmail: result.recipientEmail,
+          ccEmails: result.ccEmails,
           sentAt,
           updatedAt: sentAt,
         } satisfies Partial<QuoteEmailDeliveryRecord>,

@@ -142,7 +142,7 @@ export function validateNhAuditPartnerForm(
   const certifiedPublicAccountantCount = requiredNonNegativeInteger(
     values.certifiedPublicAccountantCount,
     "certifiedPublicAccountantCount",
-    "소속 공인회계사 수",
+    "공인회계사 인원 수",
     fieldErrors,
     missingLabels,
   );

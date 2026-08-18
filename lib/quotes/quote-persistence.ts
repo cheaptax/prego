@@ -1,5 +1,6 @@
 import { withoutUndefined } from "@/lib/firebase/clean";
 import type { QuoteRecord } from "@/lib/firebase/schema";
+import { withStandardQuoteConditions } from "@/lib/quotes/quote-presentation";
 
 /** Firestore rejects explicit `undefined` fields. First sends have no prior quote. */
 export function quoteDocumentForPersistence(input: {
@@ -10,7 +11,7 @@ export function quoteDocumentForPersistence(input: {
   updatedAt: string;
 }): QuoteRecord {
   return withoutUndefined({
-    ...input.quote,
+    ...withStandardQuoteConditions(input.quote),
     pdfPath: input.pdfPath,
     pdfFileName: input.pdfFileName,
     supersedesQuoteId: input.supersededQuoteId,

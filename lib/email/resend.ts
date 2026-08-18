@@ -3,6 +3,7 @@ import { resolveTransactionalRecipient } from "@/lib/test-data/email-classificat
 
 type SendEmailInput = {
   to: string;
+  cc?: string | readonly string[];
   subject: string;
   html: string;
   text: string;
@@ -178,14 +179,44 @@ export function getCustomerFacingAppBaseUrl(
   return getAppBaseUrl();
 }
 
+const SIMPLE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function normalizeTransactionalEmailList(
+  values?: string | readonly string[] | null,
+) {
+  const items = Array.isArray(values) ? values : values ? [values] : [];
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of items) {
+    const email = String(raw ?? "").trim().toLowerCase();
+    if (!SIMPLE_EMAIL.test(email)) continue;
+    const recipient = resolveTransactionalRecipient(email);
+    if (seen.has(recipient)) continue;
+    seen.add(recipient);
+    unique.push(recipient);
+  }
+  return unique;
+}
+
+export function uniqueCcRecipients(
+  to: string,
+  cc?: string | readonly string[] | null,
+) {
+  const toRecipient = normalizeTransactionalEmailList(to)[0] ?? "";
+  return normalizeTransactionalEmailList(cc).filter(
+    (email) => email !== toRecipient,
+  );
+}
+
 export async function sendTransactionalEmail(input: SendEmailInput) {
   if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.to) ||
+    !SIMPLE_EMAIL.test(input.to) ||
     /[\r\n]/.test(input.subject) ||
     !input.idempotencyKey.trim()
   ) {
     throw new Error("invalid_email_payload");
   }
+  const ccEmails = uniqueCcRecipients(input.to, input.cc);
   const client = getResendClient();
   if (!client) {
     if (process.env.NODE_ENV === "production") {
@@ -193,6 +224,7 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
     }
     console.info("[email] resend_not_configured", {
       to: maskEmail(input.to),
+      cc: ccEmails.map(maskEmail),
       subject: input.subject,
       idempotencyKey: input.idempotencyKey,
     });
@@ -200,6 +232,7 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
       provider: "local" as const,
       id: null,
       recipientEmail: resolveTransactionalRecipient(input.to),
+      ccEmails,
     };
   }
 
@@ -207,6 +240,7 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
   const payload = {
     from: formatEmailFromHeader(getEmailFromAddress()),
     to: recipientEmail,
+    ...(ccEmails.length > 0 ? { cc: ccEmails } : {}),
     subject: input.subject,
     html: input.html,
     text: input.text,
@@ -226,6 +260,7 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
         provider: "resend" as const,
         id: result.data?.id ?? null,
         recipientEmail,
+        ccEmails,
       };
     } catch (error) {
       lastError = error;

@@ -17,6 +17,7 @@ import type { CmsPageContent } from "@/lib/cms/schemas";
 import type { CustomerQuoteComparisonGroup } from "@/lib/quotes/customer-quote-comparison";
 import type { QuoteDocumentCopy } from "@/lib/quotes/quote-document-content";
 import {
+  quoteEvaluationFactsHelp,
   quotePartnerCredentialRows,
   quotePartnerEvaluationFactRows,
 } from "@/lib/quotes/quote-presentation";
@@ -476,6 +477,7 @@ export function CustomerQuotesPage({
                   {evaluationFactRows.length > 0 ? (
                     <section className="quote-customer-facts">
                       <h3>{copy("evaluationFactsTitle")}</h3>
+                      <p>{quoteEvaluationFactsHelp(factCopy)}</p>
                       <dl className="admin-detail-list">
                         {evaluationFactRows.map(([label, value]) => (
                           <div key={label}>
@@ -574,6 +576,7 @@ function customerQuoteFactCopy(
     proposerTypeLabel: copy("proposerTypeLabel"),
     cpaCountLabel: copy("cpaCountLabel"),
     revenueLabel: copy("revenueLabel"),
+    evaluationFactsHelp: copy("evaluationFactsHelp"),
     localAuditCountLabel: copy("localAuditCountLabel"),
     recentAuditCountLabel: copy("recentAuditCountLabel"),
     auditedTypesLabel: copy("auditedTypesLabel"),

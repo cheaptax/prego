@@ -8,6 +8,77 @@ import {
 type QuoteCopy = Partial<QuoteDocumentCopy>;
 type QuoteFactRow = [label: string, value: string];
 
+export const STANDARD_QUOTE_SERVICE_PERIOD = "2026.12 ~ 2028.02";
+export const STANDARD_QUOTE_VALID_UNTIL = "발행일로부터 감사계약 체결시까지";
+export const STANDARD_QUOTE_TERMS =
+  "감사 일정은 자료 수령 일정에 따라 협의합니다.";
+export const QUOTE_SCREEN_PREVIEW_NOTES =
+  "본 미리보기는 운영자 템플릿 확인용 샘플입니다.";
+
+const CURRENT_EVALUATION_FACTS_HELP =
+  "농협 외부회계 감사 선정시 고려할만한 평가지표 및 실적 정보입니다.";
+const LEGACY_EVALUATION_FACTS_HELP =
+  "농협 외부회계감사 선정 시 참고할 제휴사 실적·역량 정보입니다.";
+const CURRENT_LOCAL_AUDIT_COUNT_LABEL = "2025년 지역농협 감사실적";
+const LEGACY_LOCAL_AUDIT_COUNT_LABEL = "2025년 지역농협 감사건수";
+const CURRENT_CPA_COUNT_LABEL = "공인회계사 인원 수";
+const LEGACY_CPA_COUNT_LABEL = "소속 공인회계사";
+const CURRENT_EVALUATION_FOOTNOTE =
+  "(*) 소속 농협감사 협회사의 상호 공유된 제휴실적을 80%인정한 수치입니다.";
+const LEGACY_EVALUATION_FOOTNOTE =
+  "(*) 회계법인 소속 농협감사 협회사의 상호동의 제휴실적을 80%인정한 수치입니다.";
+
+function modernizeLabel(value: string | undefined, legacy: string, current: string) {
+  const raw = (value ?? "").trim() || current;
+  return raw === legacy || raw === `${legacy} (*)` ? current : raw;
+}
+
+export function quoteEvaluationFactsHelp(copy?: QuoteCopy) {
+  const help = modernizeLabel(
+    copy?.evaluationFactsHelp,
+    LEGACY_EVALUATION_FACTS_HELP,
+    CURRENT_EVALUATION_FACTS_HELP,
+  );
+  return /\(\*\)/u.test(help) ? help : `${help} (*)`;
+}
+
+export function quoteEvaluationFactsFootnote(copy?: QuoteCopy) {
+  return modernizeLabel(
+    copy?.evaluationFactsFootnoteAssociation,
+    LEGACY_EVALUATION_FOOTNOTE,
+    CURRENT_EVALUATION_FOOTNOTE,
+  );
+}
+
+function modernizeConditionValue(value: string) {
+  if (value === "2026.09 ~ 2027.02") return STANDARD_QUOTE_SERVICE_PERIOD;
+  if (value === "발행일로부터 30일") return STANDARD_QUOTE_VALID_UNTIL;
+  return value;
+}
+
+export function withStandardQuoteConditions<
+  T extends {
+    servicePeriod?: string;
+    validUntil?: string;
+    terms?: string;
+    notes?: string;
+  },
+>(quote: T) {
+  const notes = quote.notes?.trim() ?? "";
+  return {
+    ...quote,
+    servicePeriod:
+      modernizeConditionValue(quote.servicePeriod?.trim() ?? "") ||
+      STANDARD_QUOTE_SERVICE_PERIOD,
+    validUntil:
+      modernizeConditionValue(quote.validUntil?.trim() ?? "") ||
+      STANDARD_QUOTE_VALID_UNTIL,
+    terms: quote.terms?.trim() || STANDARD_QUOTE_TERMS,
+    notes:
+      notes && notes !== QUOTE_SCREEN_PREVIEW_NOTES ? notes : "",
+  };
+}
+
 export function quoteDocumentTitle(
   quote: Pick<QuoteRecord, "supplierName">,
   quoteRequest: Pick<
@@ -92,11 +163,12 @@ export function quoteConditionRows(
     | "notesLabel"
   >,
 ): Array<[label: string, value: string]> {
+  const resolved = withStandardQuoteConditions(quote);
   return [
-    [copy?.servicePeriodLabel ?? "수행기간", quote.servicePeriod?.trim() ?? ""],
-    [copy?.validUntilLabel ?? "유효기간", quote.validUntil?.trim() ?? ""],
-    [copy?.termsLabel ?? "조건", quote.terms?.trim() ?? ""],
-    [copy?.notesLabel ?? "비고", quote.notes?.trim() ?? ""],
+    [copy?.servicePeriodLabel ?? "수행기간", resolved.servicePeriod],
+    [copy?.validUntilLabel ?? "유효기간", resolved.validUntil],
+    [copy?.termsLabel ?? "조건", resolved.terms],
+    [copy?.notesLabel ?? "비고", resolved.notes],
   ].filter((row): row is [string, string] => Boolean(row[1]));
 }
 
@@ -133,10 +205,6 @@ export function quotePartnerCredentialRows(
       ? text(copy?.proposerAuditGroupLabel, "감사반")
       : text(copy?.proposerAccountingFirmLabel, "회계법인")
     : "";
-  const cpaCount =
-    submission && Number.isFinite(submission.certifiedPublicAccountantCount)
-      ? `${submission.certifiedPublicAccountantCount}${text(copy?.peopleSuffix, "명")}`
-      : "";
   const contact = [quote.supplierContactPhone, quote.supplierContactEmail]
     .filter(Boolean)
     .join(" / ");
@@ -169,9 +237,6 @@ export function quotePartnerCredentialRows(
     proposerType
       ? [text(copy?.proposerTypeLabel, "제안 주체"), proposerType]
       : null,
-    cpaCount
-      ? [text(copy?.cpaCountLabel, "소속 공인회계사"), cpaCount]
-      : null,
   ]);
 }
 
@@ -184,6 +249,9 @@ export function quotePartnerEvaluationFactRows(
     const types = submission.auditedNonghyupTypes2025
       .map((type) => cooperativeTypeLabel(type, copy))
       .filter(Boolean);
+    const cpaCount = Number.isFinite(submission.certifiedPublicAccountantCount)
+      ? `${submission.certifiedPublicAccountantCount}${text(copy?.peopleSuffix, "명")}`
+      : "";
     return compactRows([
       [
         text(copy?.revenueLabel, "회계법인 매출액"),
@@ -193,9 +261,23 @@ export function quotePartnerEvaluationFactRows(
         ) || text(copy?.missingValue, "미등록"),
       ],
       [
-        text(copy?.localAuditCountLabel, "2025년 지역농협 감사건수"),
+        modernizeLabel(
+          copy?.localAuditCountLabel,
+          LEGACY_LOCAL_AUDIT_COUNT_LABEL,
+          CURRENT_LOCAL_AUDIT_COUNT_LABEL,
+        ),
         `${submission.localNonghyupAuditCount2025}${text(copy?.countSuffix, "건")}`,
       ],
+      cpaCount
+        ? [
+            modernizeLabel(
+              copy?.cpaCountLabel,
+              LEGACY_CPA_COUNT_LABEL,
+              CURRENT_CPA_COUNT_LABEL,
+            ),
+            cpaCount,
+          ]
+        : null,
       [
         text(copy?.auditedTypesLabel, "감사 수행 농협 유형"),
         types.join(", ") || text(copy?.noneTypesLabel, "해당 없음"),

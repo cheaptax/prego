@@ -14,6 +14,7 @@ import type {
   NhAuditQuoteSubmissionV2,
 } from "@/lib/audit-evaluation/nh-audit-v2-types";
 import type { NhAuditPartnerFormValues } from "@/lib/quotes/nh-audit-quote-form";
+import type { PartnerQuoteScreenProfileRecord } from "@/lib/quotes/quote-screen-profile";
 import type { DataClassification } from "@/lib/cooperatives/demo-cooperative";
 import type { TestDataMetadata } from "@/lib/test-data/root-metadata";
 
@@ -363,6 +364,8 @@ export type PartnerRecord = {
   statusChangedByEmail?: string;
 };
 
+export type { PartnerQuoteScreenProfileRecord };
+
 export type PartnerApplicationStatus =
   | "pending"
   | "approved"
@@ -567,6 +570,7 @@ export type QuoteEmailDeliveryRecord = {
   quoteId: string;
   quoteRequestId: string;
   recipientEmail: string;
+  ccEmails?: string[];
   accountEmail?: string;
   auditQuoteRequestId?: string;
   purpose?: "quote" | "audit_quote_request";

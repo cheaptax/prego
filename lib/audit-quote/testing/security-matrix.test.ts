@@ -228,6 +228,19 @@ describe("security matrix — admin & notify", () => {
     assert.equal(payload.title.includes("raw-secret@example.com"), false);
   });
 
+  it("intake follow-up failures do not fail the public submit response", () => {
+    const src = readFileSync(
+      path.join(root, "app/api/audit-quote/requests/route.ts"),
+      "utf8",
+    );
+    assert.match(src, /followup_failed/);
+    assert.match(src, /hasSuccessfulCustomerRequestEmail/);
+    assert.match(src, /provisionTemporaryQuoteMember/);
+    const followupBlock = src.split("if (result.kind === \"success\")")[1] ?? "";
+    assert.match(followupBlock, /try \{/);
+    assert.match(followupBlock, /jsonSuccess\(result\.publicReference\)/);
+  });
+
   it("20. admin audit-quote routes require requireAdmin", () => {
     const files = [
       "app/api/admin/audit-quotes/route.ts",

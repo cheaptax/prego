@@ -24,7 +24,7 @@ import {
   sanitizeNhAuditPartnerFormDraft,
 } from "@/lib/quotes/nh-audit-quote-form";
 import { renderQuotePdf } from "@/lib/quotes/quote-pdf";
-import { quoteDocumentContentFromCms } from "@/lib/quotes/quote-document-content";
+import { getPublishedQuoteDocumentContentForPartner } from "@/lib/quotes/quote-screen-profile";
 import { loadPublishedCmsPage } from "@/lib/cms/public-content";
 import {
   readQuotePdfBuffer,
@@ -53,6 +53,7 @@ import {
 } from "@/lib/quotes/nh-audit-quote-server";
 import { validateQuoteSupplierProfile } from "@/lib/quotes/supplier-profile";
 import { finalizePartnerQuoteDelivery } from "@/lib/quotes/finalize-partner-quote-delivery";
+import { withStandardQuoteConditions } from "@/lib/quotes/quote-presentation";
 
 export const runtime = "nodejs";
 const MAX_QUOTE_PAYLOAD_BYTES = 256 * 1024;
@@ -101,7 +102,7 @@ function nhAuditValidationMessage(path: PropertyKey | undefined) {
     localNonghyupAuditCount2025:
       "2025년 지역농협 회계감사 수행 건수를 0 이상의 정수로 입력해 주세요.",
     certifiedPublicAccountantCount:
-      "소속 공인회계사 수를 0 이상의 정수로 입력해 주세요.",
+      "공인회계사 인원 수를 0 이상의 정수로 입력해 주세요.",
     accountingFirmRevenueWon:
       "회계법인 매출액을 0 이상의 원 단위 정수로 입력해 주세요.",
     auditedNonghyupTypes2025:
@@ -442,10 +443,12 @@ export async function buildQuote(
     lineItems,
     ...totals,
     vatIncluded,
-    servicePeriod: text(payload.servicePeriod, 120),
-    validUntil: text(payload.validUntil, 40),
-    terms: text(payload.terms),
-    notes: text(payload.notes),
+    ...withStandardQuoteConditions({
+      servicePeriod: text(payload.servicePeriod, 120),
+      validUntil: text(payload.validUntil, 40),
+      terms: text(payload.terms),
+      notes: text(payload.notes),
+    }),
     auditEvaluation,
     nhAuditV2,
     nhAuditDraft,
@@ -672,8 +675,13 @@ export async function PATCH(req: Request, { params }: Params) {
   const sealDataUri = await readStorageFileAsDataUri(
     result.partner.sealPath,
   );
-  const quoteDocumentContent = quoteDocumentContentFromCms(
-    (await loadPublishedCmsPage("partner.portal")).content,
+  const quoteDocumentContent = await getPublishedQuoteDocumentContentForPartner(
+    {
+      db,
+      partnerId: result.partner.id,
+      cmsContent: (await loadPublishedCmsPage("partner.portal")).content,
+      partner: result.partner,
+    },
   );
   const pdfBuffer = await renderQuotePdf({
     quote: result.quote,
