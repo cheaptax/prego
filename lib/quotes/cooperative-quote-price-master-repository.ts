@@ -18,6 +18,7 @@ import {
   cooperativeQuotePricePlanInputSchema,
 } from "@/lib/quotes/cooperative-quote-price-master-schemas";
 import { nonSelectedMasterPriceFields } from "@/lib/quotes/cooperative-quote-price-master-pricing";
+import type { WonAmount } from "@/lib/audit-evaluation/types";
 import {
   COOPERATIVE_QUOTE_PRICE_MASTER_COLLECTIONS,
   type CooperativeQuotePartnerPrice,
@@ -531,7 +532,8 @@ export async function seedQuoteAutomationFromMaster(input: {
       };
     }
     const fields = nonSelectedMasterPriceFields({
-      plannedWinnerFeeWon: winnerPrice?.plannedAuditFeeWon ?? "1",
+      plannedWinnerFeeWon:
+        winnerPrice?.plannedAuditFeeWon ?? ("1" as WonAmount),
       index: nextSyntheticIndex,
     });
     nextSyntheticIndex += 1;
