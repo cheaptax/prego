@@ -94,6 +94,12 @@ export const GENERATED_APP_PAGES = [
     "sourcePath": "app/events/audit-quote/evaluations/[caseId]/review/page.tsx"
   },
   {
+    "route": "/events/audit-quote/guide",
+    "audience": "public",
+    "dynamic": false,
+    "sourcePath": "app/events/audit-quote/guide/page.tsx"
+  },
+  {
     "route": "/faq",
     "audience": "public",
     "dynamic": false,

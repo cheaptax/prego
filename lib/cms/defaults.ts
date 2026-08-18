@@ -550,10 +550,10 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       section({
         id: "promoFloat",
         eyebrow: "기간 한정",
-        title: "2027년도 외부회계감사 견적 신청하기",
-        description: "안내를 눌러 바로 신청할 수 있습니다.",
+        title: "2027년도 외부회계감사, 이제 의무입니다",
+        description: "선임 계약 전에 비교검토표를 자동으로 준비하세요.",
         actions: [
-          action("open", "견적 신청하기", "/events/audit-quote"),
+          action("open", "자세히 보기", "/events/audit-quote/guide"),
         ],
       }),
     ],
@@ -588,10 +588,10 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       section({
         id: "promoFloat",
         eyebrow: "기간 한정",
-        title: "2027년도 외부회계감사 견적 신청하기",
-        description: "안내를 눌러 바로 신청할 수 있습니다.",
+        title: "2027년도 외부회계감사, 이제 의무입니다",
+        description: "선임 계약 전에 비교검토표를 자동으로 준비하세요.",
         actions: [
-          action("open", "견적 신청하기", "/events/audit-quote"),
+          action("open", "자세히 보기", "/events/audit-quote/guide"),
         ],
       }),
     );
@@ -1312,6 +1312,200 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
       }),
     ],
   ),
+  "event.auditQuoteGuide": page(
+    "2027 외부회계감사 견적 안내 · 농협지원센터",
+    "2027년도 재무제표 외부회계감사 의무와 감사인 선임을 위한 견적 비교검토표 자동 생성 서비스를 안내합니다.",
+    [
+      section({
+        id: "hero",
+        eyebrow: "2027 외부회계감사 의무",
+        title: "2027년도 재무제표 감사,\n이제 법으로 정해졌습니다",
+        description:
+          "대상 농협은 조만간 회계감사인 선임 계약을 체결해야 합니다. 견적 수집부터 상부 보고용 검토보고서까지, 실무 부담 없이 준비하세요.",
+        text: {
+          highlight: "법으로 정해졌습니다",
+          badge: "FY27 감사인 선임 준비",
+          primaryCtaHelp: "무료 신청 · 비교 후에도 계약 의무 없음",
+        },
+        actions: [
+          action("apply", "견적 신청하기", "/events/audit-quote"),
+          action("learnFlow", "진행 방식 보기", "#hassle-free", "secondary"),
+        ],
+      }),
+      section({
+        id: "mandate",
+        eyebrow: "왜 지금 준비해야 하나요?",
+        title: "법 개정으로 2027년도\n감사 준비가 시작됩니다",
+        description:
+          "2027년도 재무제표 감사는 감사가 끝나는 시점이 아니라, 감사인을 선임하는 시점부터 준비가 필요합니다.",
+        text: { ariaLabel: "2027 외부회계감사 의무와 선임 준비 안내" },
+        items: [
+          item(
+            "law",
+            "2027 재무제표 외부회계감사 의무",
+            "농협법 개정에 따라 대상 농협은 2027년도 재무제표에 대한 외부회계감사를 수감해야 합니다.",
+            "1",
+          ),
+          item(
+            "appointment",
+            "조만간 감사인 선임 계약 필요",
+            "내년도 재무제표 감사를 맡길 회계감사인을 미리 비교하고 선임 계약을 체결해야 합니다.",
+            "2",
+          ),
+          item(
+            "reporting",
+            "상부 보고에는 비교 근거가 필요",
+            "견적 보수뿐 아니라 농협 수임실적, 투입인력, 일정까지 같은 기준으로 비교해야 품의가 쉬워집니다.",
+            "3",
+          ),
+        ],
+      }),
+      section({
+        id: "pain",
+        eyebrow: "실무자 부담",
+        title: "견적 비교표를 직접 만들면\n같은 기준으로 보기 어렵습니다",
+        description:
+          "회계법인마다 양식과 답변 속도가 다르고, 외부에서 받은 견적까지 합치면 비교표를 다시 만드는 데 시간이 듭니다.",
+        text: { ariaLabel: "감사인 선임 준비 실무 부담" },
+        items: [
+          item("contact", "여러 법인에 같은 설명을 반복"),
+          item("format", "제각각인 견적서 양식 확인"),
+          item("spreadsheet", "엑셀 비교표와 보고자료 작성"),
+          item("external", "외부 견적까지 한 표에 반영"),
+        ],
+      }),
+      section({
+        id: "hassleFree",
+        eyebrow: "Hassle Free",
+        title: "신청 한 번으로\n검토보고서까지 자동 생성",
+        description:
+          "참여 회계법인 견적과 외부 견적을 같은 기준으로 비교하고, 상부 보고용 검토보고서까지 만들어 드립니다.",
+        text: {
+          ariaLabel: "검토보고서 자동 생성 기능",
+          tableCaption:
+            "실제 검토보고서 결과 화면 예시의 일부입니다. 프리고가 개발한 표준 양식의 최신 버전입니다.",
+          reportLabel: "감사인 선정 검토보고서 예시",
+          sampleDownloadLabel: "검토보고서 예시 파일 받기",
+        },
+        actions: [
+          action(
+            "sample",
+            "검토보고서 예시 파일 받기",
+            "/api/audit-quote/sample-report",
+          ),
+        ],
+        items: [
+          item(
+            "partnerQuotes",
+            "여러 참여 회계법인 견적",
+            "농협 감사 경험이 있는 참여 회계법인에 동일 조건으로 견적을 요청합니다.",
+          ),
+          item(
+            "externalQuotes",
+            "외부 견적도 함께 비교",
+            "이미 별도로 받은 비제휴 회계법인 견적도 같은 기준으로 반영합니다.",
+          ),
+          item(
+            "report",
+            "검토보고서 자동 생성",
+            "비교검토표만이 아니라 선정 근거가 정리된 검토보고서를 제공합니다.",
+          ),
+        ],
+      }),
+      section({
+        id: "steps",
+        eyebrow: "진행 방식",
+        title: "견적 요청부터 검토보고서까지\n한 흐름으로 준비합니다",
+        text: { ariaLabel: "견적 신청부터 검토보고서 생성까지 진행 순서" },
+        items: [
+          item("apply", "견적 신청", "대상 농협과 담당자 정보를 입력합니다.", "01"),
+          item("request", "동일 조건 견적 요청", "프리고가 참여 회계법인에 같은 조건으로 견적을 요청합니다.", "02"),
+          item("external", "외부 견적 추가", "별도로 받은 견적이 있으면 비교표에 함께 반영합니다.", "03"),
+          item("compare", "검토보고서 확인", "상부 보고용 검토보고서를 자동 생성해 확인합니다.", "04"),
+        ],
+      }),
+      section({
+        id: "benefits",
+        eyebrow: "실무자에게 남는 것",
+        title: "품의 시간은 줄이고\n선정 근거는 더 선명하게",
+        text: { ariaLabel: "견적 안내 상세 페이지 혜택" },
+        items: [
+          item(
+            "time",
+            "반복 연락과 엑셀 정리 시간 절감",
+            "견적 요청과 비교표 작성의 반복 업무를 줄입니다.",
+          ),
+          item(
+            "reason",
+            "감사인 선임 근거 정리",
+            "최저가만이 아니라 수행 경험과 투입 계획을 함께 비교합니다.",
+          ),
+          item(
+            "free",
+            "무료 신청, 계약 의무 없음",
+            "비교 후 최종 선정은 우리 농협이 직접 결정합니다.",
+          ),
+        ],
+      }),
+      section({
+        id: "faq",
+        title: "자주 묻는 질문",
+        text: { ariaLabel: "외부회계감사 견적 안내 자주 묻는 질문" },
+        items: [
+          item(
+            "contractRequired",
+            "견적을 신청하면 꼭 계약해야 하나요?",
+            "아니요. 비교검토표를 확인한 뒤 최종 선임 여부와 계약 상대방은 우리 농협이 결정합니다.",
+          ),
+          item(
+            "target",
+            "우리 농협도 2027년도 감사 대상인가요?",
+            "자산총액 500억원 이상 농협은 이번 법 개정으로 2년마다 회계감사를 받아야 합니다. (3,000억원 이상 농협은 매년으로 입법예고)\n따라서 올해 초 25년 재무제표 감사를 마무리한 회계법인은 27년에 대한 재무제표 감사계약을 올해 체결해야 합니다.",
+          ),
+          item(
+            "externalQuotes",
+            "외부에서 받은 견적도 비교할 수 있나요?",
+            "가능합니다. 비제휴 회계법인 견적도 입력해 참여 회계법인 견적과 같은 비교표에서 검토할 수 있습니다.",
+          ),
+        ],
+      }),
+      section({
+        id: "cta",
+        eyebrow: "FY27 감사인 선임 준비",
+        title: "지금 견적을 신청하고\n검토보고서 준비를 시작하세요",
+        description:
+          "무료 신청 후 여러 견적을 비교해도 계약 의무는 없습니다.",
+        text: {
+          ctaHelp: "대상 농협명, 담당자 정보, 휴대폰 인증만 있으면 시작할 수 있습니다.",
+        },
+        actions: [
+          action("apply", "견적 신청하기", "/events/audit-quote"),
+        ],
+      }),
+      section({
+        id: "legalNotice",
+        title: "운영 주체와 면책문구",
+        description:
+          "가 운영하는 견적지원 서비스로, 농협중앙회 공식 서비스가 아닙니다. 감사인의 수임 여부와 독립성 확인, 감사계획·절차·의견 결정은 각 회계법인이 관련 기준에 따라 독립적으로 수행하며, 프리고는 감사의견이나 감사결과에 관여하지 않습니다.",
+        text: {
+          ariaLabel: "운영 안내",
+          operatorName: "주식회사 프리고",
+          regulationNote: "(*) 농업협동조합법 시행령 입법예고 기준.",
+        },
+        items: [
+          item(
+            "annualAudit",
+            "자산총액 3,000억원 이상: 매년 외부회계감사",
+          ),
+          item(
+            "biennialAudit",
+            "자산총액 500억원 이상 3,000억원 미만: 2년마다 외부회계감사",
+          ),
+        ],
+        locked: true,
+      }),
+    ],
+  ),
   "event.auditQuote": page(
     "FY27 회계감사 견적 요청 · 농협지원센터",
     "지역농협 회계감사 견적을 한 번 요청으로 비교할 수 있도록 지원하는 FY27 임시 이벤트 페이지입니다.",
@@ -1388,39 +1582,17 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           item(
             "request",
             "신청",
-            "대상 농협과 사업연도, 담당자 정보를 남겨 주세요.",
+            "농협과 담당자 정보를 남겨주세요.",
           ),
           item(
             "quoteRequest",
-            "견적 요청",
-            "프리고가 필수정보를 확인하고 2곳 이상에 요청해요.",
+            "견적 발송",
+            "제휴사들이 각각의 견적을 메일로 발송해요.",
           ),
           item(
             "comparisonDelivery",
-            "비교표 전달",
-            "비교 가능한 견적을 이메일로 보내드려요.",
-          ),
-        ],
-      }),
-      section({
-        id: "faq",
-        title: "자주 묻는 질문",
-        text: { ariaLabel: "자주 묻는 질문" },
-        items: [
-          item(
-            "contractRequired",
-            "신청하면 꼭 계약해야 하나요?",
-            "아니요. 비교 후에도 계약 의무는 없고, 최종 선정은 우리 농협이 결정해요.",
-          ),
-          item(
-            "lowestPrice",
-            "가장 저렴한 곳을 추천해 주나요?",
-            "최저가 추천 서비스가 아니에요. 동일 조건의 비교 가능한 견적을 정리해 드려요.",
-          ),
-          item(
-            "informationUse",
-            "입력한 정보는 어디에 쓰이나요?",
-            "견적 진행에 필요한 범위에서만 담당 운영자와 견적 대상 회계법인에 전달돼요. 자세한 내용은 개인정보처리방침을 확인해 주세요.",
+            "견적 확인 및 비교검토 보고서 다운로드",
+            "수신한 견적을 바탕으로 프리고에서 검토보고서를 내려받아요.",
           ),
         ],
       }),
@@ -4996,6 +5168,11 @@ export const CMS_PROTECTED_PAGE_ACTION_IDS: Partial<
   },
   "auth.login": {
     promoFloat: ["open"],
+  },
+  "event.auditQuoteGuide": {
+    hero: ["apply"],
+    hassleFree: ["sample"],
+    cta: ["apply"],
   },
   "auth.signup": {
     consents: ["terms", "privacy"],

@@ -74,10 +74,11 @@ export function normalizeAuditQuoteCmsContent(
     };
   };
 
-  const sections = input.sections.map((current): CmsSection => {
+  const sections = input.sections.flatMap((current): CmsSection[] => {
+    if (current.id === "faq") return [];
     seenIds.add(current.id);
     const fallback = defaultById.get(current.id);
-    return fallback ? mergeSection(fallback, current) : current;
+    return [fallback ? mergeSection(fallback, current) : current];
   });
 
   for (const fallback of defaults.sections) {

@@ -27,7 +27,7 @@ describe("FY27 audit-quote CMS defaults", () => {
     const content = CMS_PAGE_DEFAULTS["event.auditQuote"];
     assert.deepEqual(
       content.sections.map((section) => section.id),
-      ["hero", "intakeForm", "benefits", "steps", "faq", "legalNotice"],
+      ["hero", "intakeForm", "benefits", "steps", "legalNotice"],
     );
     assert.equal(content.sections[0].eyebrow, "FY27 회계감사 견적");
     assert.equal(
@@ -54,13 +54,21 @@ describe("FY27 audit-quote CMS defaults", () => {
         .length,
       3,
     );
-    assert.equal(
-      content.sections.find((section) => section.id === "steps")?.items.length,
-      3,
+    const steps = content.sections.find((section) => section.id === "steps");
+    assert.deepEqual(
+      steps?.items.map((item) => [item.title, item.description]),
+      [
+        ["신청", "농협과 담당자 정보를 남겨주세요."],
+        ["견적 발송", "제휴사들이 각각의 견적을 메일로 발송해요."],
+        [
+          "견적 확인 및 비교검토 보고서 다운로드",
+          "수신한 견적을 바탕으로 프리고에서 검토보고서를 내려받아요.",
+        ],
+      ],
     );
     assert.equal(
-      content.sections.find((section) => section.id === "faq")?.items.length,
-      3,
+      content.sections.some((section) => section.id === "faq"),
+      false,
     );
   });
 
@@ -74,15 +82,109 @@ describe("FY27 audit-quote CMS defaults", () => {
       legacy.sections[2],
       legacy.sections[1],
       legacy.sections[3],
+      {
+        ...legacy.sections[3],
+        id: "faq",
+        title: "자주 묻는 질문",
+      },
       legacy.sections[4],
-      legacy.sections[5],
     ];
     const normalized = normalizeAuditQuoteCmsContent(legacy);
     assert.equal(normalized.sections[0].title, "게시된 제목");
     assert.equal(normalized.sections[1].id, "benefits");
     assert.equal(normalized.sections[1].items.length, 3);
+    assert.equal(
+      normalized.sections.some((section) => section.id === "faq"),
+      false,
+    );
     assert.equal(normalized.messages.genericError, "기존 오류");
     assert.ok(normalized.messages.successTitle);
+  });
+});
+
+describe("FY27 audit-quote guide CMS defaults", () => {
+  it("funnels users from the guide into the protected quote application", () => {
+    const content = CMS_PAGE_DEFAULTS["event.auditQuoteGuide"];
+    assert.deepEqual(
+      content.sections.map((section) => section.id),
+      [
+        "hero",
+        "mandate",
+        "pain",
+        "hassleFree",
+        "steps",
+        "benefits",
+        "faq",
+        "cta",
+        "legalNotice",
+      ],
+    );
+    const hero = content.sections.find((section) => section.id === "hero");
+    const hassleFree = content.sections.find(
+      (section) => section.id === "hassleFree",
+    );
+    const pain = content.sections.find((section) => section.id === "pain");
+    const steps = content.sections.find((section) => section.id === "steps");
+    const faq = content.sections.find((section) => section.id === "faq");
+    const cta = content.sections.find((section) => section.id === "cta");
+    const legal = content.sections.find((section) => section.id === "legalNotice");
+    assert.match(hero?.title ?? "", /2027년도 재무제표 감사/);
+    assert.match(hero?.description ?? "", /감사인 선임 계약/);
+    assert.equal(hero?.actions.find((action) => action.id === "apply")?.href, "/events/audit-quote");
+    assert.equal(cta?.actions.find((action) => action.id === "apply")?.href, "/events/audit-quote");
+    assert.doesNotMatch(pain?.title ?? "", /일이 너무 많습니다|최소화/);
+    assert.doesNotMatch(steps?.title ?? "", /최소화|할 일은/);
+    assert.equal(
+      hassleFree?.description,
+      "참여 회계법인 견적과 외부 견적을 같은 기준으로 비교하고, 상부 보고용 검토보고서까지 만들어 드립니다.",
+    );
+    assert.doesNotMatch(hassleFree?.description ?? "", /단순 비교표가 아니라/);
+    const targetFaq = faq?.items.find((item) => item.id === "target");
+    assert.equal(
+      targetFaq?.description,
+      "자산총액 500억원 이상 농협은 이번 법 개정으로 2년마다 회계감사를 받아야 합니다. (3,000억원 이상 농협은 매년으로 입법예고)\n따라서 올해 초 25년 재무제표 감사를 마무리한 회계법인은 27년에 대한 재무제표 감사계약을 올해 체결해야 합니다.",
+    );
+    assert.equal(
+      faq?.items.some((item) => item.id === "official"),
+      false,
+    );
+    assert.equal(
+      hassleFree?.text.tableCaption,
+      "실제 검토보고서 결과 화면 예시의 일부입니다. 프리고가 개발한 표준 양식의 최신 버전입니다.",
+    );
+    assert.equal(
+      hassleFree?.actions.find((action) => action.id === "sample")?.href,
+      "/api/audit-quote/sample-report",
+    );
+    assert.equal(legal?.locked, true);
+    assert.match(legal?.text.regulationNote ?? "", /농업협동조합법 시행령/);
+  });
+
+  it("uses the actual guide renderer in route and CMS previews", () => {
+    const route = readFileSync(
+      path.join(root, "app/events/audit-quote/guide/page.tsx"),
+      "utf8",
+    );
+    const component = readFileSync(
+      path.join(root, "components/AuditQuoteGuidePage.tsx"),
+      "utf8",
+    );
+    const actualPreview = readFileSync(
+      path.join(root, "components/cms-editor/CmsActualPagePreview.tsx"),
+      "utf8",
+    );
+    const editorPreview = readFileSync(
+      path.join(root, "components/cms-editor/CmsPageEditor.tsx"),
+      "utf8",
+    );
+    assert.match(route, /loadPublishedCmsPage\("event\.auditQuoteGuide"\)/);
+    assert.match(route, /createSampleAuditReportViewModel/);
+    assert.match(route, /<AuditQuoteGuidePage content=\{content\} sampleReport=\{sampleReport\}/);
+    assert.match(component, /AuditEvaluationReportDocument/);
+    assert.match(component, /trackAuditQuoteEvent\("audit_quote_cta_click"/);
+    assert.match(component, /placement/);
+    assert.match(actualPreview, /pageKey === "event\.auditQuoteGuide"/);
+    assert.match(editorPreview, /pageKey === "event\.auditQuoteGuide"/);
   });
 });
 

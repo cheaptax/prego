@@ -42,6 +42,7 @@ const scopedPageKeys = [
   "public.inquiries",
   "public.faq",
   "public.support",
+  "event.auditQuoteGuide",
   "event.auditQuoteEvaluate",
   "event.auditQuoteEvaluation",
   "event.auditQuoteEvaluationReview",

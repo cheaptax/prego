@@ -91,6 +91,121 @@ const PORTAL_LOGIN_MESSAGE_PRESENTATION = {
 export const CMS_ROUTE_SECTION_PRESENTATION: Partial<
   Record<CmsPageKey, Record<string, CmsHomeSectionPresentation>>
 > = {
+  "event.auditQuoteGuide": {
+    hero: {
+      name: "안내 첫 화면",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "큰 제목",
+      descriptionLabel: "설명",
+      textFields: {
+        highlight: field("강조 문구"),
+        badge: field("보조 배지 문구"),
+        primaryCtaHelp: field("신청 버튼 도움말"),
+      },
+    },
+    mandate: {
+      name: "감사 의무 안내",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "영역 제목",
+      descriptionLabel: "의무 안내 설명",
+      textFields: {
+        ariaLabel: field("영역 접근성 이름"),
+      },
+      itemFields: {
+        title: "단계 제목",
+        description: "단계 설명",
+        value: "단계 번호",
+      },
+    },
+    pain: {
+      name: "실무자 부담",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "영역 제목",
+      descriptionLabel: "실무 부담 설명",
+      textFields: {
+        ariaLabel: field("영역 접근성 이름"),
+      },
+      itemFields: {
+        title: "부담 항목",
+      },
+    },
+    hassleFree: {
+      name: "검토보고서 자동 생성",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "영역 제목",
+      descriptionLabel: "기능 설명",
+      textFields: {
+        ariaLabel: field("영역 접근성 이름"),
+        tableCaption: field("보고서 예시 설명"),
+        reportLabel: field("보고서 예시 라벨"),
+        sampleDownloadLabel: field("보고서 예시 파일 버튼"),
+      },
+      itemFields: {
+        title: "핵심 기능 제목",
+        description: "핵심 기능 설명",
+      },
+    },
+    steps: {
+      name: "진행 방식",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "영역 제목",
+      textFields: {
+        ariaLabel: field("영역 접근성 이름"),
+      },
+      itemFields: {
+        title: "단계 제목",
+        description: "단계 설명",
+        value: "단계 번호",
+      },
+    },
+    benefits: {
+      name: "실무자 혜택",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "영역 제목",
+      textFields: {
+        ariaLabel: field("영역 접근성 이름"),
+      },
+      itemFields: {
+        title: "혜택 제목",
+        description: "혜택 설명",
+      },
+    },
+    faq: {
+      name: "자주 묻는 질문",
+      titleLabel: "FAQ 영역 제목",
+      textFields: {
+        ariaLabel: field("FAQ 접근성 이름"),
+      },
+      itemFields: {
+        title: "질문",
+        description: "답변",
+      },
+    },
+    cta: {
+      name: "하단 신청 유도",
+      eyebrowLabel: "상단 작은 문구",
+      titleLabel: "신청 유도 제목",
+      descriptionLabel: "신청 유도 설명",
+      textFields: {
+        ctaHelp: field("신청 유도 도움말"),
+      },
+    },
+    legalNotice: {
+      name: "운영 주체와 면책문구",
+      titleLabel: "관리자 목록 이름",
+      descriptionLabel: "필수 면책문구",
+      textFields: {
+        operatorName: field("운영 주체"),
+        ariaLabel: field("운영 안내 접근성 이름"),
+        regulationNote: field("시행령 주석 제목"),
+      },
+      itemFields: {
+        title: "시행령 주석 항목",
+      },
+      legalWarning:
+        "법적·운영상 필수 안내입니다. 문구 변경은 이력에 남으며 게시 전 경고가 표시됩니다. 이 영역은 숨기거나 삭제할 수 없습니다.",
+    },
+  },
   "event.auditQuoteEvaluate": {
     hero: {
       name: "평가 접속 첫 안내",

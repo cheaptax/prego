@@ -9,6 +9,7 @@ import { LoginPageRenderer } from "@/components/LoginPageRenderer";
 import { MyPageDashboard } from "@/components/MyPageDashboard";
 import { RequestDetailPage } from "@/components/RequestDetailPage";
 import { AuditEvaluationCmsPreview } from "@/components/AuditEvaluationCustomerPage";
+import { AuditQuoteGuidePage } from "@/components/AuditQuoteGuidePage";
 import { SignupPageRenderer } from "@/components/SignupPageRenderer";
 import { CustomerQuotesPage } from "@/components/CustomerQuotesPage";
 import { PartnerApplicationForm } from "@/components/PartnerApplicationForm";
@@ -86,6 +87,9 @@ export function CmsActualPagePreview({
   }
   if (renderer === "adminConsole") {
     return <CmsAdminConsole {...shared} />;
+  }
+  if (pageKey === "event.auditQuoteGuide") {
+    return <AuditQuoteGuidePage {...shared} />;
   }
   if (
     pageKey === "member.quotes" ||

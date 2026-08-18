@@ -60,6 +60,7 @@ describe("public Footer portal links", () => {
   it("shows the links on public surfaces and suppresses them in protected portals", () => {
     for (const file of [
       "components/HomePageRenderer.tsx",
+      "app/events/audit-quote/guide/page.tsx",
       "app/events/audit-quote/page.tsx",
       "app/consult/page.tsx",
       "app/support/page.tsx",

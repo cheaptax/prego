@@ -1563,37 +1563,20 @@ export function AuditQuoteEventPage({
     }
 
     if (section.id === "faq") {
-      return (
-        <section
-          key={section.id}
-          {...sectionProps(section, "aq-section")}
-          aria-label={section.text.ariaLabel}
-        >
-          <h2 className="aq-section__title">{section.title}</h2>
-          <div className="aq-faq">
-            {visibleItems(section).map((item) => (
-              <details key={item.id}>
-                <summary>{item.title}</summary>
-                {item.description ? <p>{item.description}</p> : null}
-              </details>
-            ))}
-          </div>
-        </section>
-      );
+      return null;
     }
 
     if (section.id === "legalNotice") {
       const regulationItems = visibleItems(section);
+      if (!section.text.regulationNote && regulationItems.length === 0) {
+        return null;
+      }
       return (
         <section
           key={section.id}
           {...sectionProps(section, "aq-footnote")}
           aria-label={section.text.ariaLabel}
         >
-          <p>
-            본 서비스는 <strong>{section.text.operatorName}</strong>
-            {section.description}
-          </p>
           {section.text.regulationNote || regulationItems.length > 0 ? (
             <div
               className="aq-footnote__notes"

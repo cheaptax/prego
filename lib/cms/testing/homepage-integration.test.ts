@@ -58,9 +58,11 @@ describe("homepage CMS operating defaults", () => {
     );
     assert.equal(
       promoFloat?.title,
-      "2027년도 외부회계감사 견적 신청하기",
+      "2027년도 외부회계감사, 이제 의무입니다",
     );
-    assert.equal(promoFloat?.actions[0]?.href, "/events/audit-quote");
+    assert.equal(promoFloat?.description, "선임 계약 전에 비교검토표를 자동으로 준비하세요.");
+    assert.equal(promoFloat?.actions[0]?.label, "자세히 보기");
+    assert.equal(promoFloat?.actions[0]?.href, "/events/audit-quote/guide");
     assert.equal(
       home.sections
         .find((section) => section.id === "hero")
@@ -156,9 +158,9 @@ describe("homepage CMS operating defaults", () => {
     );
     assert.equal(
       promo?.title,
-      "2027년도 외부회계감사 견적 신청하기",
+      "2027년도 외부회계감사, 이제 의무입니다",
     );
-    assert.equal(promo?.actions[0]?.href, "/events/audit-quote");
+    assert.equal(promo?.actions[0]?.href, "/events/audit-quote/guide");
   });
 
   it("supports explicit page overrides without copying common documents", () => {

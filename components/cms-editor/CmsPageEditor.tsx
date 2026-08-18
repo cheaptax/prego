@@ -20,6 +20,7 @@ import {
   type CmsPreviewDevice,
 } from "@/components/cms-editor/CmsPageRenderer";
 import { CmsEditorSidebar } from "@/components/cms-editor/CmsEditorSidebar";
+import { AuditQuoteGuidePage } from "@/components/AuditQuoteGuidePage";
 import type { CmsPageKey } from "@/lib/cms/constants";
 import type { CmsPublicGlobals } from "@/lib/cms/public-content";
 import {
@@ -1265,6 +1266,22 @@ export function CmsPageEditor({ pageKey }: { pageKey: CmsPageKey }) {
                 content={content}
                 globals={globals}
                 assetUrls={assetUrls}
+                mainId={null}
+                editing
+                selectedSectionId={
+                  selection === "page" || selection === "messages"
+                    ? undefined
+                    : selection
+                }
+                onSelectSection={(sectionId) => {
+                  setSelection(sectionId);
+                  setNarrowPane("settings");
+                }}
+              />
+            ) : pageKey === "event.auditQuoteGuide" ? (
+              <AuditQuoteGuidePage
+                content={content}
+                previewMode
                 mainId={null}
                 editing
                 selectedSectionId={

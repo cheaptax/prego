@@ -100,8 +100,10 @@ describe("portal login page rendering contract", () => {
     assert.match(JSON.stringify(partner), /등록된 제휴사 운영자 계정/);
     assert.doesNotMatch(JSON.stringify(partner), /\/signup/);
     const promo = customer.sections.find((section) => section.id === "promoFloat");
-    assert.equal(promo?.title, "2027년도 외부회계감사 견적 신청하기");
-    assert.equal(promo?.actions[0]?.href, "/events/audit-quote");
+    assert.equal(promo?.title, "2027년도 외부회계감사, 이제 의무입니다");
+    assert.equal(promo?.description, "선임 계약 전에 비교검토표를 자동으로 준비하세요.");
+    assert.equal(promo?.actions[0]?.label, "자세히 보기");
+    assert.equal(promo?.actions[0]?.href, "/events/audit-quote/guide");
     assert.equal(
       partner.sections.some((section) => section.id === "promoFloat"),
       false,

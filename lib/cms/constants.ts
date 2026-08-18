@@ -25,6 +25,7 @@ export const CMS_PAGE_KEYS = [
   "public.inquiries",
   "public.faq",
   "public.support",
+  "event.auditQuoteGuide",
   "event.auditQuote",
   "event.auditQuoteEvaluate",
   "event.auditQuoteEvaluation",
@@ -76,6 +77,7 @@ export const CMS_PAGE_ROUTES: Record<CmsPageKey, string> = {
   "public.inquiries": "/inquiries",
   "public.faq": "/faq",
   "public.support": "/support",
+  "event.auditQuoteGuide": "/events/audit-quote/guide",
   "event.auditQuote": "/events/audit-quote",
   "event.auditQuoteEvaluate": "/events/audit-quote/evaluate",
   "event.auditQuoteEvaluation":

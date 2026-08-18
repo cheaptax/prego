@@ -58,6 +58,7 @@ const COMPLETION_PAGE_KEYS = new Set<CmsPageKey>([
   "public.inquiries",
   "public.faq",
   "public.support",
+  "event.auditQuoteGuide",
   "event.auditQuoteEvaluate",
   "event.auditQuoteEvaluation",
   "event.auditQuoteEvaluationReview",

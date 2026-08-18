@@ -134,6 +134,15 @@ export const CMS_PAGE_PRESENTATION: Record<CmsPageKey, CmsPagePresentation> = {
     categoryLabel: "공개 화면",
     previewUrl: "/support",
   },
+  "event.auditQuoteGuide": {
+    name: "회계감사 견적 안내",
+    description: "FY27 외부회계감사 의무와 비교검토표 자동 생성 안내",
+    audience: "public",
+    audienceLabel: "전체 공개",
+    category: "event",
+    categoryLabel: "행사 화면",
+    previewUrl: "/events/audit-quote/guide",
+  },
   "event.auditQuote": {
     name: "회계감사 견적 행사",
     description: "견적 지원 신청, 혜택과 이용 안내",

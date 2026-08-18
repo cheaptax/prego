@@ -190,6 +190,14 @@ const CMS_FEATURE_METADATA: Record<CmsPageKey, CmsFeatureMetadata> = {
       protectedTarget("safe-support-links", "고객지원 링크 프로토콜과 목적지 검증"),
     ],
   },
+  "event.auditQuoteGuide": {
+    access: ["guest", "member", "admin"],
+    previewRenderer: "generic",
+    protectedTargets: [
+      protectedTarget("audit-quote-guide-cta", "견적 신청 CTA 목적지와 안내 페이지 유입 경로"),
+      protectedTarget("audit-quote-guide-legal-copy", "2027 회계감사 대상 기준과 운영 주체 안내"),
+    ],
+  },
   "event.auditQuote": {
     access: ["guest", "member", "admin"],
     previewRenderer: "generic",
