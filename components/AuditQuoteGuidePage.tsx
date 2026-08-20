@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { AuditEvaluationReportDocument } from "@/components/AuditEvaluationReportDocument";
 import { trackAuditQuoteEvent } from "@/lib/audit-quote/analytics";
 import {
@@ -45,10 +45,10 @@ function visibleItems(section?: CmsSection) {
 function lineBreaks(text?: string) {
   if (!text) return null;
   return text.split(/\n+/u).map((line, index) => (
-    <span key={`${line}-${index}`}>
+    <Fragment key={`${line}-${index}`}>
       {index > 0 ? <br /> : null}
       {line}
-    </span>
+    </Fragment>
   ));
 }
 
@@ -83,6 +83,34 @@ function trackCta(placement: string) {
   });
 }
 
+const LAW_AMENDMENT_PRINT_FACTS = [
+  { label: "시행일", value: "2026. 9. 11." },
+  { label: "대상", value: "자산총액 500억원 이상 지역농협" },
+  { label: "적용 회계연도", value: "2027년도 재무제표" },
+] as const;
+
+function formatLawAmendmentPrintDate(date = new Date()) {
+  return `${date.getFullYear()}. ${date.getMonth() + 1}. ${date.getDate()}.`;
+}
+
+function printLawAmendment() {
+  const details = document.querySelector<HTMLDetailsElement>(
+    ".aq-guide-law__details",
+  );
+  if (details) details.open = true;
+
+  document.body.classList.add("is-printing-law-amendment");
+  trackCta("law-amendment-print");
+
+  const cleanup = () => {
+    document.body.classList.remove("is-printing-law-amendment");
+  };
+
+  window.addEventListener("afterprint", cleanup, { once: true });
+  window.print();
+  window.setTimeout(cleanup, 1200);
+}
+
 function CtaLink({
   action,
   className,
@@ -109,12 +137,11 @@ function CtaLink({
 function useSampleReport(
   provided?: AuditEvaluationReportViewModel | null,
 ) {
-  const [viewModel, setViewModel] =
-    useState<AuditEvaluationReportViewModel | null>(provided ?? null);
+  const [fetchedViewModel, setFetchedViewModel] =
+    useState<AuditEvaluationReportViewModel | null>(null);
 
   useEffect(() => {
     if (provided) {
-      setViewModel(provided);
       return;
     }
     let cancelled = false;
@@ -122,7 +149,7 @@ function useSampleReport(
       .then((response) => response.json())
       .then((payload: { ok?: boolean; viewModel?: AuditEvaluationReportViewModel }) => {
         if (!cancelled && payload.ok && payload.viewModel) {
-          setViewModel(payload.viewModel);
+          setFetchedViewModel(payload.viewModel);
         }
       })
       .catch(() => undefined);
@@ -131,7 +158,7 @@ function useSampleReport(
     };
   }, [provided]);
 
-  return viewModel;
+  return provided ?? fetchedViewModel;
 }
 
 export function AuditQuoteGuidePage({
@@ -146,6 +173,7 @@ export function AuditQuoteGuidePage({
   const sections = sectionsById(content, editing);
   const editingOptions = { editing, selectedSectionId, onSelectSection };
   const hero = sections.hero;
+  const lawAmendment = sections.lawAmendment;
   const mandate = sections.mandate;
   const pain = sections.pain;
   const hassleFree = sections.hassleFree;
@@ -180,6 +208,91 @@ export function AuditQuoteGuidePage({
             ) : null}
             <h1>{lineBreaks(hero.title)}</h1>
             {hero.description ? <p>{hero.description}</p> : null}
+            {lawAmendment ? (
+              <div
+                {...sectionProps(
+                  lawAmendment,
+                  "aq-guide-law",
+                  editingOptions,
+                )}
+                aria-label={lawAmendment.text.ariaLabel}
+              >
+                <header className="aq-guide-law__print-only aq-guide-law__letterhead">
+                  <div className="aq-guide-law__letterhead-brand">
+                    <strong>
+                      {lawAmendment.text.printBrand ?? "농협지원센터"}
+                    </strong>
+                    <span>
+                      {lawAmendment.text.printKicker ?? "내부 보고용 참고자료"}
+                    </span>
+                  </div>
+                  <p className="aq-guide-law__letterhead-meta">
+                    2027 외부회계감사 의무 안내 · 출력일{" "}
+                    {formatLawAmendmentPrintDate()}
+                  </p>
+                </header>
+                {lawAmendment.text.printQuestionLabel ? (
+                  <p className="aq-guide-law__print-only aq-guide-law__question-label">
+                    {lawAmendment.text.printQuestionLabel}
+                  </p>
+                ) : null}
+                {lawAmendment.description ? (
+                  <p className="aq-guide-law__question">
+                    {lineBreaks(lawAmendment.description)}
+                  </p>
+                ) : null}
+                <details className="aq-guide-law__details">
+                  <summary className="cta cta--outline">
+                    {lawAmendment.text.toggleLabel}
+                  </summary>
+                  <div className="aq-guide-law__panel">
+                    <h2>{lineBreaks(lawAmendment.title)}</h2>
+                    <dl className="aq-guide-law__print-only aq-guide-law__facts">
+                      {LAW_AMENDMENT_PRINT_FACTS.map((fact) => (
+                        <div key={fact.label}>
+                          <dt>{fact.label}</dt>
+                          <dd>{fact.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <ol>
+                      {visibleItems(lawAmendment).map((item, index) => (
+                        <li key={item.id}>
+                          <b className="aq-guide-law__index" aria-hidden="true">
+                            {index + 1}
+                          </b>
+                          <div className="aq-guide-law__item">
+                            <strong>{item.title}</strong>
+                            {item.description ? (
+                              <p>{lineBreaks(item.description)}</p>
+                            ) : null}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                    {lawAmendment.text.note ? (
+                      <p className="aq-guide-law__note">
+                        {lawAmendment.text.note}
+                      </p>
+                    ) : null}
+                    {lawAmendment.text.printLabel ? (
+                      <button
+                        type="button"
+                        className="cta cta--ghost aq-guide-law__print"
+                        onClick={printLawAmendment}
+                      >
+                        {lawAmendment.text.printLabel}
+                      </button>
+                    ) : null}
+                  </div>
+                </details>
+                {lawAmendment.text.printSource ? (
+                  <footer className="aq-guide-law__print-only aq-guide-law__colophon">
+                    {lawAmendment.text.printSource}
+                  </footer>
+                ) : null}
+              </div>
+            ) : null}
             <div className="aq-guide-hero__actions">
               <CtaLink
                 action={heroPrimary}

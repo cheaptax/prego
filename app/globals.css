@@ -2060,6 +2060,8 @@ button { font: inherit; cursor: pointer; }
 .cta--solid:hover { background: var(--primary-strong); box-shadow: var(--shadow-blue); }
 .cta--ghost { background: var(--bg-card); color: var(--text-1); }
 .cta--ghost:hover { background: var(--gray-200); }
+.cta--outline { background: #fff; border-color: rgba(49, 130, 246, 0.36); color: var(--primary); }
+.cta--outline:hover { background: var(--primary-tint); border-color: var(--primary); box-shadow: var(--shadow-blue); }
 .cta--text { color: var(--primary); padding: 12px 8px; }
 .cta--text:hover { color: var(--primary-strong); }
 .cta--sm { padding: 9px 16px; font-size: 14px; }
@@ -9350,6 +9352,213 @@ body {
     overflow: visible !important;
     background: #fff !important;
     color: #111 !important;
+  }
+
+  body.is-printing-law-amendment {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.is-printing-law-amendment .topbar,
+  body.is-printing-law-amendment .foot,
+  body.is-printing-law-amendment .aq-guide > :not(.aq-guide-hero),
+  body.is-printing-law-amendment .aq-guide-hero__panel,
+  body.is-printing-law-amendment .aq-guide-hero__copy > :not(.aq-guide-law),
+  body.is-printing-law-amendment .aq-guide-law__details summary,
+  body.is-printing-law-amendment .aq-guide-law__print {
+    display: none !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide,
+  body.is-printing-law-amendment .aq-guide-hero,
+  body.is-printing-law-amendment .aq-guide-hero__copy {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law {
+    display: flex !important;
+    flex-direction: column;
+    min-height: 260mm;
+    margin: 0 !important;
+    overflow: hidden;
+    border: 1pt solid #d7e3f4 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    color: #172033 !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__print-only {
+    display: block !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__letterhead {
+    display: flex !important;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    background: #1b64da !important;
+    color: #fff !important;
+    padding: 8mm 8mm 7mm;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__letterhead-brand {
+    display: grid;
+    gap: 3mm;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__letterhead-brand strong {
+    display: block;
+    color: #fff !important;
+    font-size: 18pt;
+    letter-spacing: -0.03em;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__letterhead-brand span,
+  body.is-printing-law-amendment .aq-guide-law__letterhead-meta {
+    color: rgba(255, 255, 255, 0.88) !important;
+    font-size: 10pt;
+    font-weight: 700;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__letterhead-meta {
+    margin: 0;
+    text-align: right;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__question-label {
+    margin: 8mm 8mm 0;
+    color: #1b64da !important;
+    font-size: 9.5pt;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__question {
+    margin: 2mm 8mm 0;
+    border-left: 4pt solid #3182f6;
+    background: #eaf3ff !important;
+    color: #172033 !important;
+    font-size: 13.5pt;
+    line-height: 1.55;
+    padding: 4.5mm 5mm;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__details,
+  body.is-printing-law-amendment .aq-guide-law__panel {
+    display: block !important;
+    margin: 0;
+    border: 0 !important;
+    padding: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__panel {
+    padding: 7mm 8mm 0;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__panel h2 {
+    margin: 0 0 5mm;
+    padding-bottom: 3.5mm;
+    border-bottom: 1.5pt solid #1b64da;
+    color: #172033 !important;
+    font-size: 16pt;
+    line-height: 1.35;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__facts {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin: 0 0 6mm;
+    border: 1pt solid #d7e3f4;
+    background: #f7fbff !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__facts > div {
+    padding: 4mm 4.5mm;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__facts > div + div {
+    border-left: 1pt solid #d7e3f4;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__facts dt {
+    margin: 0 0 1.5mm;
+    color: #1b64da !important;
+    font-size: 8.5pt;
+    font-weight: 800;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__facts dd {
+    margin: 0;
+    color: #172033 !important;
+    font-size: 11pt;
+    font-weight: 800;
+    line-height: 1.4;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__panel ol {
+    gap: 3.5mm;
+    margin: 0;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__panel li {
+    align-items: flex-start;
+    border: 1pt solid #d7e3f4;
+    background: #fff !important;
+    padding: 4.5mm 5mm;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__index {
+    background: #3182f6 !important;
+    color: #fff !important;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__item {
+    min-width: 0;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__item strong {
+    color: #172033 !important;
+    font-size: 12pt;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__item p {
+    color: #3d4b63 !important;
+    font-size: 10.5pt;
+    line-height: 1.7;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__note {
+    margin: 6mm 0 0;
+    border: 1pt solid #b7d4ff !important;
+    background: #eaf3ff !important;
+    color: #172033 !important;
+    font-size: 10.5pt;
+    line-height: 1.65;
+    padding: 4.5mm 5mm;
+  }
+
+  body.is-printing-law-amendment .aq-guide-law__colophon {
+    margin-top: auto;
+    border-top: 1pt solid #d7e3f4;
+    background: #f7fbff !important;
+    color: #5b6b82 !important;
+    font-size: 8.5pt;
+    font-weight: 650;
+    line-height: 1.6;
+    padding: 5mm 8mm;
   }
 
   /* 화면용 크롬·편집 UI 숨김 — visibility:hidden 방식은 빈 장으로 깨짐 */
@@ -21111,6 +21320,132 @@ a.aq-ref-mark:hover {
   line-height: 1.75;
 }
 
+.aq-guide-hero:has(.aq-guide-law__details[open]) {
+  align-items: start;
+}
+
+.aq-guide-law {
+  max-width: 44rem;
+  margin-top: 28px;
+  border: 1px solid rgba(49, 130, 246, 0.14);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.06);
+  padding: 24px;
+}
+
+.aq-guide-law__question {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.7;
+  letter-spacing: -0.02em;
+}
+
+.aq-guide-law__details {
+  margin-top: 18px;
+}
+
+.aq-guide-law__details summary {
+  cursor: pointer;
+  width: fit-content;
+  list-style: none;
+}
+
+.aq-guide-law__details summary::-webkit-details-marker {
+  display: none;
+}
+
+.aq-guide-law__details[open] summary {
+  background: var(--primary-tint);
+  border-color: var(--primary);
+}
+
+.aq-guide-law__panel {
+  margin-top: 18px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  padding-top: 22px;
+}
+
+.aq-guide-law__panel h2 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: clamp(21px, 2.5vw, 28px);
+  line-height: 1.35;
+  letter-spacing: -0.03em;
+  font-weight: 850;
+}
+
+.aq-guide-law__print-only {
+  display: none;
+}
+
+.aq-guide-law__panel ol {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aq-guide-law__panel li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--text-1);
+}
+
+.aq-guide-law__index {
+  display: inline-flex;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.aq-guide-law__item {
+  min-width: 0;
+  flex: 1;
+}
+
+.aq-guide-law__item strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.aq-guide-law__item p {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 520;
+  line-height: 1.75;
+}
+
+.aq-guide-law__note {
+  margin: 20px 0 0;
+  border-radius: 18px;
+  background: var(--primary-tint);
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.7;
+  padding: 16px 18px;
+}
+
+.aq-guide-law__print {
+  margin-top: 16px;
+}
+
 .aq-guide-hero__actions {
   display: flex;
   flex-wrap: wrap;
@@ -21488,6 +21823,16 @@ a.aq-ref-mark:hover {
   .aq-guide-hero {
     padding: 68px 0 44px;
     gap: 28px;
+  }
+
+  .aq-guide-law {
+    padding: 20px;
+  }
+
+  .aq-guide-law__details summary,
+  .aq-guide-law__print {
+    justify-content: center;
+    width: 100%;
   }
 
   .aq-guide-section {

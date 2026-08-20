@@ -109,6 +109,7 @@ describe("FY27 audit-quote guide CMS defaults", () => {
       content.sections.map((section) => section.id),
       [
         "hero",
+        "lawAmendment",
         "mandate",
         "pain",
         "hassleFree",
@@ -120,6 +121,9 @@ describe("FY27 audit-quote guide CMS defaults", () => {
       ],
     );
     const hero = content.sections.find((section) => section.id === "hero");
+    const lawAmendment = content.sections.find(
+      (section) => section.id === "lawAmendment",
+    );
     const hassleFree = content.sections.find(
       (section) => section.id === "hassleFree",
     );
@@ -131,6 +135,32 @@ describe("FY27 audit-quote guide CMS defaults", () => {
     assert.match(hero?.title ?? "", /2027년도 재무제표 감사/);
     assert.match(hero?.description ?? "", /감사인 선임 계약/);
     assert.equal(hero?.actions.find((action) => action.id === "apply")?.href, "/events/audit-quote");
+    assert.equal(
+      lawAmendment?.description,
+      "26년 초에 25년 재무제표 감사를 마쳤는데,\n벌써 또 감사계약을 해야 하나요?",
+    );
+    assert.equal(
+      lawAmendment?.text.toggleLabel,
+      "농협법 개정내용 보기",
+    );
+    assert.match(
+      lawAmendment?.items.find((item) => item.id === "effectiveDate")
+        ?.description ?? "",
+      /2026년 9월 11일/,
+    );
+    assert.match(
+      lawAmendment?.items.find((item) => item.id === "fy27Impact")
+        ?.description ?? "",
+      /2027년도 재무제표/,
+    );
+    assert.match(
+      lawAmendment?.items.find((item) => item.id === "howToPrepare")
+        ?.description ?? "",
+      /농협 감사인 협회 소속/,
+    );
+    assert.match(lawAmendment?.text.note ?? "", /필요할 때 언제든 바로 꺼내보실 수 있습니다/);
+    assert.equal(lawAmendment?.text.printBrand, "농협지원센터");
+    assert.match(lawAmendment?.text.printSource ?? "", /내부 보고/);
     assert.equal(cta?.actions.find((action) => action.id === "apply")?.href, "/events/audit-quote");
     assert.doesNotMatch(pain?.title ?? "", /일이 너무 많습니다|최소화/);
     assert.doesNotMatch(steps?.title ?? "", /최소화|할 일은/);

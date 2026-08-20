@@ -103,6 +103,25 @@ export const CMS_ROUTE_SECTION_PRESENTATION: Partial<
         primaryCtaHelp: field("신청 버튼 도움말"),
       },
     },
+    lawAmendment: {
+      name: "농협법 개정내용 안내",
+      titleLabel: "개정내용 제목",
+      descriptionLabel: "고객 의문 문구",
+      textFields: {
+        ariaLabel: field("영역 접근성 이름"),
+        toggleLabel: field("개정내용 보기 버튼"),
+        printLabel: field("내부 보고용 저장/인쇄 버튼"),
+        printBrand: field("인쇄 상단 기관명"),
+        printKicker: field("인쇄 상단 자료 성격"),
+        printQuestionLabel: field("인쇄용 질문 라벨"),
+        printSource: field("인쇄 하단 출처 안내"),
+        note: field("부담 없는 안내 문구"),
+      },
+      itemFields: {
+        title: "개정내용 항목 제목",
+        description: "개정내용 항목 설명",
+      },
+    },
     mandate: {
       name: "감사 의무 안내",
       eyebrowLabel: "상단 작은 문구",

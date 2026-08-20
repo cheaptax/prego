@@ -20,7 +20,28 @@ const STALE_SECTION_TEXT: ReadonlyArray<{
     from: "제휴사 및 운영자 로그인",
     to: "고객 · 제휴사 · 운영자 로그인",
   },
+  {
+    from: "무료 신청 · 비교 후에도 계약 의무 없음",
+    to: "무료 신청, 비교보고서로 한눈에 회계법인 비교평가",
+  },
+  {
+    from: "무료 신청, 계약 의무 없음",
+    to: "무료 신청, 비교보고서로 한눈에 회계법인 비교평가",
+  },
+  {
+    from: "무료로 견적을 받아보신 후 내부에서 충분히 검토하셔도 됩니다. 비교 후에도 계약 의무는 없습니다.",
+    to: "손쉽게 견적만 미리 받아두시면 필요할 때 언제든 바로 꺼내보실 수 있습니다.",
+  },
+  {
+    from: "무료 신청 후 여러 견적을 비교해도 계약 의무는 없습니다.",
+    to: "손쉽게 견적만 미리 받아두시면 필요할 때 언제든 바로 꺼내보실 수 있습니다.",
+  },
 ];
+
+function refreshStalePlainText(value?: string) {
+  if (!value) return value;
+  return STALE_SECTION_TEXT.find((entry) => entry.from === value)?.to ?? value;
+}
 
 function refreshStaleSectionText(
   text: CmsSection["text"],
@@ -65,8 +86,13 @@ export function normalizeCmsPageContent(
       current.actions.map((action) => [action.id, action]),
     );
     const items = current.items.map((item) => {
-      if (!protectedItemIds.includes(item.id)) return item;
-      return { ...item, visible: true, deleted: false };
+      const nextItem = {
+        ...item,
+        title: refreshStalePlainText(item.title) ?? item.title,
+        description: refreshStalePlainText(item.description),
+      };
+      if (!protectedItemIds.includes(item.id)) return nextItem;
+      return { ...nextItem, visible: true, deleted: false };
     });
     const actions = current.actions
       .filter((action) => !removedActionIds.has(action.id))
@@ -118,6 +144,8 @@ export function normalizeCmsPageContent(
       visible: fallback.locked ? true : current.visible,
       locked: fallback.locked ? true : current.locked,
       deleted: fallback.locked ? false : Boolean(current.deleted),
+      title: refreshStalePlainText(current.title) ?? current.title,
+      description: refreshStalePlainText(current.description),
       text: refreshStaleSectionText(
         { ...fallback.text, ...current.text },
         fallback.text,

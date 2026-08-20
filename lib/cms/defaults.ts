@@ -1325,11 +1325,46 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         text: {
           highlight: "법으로 정해졌습니다",
           badge: "FY27 감사인 선임 준비",
-          primaryCtaHelp: "무료 신청 · 비교 후에도 계약 의무 없음",
+          primaryCtaHelp: "무료 신청, 비교보고서로 한눈에 회계법인 비교평가",
         },
         actions: [
           action("apply", "견적 신청하기", "/events/audit-quote"),
           action("learnFlow", "진행 방식 보기", "#hassle-free", "secondary"),
+        ],
+      }),
+      section({
+        id: "lawAmendment",
+        title: "2026년 9월 11일부터 시행되는 개정 농협법 주요 내용",
+        description:
+          "26년 초에 25년 재무제표 감사를 마쳤는데,\n벌써 또 감사계약을 해야 하나요?",
+        text: {
+          ariaLabel: "농협법 개정내용 안내",
+          toggleLabel: "농협법 개정내용 보기",
+          printLabel: "이 내용을 내부 보고용으로 저장/인쇄",
+          printBrand: "농협지원센터",
+          printKicker: "내부 보고용 참고자료",
+          printQuestionLabel: "현장에서 자주 나오는 질문",
+          printSource:
+            "개정 「농업협동조합법」 2026년 9월 11일 시행 기준. 이 자료는 내부 보고·품의용 참고자료이며, 농협중앙회 공식 안내가 아닙니다.",
+          note:
+            "손쉽게 견적만 미리 받아두시면 필요할 때 언제든 바로 꺼내보실 수 있습니다.",
+        },
+        items: [
+          item(
+            "effectiveDate",
+            "시행일 및 핵심 변경점",
+            "2026년 9월 11일부터 개정 「농업협동조합법」이 시행됩니다.\n자산총액 500억원 이상 지역농협의 외부회계감사 주기가 기존 4년에서 1년 또는 2년으로 단축됩니다.",
+          ),
+          item(
+            "fy27Impact",
+            "2027년도 재무제표에 미치는 영향",
+            "시행일 이후 도래하는 회계연도부터 적용되므로, 2027년도 재무제표가 새로운 감사 의무 대상에 포함됩니다.\n따라서 올해 중으로 2027년도 외부감사 계약을 준비해야 합니다.",
+          ),
+          item(
+            "howToPrepare",
+            "실무적으로 준비하는 방법",
+            "여러 회계법인에 일일이 연락하지 않아도, 농협지원센터를 통해 제휴 회계법인(농협 감사인 협회 소속)의 견적을 한 번에 비교할 수 있습니다.\n견적 수집부터 내부 보고용 검토자료 생성까지 실무 부담을 크게 줄일 수 있습니다.",
+          ),
         ],
       }),
       section({
@@ -1442,7 +1477,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           ),
           item(
             "free",
-            "무료 신청, 계약 의무 없음",
+            "무료 신청, 비교보고서로 한눈에 회계법인 비교평가",
             "비교 후 최종 선정은 우리 농협이 직접 결정합니다.",
           ),
         ],
@@ -1474,7 +1509,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
         eyebrow: "FY27 감사인 선임 준비",
         title: "지금 견적을 신청하고\n검토보고서 준비를 시작하세요",
         description:
-          "무료 신청 후 여러 견적을 비교해도 계약 의무는 없습니다.",
+          "손쉽게 견적만 미리 받아두시면 필요할 때 언제든 바로 꺼내보실 수 있습니다.",
         text: {
           ctaHelp: "대상 농협명, 담당자 정보, 휴대폰 인증만 있으면 시작할 수 있습니다.",
         },
@@ -1549,7 +1584,7 @@ export const CMS_PAGE_DEFAULTS: Record<CmsPageKey, CmsPageContent> = {
           privacyConsentLinkLabel: "보기",
           marketingConsentLabel: "[선택] 이벤트·혜택 정보 수신 동의",
           submitLabel: "견적 요청하기",
-          freeNotice: "무료 신청 · 비교 후에도 계약 의무 없음",
+          freeNotice: "무료 신청, 비교보고서로 한눈에 회계법인 비교평가",
         },
       }),
       section({
