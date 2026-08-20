@@ -85,11 +85,11 @@ export function normalizeCmsPageContent(
     const currentActions = new Map(
       current.actions.map((action) => [action.id, action]),
     );
-    const items = current.items.map((item) => {
+    const items: CmsSection["items"] = current.items.map((item) => {
       const nextItem = {
         ...item,
         title: refreshStalePlainText(item.title) ?? item.title,
-        description: refreshStalePlainText(item.description),
+        description: refreshStalePlainText(item.description) ?? item.description,
       };
       if (!protectedItemIds.includes(item.id)) return nextItem;
       return { ...nextItem, visible: true, deleted: false };
